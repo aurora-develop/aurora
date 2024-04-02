@@ -54,15 +54,9 @@ func nightmare(c *gin.Context) {
 
 	token, puid := "", ""
 
-	var proxy_url string
-	if len(proxies) == 0 {
-		proxy_url = ""
-	} else {
-		proxy_url = proxies[0]
-		// Push used proxy to the back of the list
-		proxies = append(proxies[1:], proxies[0])
-	}
+	var proxy_url = PROXY_URL
 	uid := uuid.NewString()
+	oidDid := uuid.NewString()
 	var chat_require *chatgpt.ChatRequire
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -72,7 +66,7 @@ func nightmare(c *gin.Context) {
 	}()
 	go func() {
 		defer wg.Done()
-		chat_require = chatgpt.CheckRequire(token, puid, proxy_url)
+		chat_require = chatgpt.CheckRequire(token, puid, proxy_url, oidDid)
 	}()
 	wg.Wait()
 	if err != nil {
@@ -86,7 +80,7 @@ func nightmare(c *gin.Context) {
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgpt_request_converter.ConvertAPIRequest(original_request, puid, chat_require.Arkose.Required, proxy_url)
 
-	response, err := chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url)
+	response, err := chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "error sending request",
@@ -106,7 +100,6 @@ func nightmare(c *gin.Context) {
 		if continue_info == nil {
 			break
 		}
-		println("Continuing conversation")
 		translated_request.Messages = nil
 		translated_request.Action = "continue"
 		translated_request.ConversationID = continue_info.ConversationID
@@ -114,7 +107,7 @@ func nightmare(c *gin.Context) {
 		if chat_require.Arkose.Required {
 			chatgpt_request_converter.RenewTokenForRequest(&translated_request, puid, proxy_url)
 		}
-		response, err = chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url)
+		response, err = chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",

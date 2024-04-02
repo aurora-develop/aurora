@@ -11,15 +11,16 @@ import (
 var HOST string
 var PORT string
 var ACCESS_TOKENS tokens.AccessToken
-var proxies []string = []string{"http://127.0.0.1:7890"}
+var PROXY_URL string
 
 func init() {
 	_ = godotenv.Load(".env")
 
 	HOST = os.Getenv("SERVER_HOST")
 	PORT = os.Getenv("SERVER_PORT")
+	PROXY_URL = os.Getenv("PROXY_URL")
 	if HOST == "" {
-		HOST = "127.0.0.1"
+		HOST = "0.0.0.0"
 	}
 	if PORT == "" {
 		PORT = "8080"
