@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"freechatgpt/typings"
 	chatgpt_types "freechatgpt/typings/chatgpt"
 	"io"
@@ -202,45 +201,7 @@ type ChatRequire struct {
 	}
 }
 
-func getOidDid() string {
-	getReq, _ := http.NewRequest(http.MethodGet, "https://chat.openai.com/", nil)
-
-	getReq.Header.Set("User-Agent", userAgent)
-	getReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-	getResp, _ := client.Do(getReq)
-	defer getResp.Body.Close()
-
-	var oaiDid string
-	for _, cookie := range getResp.Cookies() {
-		if cookie.Name == "oai-did" {
-			oaiDid = cookie.Value
-			fmt.Print(oaiDid)
-			break
-		}
-	}
-
-	return oaiDid
-}
-
-var oaiDid string
-
-func init() {
-	oaiDid := ""
-	for i := 0; i < 20; i++ {
-		oaiDid = getOidDid()
-		if oaiDid != "" {
-			break
-		}
-		//	sleep 0.5
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	if oaiDid == "" {
-		panic("Failed to get oai-did")
-	}
-}
-
-func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
+func CheckRequire(access_token string, puid string, proxy string, oidDid string) *ChatRequire {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -252,7 +213,7 @@ func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Oai-Language", "en-US")
-	request.Header.Set("Oai-Device-Id", oaiDid)
+	request.Header.Set("Oai-Device-Id", oidDid)
 	if err != nil {
 		return nil
 	}
@@ -265,13 +226,6 @@ func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
 	err = json.NewDecoder(response.Body).Decode(&require)
 	if err != nil {
 		return nil
-	}
-	fmt.Printf(require.Token)
-	fmt.Print(require.Arkose.Required)
-	fmt.Print(require.Turnstile.Required)
-
-	if require.Token == "" {
-		print("Token is empty")
 	}
 
 	return &require
@@ -316,7 +270,7 @@ func getURLAttribution(access_token string, puid string, url string) string {
 	return attr.Attribution
 }
 
-func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string, puid string, chat_token string, proxy string) (*http.Response, error) {
+func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string, puid string, chat_token string, proxy string, oidDid string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -342,7 +296,7 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "text/event-stream")
 	request.Header.Set("Oai-Language", "en-US")
-	request.Header.Set("Oai-Device-Id", oaiDid)
+	request.Header.Set("Oai-Device-Id", oidDid)
 	if arkoseToken != "" {
 		request.Header.Set("Openai-Sentinel-Arkose-Token", arkoseToken)
 	}
@@ -353,6 +307,7 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 		return &http.Response{}, err
 	}
 	response, err := client.Do(request)
+
 	return response, err
 }
 
