@@ -1,0 +1,13 @@
+tools/authenticator/100-ACCOUNTS_COMPILED.txt
+tools/authenticator/accounts.txt
+tools/authenticator/proxies.txt
+tools/authenticator/authenticated_accounts.txt
+tools/authenticator/access_tokens.txt
+*.txt
+*.json
+freechatgpt
+chatgpttoapi
+tools/authenticator/.proxies.txt.swp
+.env
+*.har
+.idea/

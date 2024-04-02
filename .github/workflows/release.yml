@@ -1,0 +1,43 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Release Workflow
+on:
+  release:
+    types:
+      - created
+permissions:
+  contents: write
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.19
+
+    - name: Build
+      run: go build -o bin/ .
+    
+    - name: recursively list files
+      run: ls -R
+
+    - name: Get existing release body
+      id: get_release_body
+      run: |
+        echo "::set-output name=body::$(curl -s -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_path }} | jq -r '.body')"
+
+    - name: Upload release artifact
+      uses: svenstaro/upload-release-action@v2
+      with:
+        file: bin/*
+        file_glob: true
+        tag: ${{ github.ref }}
+        body: |
+          ${{ steps.get_release_body.outputs.body }}
+        repo_token: ${{ secrets.GITHUB_TOKEN }}

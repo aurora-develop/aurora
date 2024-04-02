@@ -1,0 +1,51 @@
+name: Go Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: 386
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+          - goos: linux
+            goarch: 386
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Build
+        run: |
+          echo "Building for ${{ matrix.goos }} ${{ matrix.goarch }}"
+          suffix=""
+          if [ "${{ matrix.goos }}" == "windows" ]; then
+            suffix=".exe"
+          fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ./build/freechatgpt-${{ matrix.goos }}-${{ matrix.goarch }}$suffix
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: freechatgpt-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ./build/freechatgpt-${{ matrix.goos }}-${{ matrix.goarch }}*
