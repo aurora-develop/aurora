@@ -1,7 +1,7 @@
 package main
 
 import (
-	"freechatgpt/internal/tokens"
+	"aurora/internal/tokens"
 	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"

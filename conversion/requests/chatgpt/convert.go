@@ -1,9 +1,9 @@
 package chatgpt
 
 import (
+	chatgpt_types "aurora/typings/chatgpt"
+	official_types "aurora/typings/official"
 	"fmt"
-	chatgpt_types "freechatgpt/typings/chatgpt"
-	official_types "freechatgpt/typings/official"
 	"strings"
 
 	arkose "github.com/xqdoo00o/funcaptcha"

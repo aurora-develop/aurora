@@ -1,13 +1,13 @@
 package chatgpt
 
 import (
+	"aurora/typings"
+	chatgpt_types "aurora/typings/chatgpt"
 	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"freechatgpt/typings"
-	chatgpt_types "freechatgpt/typings/chatgpt"
 	"io"
 	"net/url"
 	"os"
@@ -23,9 +23,9 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
 
-	chatgpt_response_converter "freechatgpt/conversion/response/chatgpt"
+	chatgpt_response_converter "aurora/conversion/response/chatgpt"
 
-	official_types "freechatgpt/typings/official"
+	official_types "aurora/typings/official"
 )
 
 type connInfo struct {

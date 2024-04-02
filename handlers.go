@@ -1,9 +1,9 @@
 package main
 
 import (
-	chatgpt_request_converter "freechatgpt/conversion/requests/chatgpt"
-	chatgpt "freechatgpt/internal/chatgpt"
-	official_types "freechatgpt/typings/official"
+	chatgpt_request_converter "aurora/conversion/requests/chatgpt"
+	chatgpt "aurora/internal/chatgpt"
+	official_types "aurora/typings/official"
 	"sync"
 
 	"github.com/gin-gonic/gin"

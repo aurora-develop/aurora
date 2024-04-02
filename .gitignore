@@ -5,7 +5,7 @@ tools/authenticator/authenticated_accounts.txt
 tools/authenticator/access_tokens.txt
 *.txt
 *.json
-freechatgpt
+aurora
 chatgpttoapi
 tools/authenticator/.proxies.txt.swp
 .env
