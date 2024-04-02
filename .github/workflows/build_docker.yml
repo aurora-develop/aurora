@@ -35,5 +35,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/chatgpt-to-api:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/chatgpt-to-api:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/aurora:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/aurora:latest
