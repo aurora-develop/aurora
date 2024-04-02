@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"freechatgpt/typings"
 	chatgpt_types "freechatgpt/typings/chatgpt"
 	"io"
@@ -209,6 +210,7 @@ func getOidDid() string {
 	for _, cookie := range getResp.Cookies() {
 		if cookie.Name == "oai-did" {
 			oaiDid = cookie.Value
+			fmt.Print(oaiDid)
 			break
 		}
 	}
@@ -216,20 +218,27 @@ func getOidDid() string {
 	return oaiDid
 }
 
-func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
-	if proxy != "" {
-		client.SetProxy(proxy)
-	}
+var oaiDid string
 
+func init() {
 	oaiDid := ""
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		oaiDid = getOidDid()
 		if oaiDid != "" {
 			break
 		}
+		time.Sleep(time.Second)
 	}
 
-	print(oaiDid)
+	if oaiDid == "" {
+		panic("Failed to get oai-did")
+	}
+}
+
+func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
 
 	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-anon/sentinel/chat-requirements", bytes.NewBuffer([]byte(`{}`)))
 	if err != nil {
