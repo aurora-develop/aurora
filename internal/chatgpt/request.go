@@ -196,13 +196,17 @@ type ChatRequire struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
 	} `json:"arkose"`
+
+	Turnstile struct {
+		Required bool `json:"required"`
+	}
 }
 
 func getOidDid() string {
 	getReq, _ := http.NewRequest(http.MethodGet, "https://chat.openai.com/", nil)
 
 	getReq.Header.Set("User-Agent", userAgent)
-	getReq.Header.Set("Accept", "*/*")
+	getReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
 	getResp, _ := client.Do(getReq)
 	defer getResp.Body.Close()
 
@@ -227,7 +231,8 @@ func init() {
 		if oaiDid != "" {
 			break
 		}
-		time.Sleep(time.Second)
+		//	sleep 0.5
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	if oaiDid == "" {
@@ -261,6 +266,14 @@ func CheckRequire(access_token string, puid string, proxy string) *ChatRequire {
 	if err != nil {
 		return nil
 	}
+	fmt.Printf(require.Token)
+	fmt.Print(require.Arkose.Required)
+	fmt.Print(require.Turnstile.Required)
+
+	if require.Token == "" {
+		print("Token is empty")
+	}
+
 	return &require
 }
 
@@ -282,6 +295,8 @@ func getURLAttribution(access_token string, puid string, url string) string {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Oai-Language", "en-US")
+	request.Header.Set("Origin", "https://chat.openai.com")
+	request.Header.Set("Referer", "https://chat.openai.com/")
 	if access_token != "" {
 		request.Header.Set("Authorization", "Bearer "+access_token)
 	}
@@ -331,6 +346,7 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "text/event-stream")
 	request.Header.Set("Oai-Language", "en-US")
+	request.Header.Set("Oai-Device-Id", oaiDid)
 	if arkoseToken != "" {
 		request.Header.Set("Openai-Sentinel-Arkose-Token", arkoseToken)
 	}
