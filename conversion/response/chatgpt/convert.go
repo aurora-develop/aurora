@@ -1,9 +1,9 @@
 package chatgpt
 
 import (
-	"freechatgpt/typings"
-	chatgpt_types "freechatgpt/typings/chatgpt"
-	official_types "freechatgpt/typings/official"
+	"aurora/typings"
+	chatgpt_types "aurora/typings/chatgpt"
+	official_types "aurora/typings/official"
 	"strings"
 )
 
