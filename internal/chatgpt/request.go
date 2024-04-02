@@ -338,10 +338,6 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 	if err != nil {
 		return &http.Response{}, err
 	}
-	// Clear cookies
-	if puid != "" {
-		request.Header.Set("Cookie", "_puid="+puid+";")
-	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "text/event-stream")
@@ -353,9 +349,6 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 	if chat_token != "" {
 		request.Header.Set("Openai-Sentinel-Chat-Requirements-Token", chat_token)
 	}
-	if access_token != "" {
-		request.Header.Set("Authorization", "Bearer "+access_token)
-	}
 	if err != nil {
 		return &http.Response{}, err
 	}
@@ -363,7 +356,6 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string,
 	return response, err
 }
 
-// Returns whether an error was handled
 func Handle_request_error(c *gin.Context, response *http.Response) bool {
 	if response.StatusCode != 200 {
 		// Try read response body as JSON
@@ -653,7 +645,6 @@ func Handler(c *gin.Context, response *http.Response, token string, puid string,
 				}
 			}
 		endProcess:
-			// Flush the response writer buffer to ensure that the client receives each line as it's written
 			c.Writer.Flush()
 
 			if original_response.Message.Metadata.FinishDetails != nil {

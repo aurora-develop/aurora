@@ -3,7 +3,6 @@ package main
 import (
 	chatgpt_request_converter "freechatgpt/conversion/requests/chatgpt"
 	chatgpt "freechatgpt/internal/chatgpt"
-	"freechatgpt/internal/tokens"
 	official_types "freechatgpt/typings/official"
 	"sync"
 
@@ -11,19 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func tokensHandler(c *gin.Context) {
-	// Get the request_tokens from the request (json) and update the request_tokens
-	var request_tokens map[string]tokens.Secret
-	err := c.BindJSON(&request_tokens)
-	if err != nil {
-		c.String(400, "tokens not provided")
-		return
-	}
-	ACCESS_TOKENS = tokens.NewAccessToken(request_tokens)
-	ACCESS_TOKENS.Save()
-	validAccounts = ACCESS_TOKENS.GetKeys()
-	c.String(200, "tokens updated")
-}
 func optionsHandler(c *gin.Context) {
 	// Set headers for CORS
 	c.Header("Access-Control-Allow-Origin", "*")

@@ -24,7 +24,6 @@ func init() {
 	if PORT == "" {
 		PORT = "8080"
 	}
-	scheduleTokenPUID()
 }
 func main() {
 	router := gin.Default()
