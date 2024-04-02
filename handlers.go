@@ -59,20 +59,20 @@ func nightmare(c *gin.Context) {
 	oidDid := uuid.NewString()
 	var chat_require *chatgpt.ChatRequire
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		err = chatgpt.InitWSConn(token, uid, proxy_url)
-	}()
+	wg.Add(1)
+	//go func() {
+	//	defer wg.Done()
+	//	err = chatgpt.InitWSConn(token, uid, proxy_url)
+	//}()
 	go func() {
 		defer wg.Done()
 		chat_require = chatgpt.CheckRequire(token, puid, proxy_url, oidDid)
 	}()
 	wg.Wait()
-	if err != nil {
-		c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
-		return
-	}
+	//if err != nil {
+	//	c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
+	//	return
+	//}
 	if chat_require == nil {
 		c.JSON(500, gin.H{"error": "unable to check chat requirement"})
 		return
