@@ -2,7 +2,7 @@ version: '3'
 
 services:
   app:
-    image: ghcr.io/aurora-develop/aurora
+    image: ghcr.io/aurora-develop/aurora:latest
     container_name: aurora
     restart: unless-stopped
     ports:
@@ -10,3 +10,7 @@ services:
     environment:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
+      # FREE_ACCOUNTS: true
+      # FREE_ACCOUNTS_NUM: 1024
+      # PROXY_URL: http://username:password@ip:port
+      # Authorization: sk-xxxxxxx
