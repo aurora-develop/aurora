@@ -42,7 +42,7 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
    }'
 ```
 
-## 贡献
+## 参考
 
 https://github.com/xqdoo00o/ChatGPT-to-API
 
