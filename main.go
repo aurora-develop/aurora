@@ -5,6 +5,7 @@ import (
 	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
+	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"net/url"
@@ -94,4 +95,6 @@ func main() {
 
 	router.Run(HOST + ":" + PORT)
 
+
+	endless.ListenAndServe(HOST+":"+PORT, router)
 }

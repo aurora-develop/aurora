@@ -112,7 +112,12 @@ func nightmare(c *gin.Context) {
 		translated_request.Action = "continue"
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
-		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
+
+		if chat_require.Arkose.Required {
+			chatgpt_request_converter.RenewTokenForRequest(&translated_request, puid, proxy_url)
+		}
+		response, err = chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
+
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",
