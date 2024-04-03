@@ -11,6 +11,8 @@ import (
 
 var HOST string
 var PORT string
+var TLS_CERT string
+var TLS_KEY string
 var ACCESS_TOKENS tokens.AccessToken
 var PROXY_URL string
 
@@ -19,6 +21,8 @@ func init() {
 
 	HOST = os.Getenv("SERVER_HOST")
 	PORT = os.Getenv("SERVER_PORT")
+	TLS_CERT = os.Getenv("TLS_CERT")
+	TLS_KEY = os.Getenv("TLS_KEY")
 	PROXY_URL = os.Getenv("PROXY_URL")
 	if HOST == "" {
 		HOST = "0.0.0.0"
@@ -28,6 +32,7 @@ func init() {
 	}
 }
 func main() {
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
 	router.Use(cors)
@@ -40,5 +45,10 @@ func main() {
 
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
 	router.POST("/v1/chat/completions", nightmare)
-	endless.ListenAndServe(HOST+":"+PORT, router)
+
+	if TLS_CERT != "" && TLS_KEY != "" {
+		endless.ListenAndServeTLS(HOST+":"+PORT, TLS_CERT, TLS_KEY, router)
+	} else {
+		endless.ListenAndServe(HOST+":"+PORT, router)
+	}
 }
