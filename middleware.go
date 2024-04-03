@@ -14,7 +14,6 @@ func cors(c *gin.Context) {
 }
 
 func Authorization(c *gin.Context) {
-
 	customer_key := os.Getenv("Authorization")
 	if customer_key != "" {
 		authHeader := c.GetHeader("Authorization")
@@ -30,6 +29,5 @@ func Authorization(c *gin.Context) {
 			return
 		}
 	}
-
 	c.Next()
 }

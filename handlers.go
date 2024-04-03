@@ -96,13 +96,10 @@ func nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-
 		if turnStile.Arkose {
-			chatgpt_request_converter.RenewTokenForRequest(&translated_request, secret.Token, proxy_url)
+			chatgpt_request_converter.RenewTokenForRequest(&translated_request, secret.PUID, proxy_url)
 		}
 		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
-
-
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",
