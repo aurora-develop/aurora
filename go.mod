@@ -3,12 +3,14 @@ module aurora
 go 1.21
 
 require (
+	github.com/acheong08/endless v0.0.0-20230615162514-90545c7793fd
 	github.com/bogdanfinn/fhttp v0.5.24
 	github.com/bogdanfinn/tls-client v1.6.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1
+	github.com/xqdoo00o/funcaptcha v0.0.0-20240313153914-4ab805804232
 )
 
 require (
