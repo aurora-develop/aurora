@@ -12,6 +12,7 @@ chmod +x ./aurora
 ./aurora
 ```
 
+.env.template中是默认环境变量配置需要的自己改.env后运行
 ### Docker部署
 ## Docker部署
 您需要安装Docker和Docker Compose。
@@ -42,7 +43,7 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
    }'
 ```
 
-## 贡献
+## 参考
 
 https://github.com/xqdoo00o/ChatGPT-to-API
 

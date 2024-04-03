@@ -2,11 +2,13 @@ package main
 
 import (
 	chatgpt_request_converter "aurora/conversion/requests/chatgpt"
-	chatgpt "aurora/internal/chatgpt"
+	"aurora/internal/chatgpt"
+
 	official_types "aurora/typings/official"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"strings"
 )
 
 func optionsHandler(c *gin.Context) {
@@ -95,10 +97,12 @@ func nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
+
 		if turnStile.Arkose {
 			chatgpt_request_converter.RenewTokenForRequest(&translated_request, secret.Token, proxy_url)
 		}
 		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
+
 
 		if err != nil {
 			c.JSON(500, gin.H{
