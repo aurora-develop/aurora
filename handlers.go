@@ -4,10 +4,9 @@ import (
 	chatgpt_request_converter "aurora/conversion/requests/chatgpt"
 	chatgpt "aurora/internal/chatgpt"
 	official_types "aurora/typings/official"
-	"sync"
-
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"strings"
 )
 
 func optionsHandler(c *gin.Context) {
@@ -52,35 +51,44 @@ func nightmare(c *gin.Context) {
 		return
 	}
 
-	token, puid := "", ""
-
-	var proxy_url = PROXY_URL
-	uid := uuid.NewString()
-	oidDid := uuid.NewString()
-	var chat_require *chatgpt.ChatRequire
-	var wg sync.WaitGroup
-	wg.Add(1)
-	//go func() {
-	//	defer wg.Done()
-	//	err = chatgpt.InitWSConn(token, uid, proxy_url)
-	//}()
-	go func() {
-		defer wg.Done()
-		chat_require = chatgpt.CheckRequire(token, puid, proxy_url, oidDid)
-	}()
-	wg.Wait()
-	//if err != nil {
-	//	c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
-	//	return
-	//}
-	if chat_require == nil {
-		c.JSON(500, gin.H{"error": "unable to check chat requirement"})
+	proxy_url := ProxyIP.GetProxyIP()
+	secret := ACCESS_TOKENS.GetSecret()
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		// Check if customAccessToken starts with sk-
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = ACCESS_TOKENS.GenerateTempToken(customAccessToken)
+		}
+	}
+	if secret == nil {
+		c.JSON(400, gin.H{"error": "Not Account Found."})
 		return
 	}
-	// Convert the chat request to a ChatGPT request
-	translated_request := chatgpt_request_converter.ConvertAPIRequest(original_request, puid, chat_require.Arkose.Required, proxy_url)
 
-	response, err := chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
+	uid := uuid.NewString()
+	turnStile, status, err := chatgpt.InitTurnStile(secret, proxy_url)
+	if err != nil {
+		c.JSON(status, gin.H{
+			"message": err.Error(),
+			"type":    "InitTurnStile_request_error",
+			"param":   err,
+			"code":    status,
+		})
+		return
+	}
+	if !secret.IsFree {
+		err = chatgpt.InitWSConn(secret.Token, uid, proxy_url)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
+			return
+		}
+	}
+
+	// Convert the chat request to a ChatGPT request
+	translated_request := chatgpt_request_converter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxy_url)
+
+	response, err := chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "error sending request",
@@ -95,7 +103,7 @@ func nightmare(c *gin.Context) {
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string
-		response_part, continue_info = chatgpt.Handler(c, response, token, puid, uid, translated_request, original_request.Stream)
+		response_part, continue_info = chatgpt.Handler(c, response, secret, uid, translated_request, original_request.Stream)
 		full_response += response_part
 		if continue_info == nil {
 			break
@@ -104,10 +112,12 @@ func nightmare(c *gin.Context) {
 		translated_request.Action = "continue"
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
+
 		if chat_require.Arkose.Required {
 			chatgpt_request_converter.RenewTokenForRequest(&translated_request, puid, proxy_url)
 		}
 		response, err = chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
+
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",
@@ -127,5 +137,70 @@ func nightmare(c *gin.Context) {
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}
-	chatgpt.UnlockSpecConn(token, uid)
+	chatgpt.UnlockSpecConn(secret.Token, uid)
+}
+
+func engines_handler(c *gin.Context) {
+	proxy_url := ProxyIP.GetProxyIP()
+	secret := ACCESS_TOKENS.GetSecret()
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		// Check if customAccessToken starts with sk-
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = ACCESS_TOKENS.GenerateTempToken(customAccessToken)
+		}
+	}
+	if secret.Token == "" || secret == nil {
+		c.JSON(400, gin.H{"error": "Not Account Found."})
+		return
+	}
+
+	resp, status, err := chatgpt.GETengines(secret, proxy_url)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": "error sending request",
+		})
+		return
+	}
+
+	type ResData struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int    `json:"created"`
+		OwnedBy string `json:"owned_by"`
+	}
+
+	type JSONData struct {
+		Object string    `json:"object"`
+		Data   []ResData `json:"data"`
+	}
+
+	modelS := JSONData{
+		Object: "list",
+	}
+	var resModelList []ResData
+	if len(resp.Models) > 2 {
+		res_data := ResData{
+			ID:      "gpt-4-mobile",
+			Object:  "model",
+			Created: 1685474247,
+			OwnedBy: "openai",
+		}
+		resModelList = append(resModelList, res_data)
+	}
+	for _, model := range resp.Models {
+		res_data := ResData{
+			ID:      model.Slug,
+			Object:  "model",
+			Created: 1685474247,
+			OwnedBy: "openai",
+		}
+		if model.Slug == "text-davinci-002-render-sha" {
+			res_data.ID = "gpt-3.5-turbo"
+		}
+		resModelList = append(resModelList, res_data)
+	}
+	modelS.Data = resModelList
+	c.JSON(status, modelS)
 }
