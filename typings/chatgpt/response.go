@@ -78,3 +78,14 @@ type DalleContent struct {
 		} `json:"dalle"`
 	} `json:"metadata"`
 }
+
+type RequirementsResponse struct {
+	Arkose struct {
+		Required bool        `json:"required"`
+		Dx       interface{} `json:"dx"`
+	} `json:"arkose"`
+	Turnstile struct {
+		Required bool `json:"required"`
+	} `json:"turnstile"`
+	Token string `json:"token"`
+}
