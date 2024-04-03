@@ -8,8 +8,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	tls_client "github.com/bogdanfinn/tls-client"
-	"github.com/gorilla/websocket"
 	"io"
 	"net/url"
 	"os"
@@ -18,7 +16,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	http "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
 
 	chatgpt_response_converter "aurora/conversion/response/chatgpt"
@@ -35,13 +37,18 @@ type connInfo struct {
 }
 
 var (
+	client, _ = tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
+		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+		tls_client.WithTimeoutSeconds(600),
+		tls_client.WithClientProfile(profiles.Okhttp4Android13),
+	}...)
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
 	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 
-func getWSURL(client tls_client.HttpClient, token string, retry int) (string, error) {
+func getWSURL(token string, retry int) (string, error) {
 	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-api/register-websocket", nil)
 	if err != nil {
 		return "", err
@@ -58,7 +65,7 @@ func getWSURL(client tls_client.HttpClient, token string, retry int) (string, er
 			return "", err
 		}
 		time.Sleep(time.Second) // wait 1s to get ws url
-		return getWSURL(client, token, retry+1)
+		return getWSURL(token, retry+1)
 	}
 	defer response.Body.Close()
 	var WSSResp chatgpt_types.ChatGPTWSSResponse
@@ -126,7 +133,7 @@ func UnlockSpecConn(token string, uuid string) {
 		}
 	}
 }
-func InitWSConn(client tls_client.HttpClient, token string, uuid string, proxy string) error {
+func InitWSConn(token string, uuid string, proxy string) error {
 	connInfo := findAvailConn(token, uuid)
 	conn := connInfo.conn
 	isExpired := connInfo.expire.IsZero() || time.Now().After(connInfo.expire)
@@ -139,7 +146,7 @@ func InitWSConn(client tls_client.HttpClient, token string, uuid string, proxy s
 			conn.Close()
 			connInfo.conn = nil
 		}
-		wssURL, err := getWSURL(client, token, 0)
+		wssURL, err := getWSURL(token, 0)
 		if err != nil {
 			return err
 		}
@@ -171,7 +178,7 @@ func InitWSConn(client tls_client.HttpClient, token string, uuid string, proxy s
 				conn.Close()
 				connInfo.conn = nil
 				connInfo.lock = false
-				return InitWSConn(client, token, uuid, proxy)
+				return InitWSConn(token, uuid, proxy)
 			case context.DeadlineExceeded:
 				return nil
 			default:
@@ -194,42 +201,34 @@ type ChatRequire struct {
 	}
 }
 
-func CheckRequire(client tls_client.HttpClient, access_token string, puid string, proxy string, oidDid string) *ChatRequire {
-	maxRetries := 3
-	var require ChatRequire
-
-	for i := 0; i < maxRetries; i++ {
-		if proxy != "" {
-			client.SetProxy(proxy)
-		}
-
-		request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-anon/sentinel/chat-requirements", bytes.NewBuffer([]byte(`{}`)))
-		if err != nil {
-			continue
-		}
-
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("User-Agent", userAgent)
-		request.Header.Set("Oai-Language", "en-US")
-		request.Header.Set("Oai-Device-Id", oidDid)
-
-		response, err := client.Do(request)
-
-		if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			continue
-		}
-
-		defer response.Body.Close()
-
-		err = json.NewDecoder(response.Body).Decode(&require)
-		if err != nil || require.Token == "" {
-			continue
-		}
-
-		return &require
+func CheckRequire(access_token string, puid string, proxy string, oidDid string) *ChatRequire {
+	if proxy != "" {
+		client.SetProxy(proxy)
 	}
 
-	return nil
+	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-anon/sentinel/chat-requirements", bytes.NewBuffer([]byte(`{}`)))
+	if err != nil {
+		return nil
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Oai-Language", "en-US")
+	request.Header.Set("Oai-Device-Id", oidDid)
+	if err != nil {
+		return nil
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil
+	}
+	defer response.Body.Close()
+	var require ChatRequire
+	err = json.NewDecoder(response.Body).Decode(&require)
+	if err != nil {
+		return nil
+	}
+
+	return &require
 }
 
 var urlAttrMap = make(map[string]string)
@@ -239,7 +238,7 @@ type urlAttr struct {
 	Attribution string `json:"attribution"`
 }
 
-func getURLAttribution(client tls_client.HttpClient, access_token string, puid string, url string) string {
+func getURLAttribution(access_token string, puid string, url string) string {
 	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-api/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
 	if err != nil {
 		return ""
@@ -271,7 +270,7 @@ func getURLAttribution(client tls_client.HttpClient, access_token string, puid s
 	return attr.Attribution
 }
 
-func POSTconversation(client tls_client.HttpClient, message chatgpt_types.ChatGPTRequest, access_token string, puid string, chat_token string, proxy string, oidDid string) (*http.Response, error) {
+func POSTconversation(message chatgpt_types.ChatGPTRequest, access_token string, puid string, chat_token string, proxy string, oidDid string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -281,6 +280,7 @@ func POSTconversation(client tls_client.HttpClient, message chatgpt_types.ChatGP
 		apiUrl = API_REVERSE_PROXY
 	}
 
+	arkoseToken := message.ArkoseToken
 	message.ArkoseToken = ""
 	// JSONify the body and add it to the request
 	body_json, err := json.Marshal(message)
@@ -297,25 +297,18 @@ func POSTconversation(client tls_client.HttpClient, message chatgpt_types.ChatGP
 	request.Header.Set("Accept", "text/event-stream")
 	request.Header.Set("Oai-Language", "en-US")
 	request.Header.Set("Oai-Device-Id", oidDid)
+	if arkoseToken != "" {
+		request.Header.Set("Openai-Sentinel-Arkose-Token", arkoseToken)
+	}
 	if chat_token != "" {
 		request.Header.Set("Openai-Sentinel-Chat-Requirements-Token", chat_token)
 	}
 	if err != nil {
 		return &http.Response{}, err
 	}
+	response, err := client.Do(request)
 
-	maxRetries := 3
-
-	for i := 0; i < maxRetries; i++ {
-
-		response, err := client.Do(request)
-		if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			continue
-		}
-
-		return response, err
-	}
-	return nil, err
+	return response, err
 }
 
 func Handle_request_error(c *gin.Context, response *http.Response) bool {
@@ -356,7 +349,7 @@ type fileInfo struct {
 	Status      string `json:"status"`
 }
 
-func GetImageSource(client tls_client.HttpClient, wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
+func GetImageSource(wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
 	defer wg.Done()
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -384,7 +377,7 @@ func GetImageSource(client tls_client.HttpClient, wg *sync.WaitGroup, url string
 	imgSource[idx] = "[![image](" + file_info.DownloadURL + " \"" + prompt + "\")](" + file_info.DownloadURL + ")"
 }
 
-func Handler(c *gin.Context, client tls_client.HttpClient, response *http.Response, token string, puid string, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool) (string, *ContinueInfo) {
+func Handler(c *gin.Context, response *http.Response, token string, puid string, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool) (string, *ContinueInfo) {
 	max_tokens := false
 
 	// Create a bufio.Reader from the response body
@@ -544,7 +537,7 @@ func Handler(c *gin.Context, client tls_client.HttpClient, response *http.Respon
 					if attr == "" {
 						u, _ := url.Parse(citation.Metadata.URL)
 						baseURL := u.Scheme + "://" + u.Host + "/"
-						attr = getURLAttribution(client, token, puid, baseURL)
+						attr = getURLAttribution(token, puid, baseURL)
 						if attr != "" {
 							urlAttrMap[citation.Metadata.URL] = attr
 						}
@@ -576,7 +569,7 @@ func Handler(c *gin.Context, client tls_client.HttpClient, response *http.Respon
 					}
 					url := apiUrl + strings.Split(dalle_content.AssetPointer, "//")[1] + "/download"
 					wg.Add(1)
-					go GetImageSource(client, &wg, url, dalle_content.Metadata.Dalle.Prompt, token, puid, index, imgSource)
+					go GetImageSource(&wg, url, dalle_content.Metadata.Dalle.Prompt, token, puid, index, imgSource)
 				}
 				wg.Wait()
 				translated_response := official_types.NewChatCompletionChunk(strings.Join(imgSource, ""))
