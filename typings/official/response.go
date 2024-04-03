@@ -104,3 +104,15 @@ func NewChatCompletion(full_test string) ChatCompletion {
 		},
 	}
 }
+
+type OpenAIAccessTokenWithSession struct {
+	SessionToken string `json:"session_token"`
+	AccessToken  string `json:"access_token"`
+}
+
+func NewOpenAISessionToken(session_token string, access_token string) *OpenAIAccessTokenWithSession {
+	return &OpenAIAccessTokenWithSession{
+		SessionToken: session_token,
+		AccessToken:  access_token,
+	}
+}
