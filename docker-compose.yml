@@ -14,3 +14,5 @@ services:
       # FREE_ACCOUNTS_NUM: 1024
       # PROXY_URL: http://username:password@ip:port
       # Authorization: sk-xxxxxxx
+      # TLS_CERT=
+      # TLS_KEY=
