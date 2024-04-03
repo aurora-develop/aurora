@@ -1,20 +1,17 @@
 package chatgpt
 
 import (
-	"aurora/internal/tokens"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
 	"fmt"
-	arkose "github.com/xqdoo00o/funcaptcha"
 	"strings"
+
+	arkose "github.com/xqdoo00o/funcaptcha"
 )
 
-func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Secret, requireArk bool, proxy string) chatgpt_types.ChatGPTRequest {
+func ConvertAPIRequest(api_request official_types.APIRequest, puid string, requireArk bool, proxy string) chatgpt_types.ChatGPTRequest {
 	chatgpt_request := chatgpt_types.NewChatGPTRequest()
 	var api_version int
-	if secret.PUID == "" {
-		api_request.Model = "gpt-3.5"
-	}
 	if strings.HasPrefix(api_request.Model, "gpt-3.5") {
 		api_version = 3
 		chatgpt_request.Model = "text-davinci-002-render-sha"
@@ -27,14 +24,13 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 		}
 	}
 	if requireArk {
-		token, err := arkose.GetOpenAIToken(api_version, secret.PUID, proxy)
+		token, err := arkose.GetOpenAIToken(api_version, puid, proxy)
 		if err == nil {
 			chatgpt_request.ArkoseToken = token
 		} else {
 			fmt.Println("Error getting Arkose token: ", err)
 		}
 	}
-
 	if api_request.PluginIDs != nil {
 		chatgpt_request.PluginIDs = api_request.PluginIDs
 		chatgpt_request.Model = "gpt-4-plugins"
