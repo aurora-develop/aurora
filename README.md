@@ -16,3 +16,11 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
      "messages": [{"role": "user", "content": "Say this is a test!"}]
    }'
 ```
+
+## 参考
+
+https://github.com/xqdoo00o/ChatGPT-to-API
+
+## License
+
+MIT License
