@@ -1,7 +1,6 @@
 package chatgpt
 
 import (
-	arkose "aurora/funcaptcha"
 	"aurora/internal/tokens"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
@@ -20,9 +19,8 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 			chatgpt_request.Model = "gpt-4"
 		}
 	}
-
 	if requireArk {
-		token, err := arkose.SendRequest(proxy, "message")
+		token, err := arkose.GetOpenAIToken(api_version, secret.PUID, proxy)
 		if err == nil {
 			chatgpt_request.ArkoseToken = token
 		} else {

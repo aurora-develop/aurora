@@ -90,9 +90,11 @@ func main() {
 	})
 
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
-	router.POST("/v1/chat/completions", nightmare)
-	router.GET("/v1/models", engines_handler)
+	router.POST("/v1/chat/completions", Authorization, nightmare)
+	router.GET("/v1/models", Authorization, engines_handler)
 
 	router.Run(HOST + ":" + PORT)
+
+	endless.ListenAndServe(HOST+":"+PORT, router)
 
 }
