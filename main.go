@@ -48,7 +48,7 @@ func checkProxy() {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			proxy := scanner.Text()
-			parsedURL, _ := url.Parse(proxy)
+			parsedURL, err := url.Parse(proxy)
 			if err != nil {
 				fmt.Println("无法解析URL:", err)
 				return
