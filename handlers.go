@@ -35,7 +35,6 @@ func nightmare(c *gin.Context) {
 	proxy_url := ProxyIP.GetProxyIP()
 	secret := ACCESS_TOKENS.GetSecret()
 	authHeader := c.GetHeader("Authorization")
-
 	if authHeader != "" {
 		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
 		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {

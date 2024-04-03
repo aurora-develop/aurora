@@ -14,17 +14,22 @@ func cors(c *gin.Context) {
 }
 
 func Authorization(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
+
 	customer_key := os.Getenv("Authorization")
-	if authHeader != "" {
+	if customer_key != "" {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(401, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
+		}
 		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if customer_key != "" {
-			if customer_key != customAccessToken {
-				c.JSON(401, gin.H{"error": "Unauthorized"})
-				c.Abort()
-				return
-			}
+		if customer_key != customAccessToken {
+			c.JSON(401, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
 		}
 	}
+
 	c.Next()
 }
