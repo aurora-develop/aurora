@@ -17,8 +17,6 @@ var ACCESS_TOKENS tokens.AccessToken
 var PROXY_URL string
 
 func init() {
-	_ = godotenv.Load(".env")
-
 	HOST = os.Getenv("SERVER_HOST")
 	PORT = os.Getenv("SERVER_PORT")
 	TLS_CERT = os.Getenv("TLS_CERT")
