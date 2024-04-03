@@ -2,7 +2,6 @@ package main
 
 import (
 	"aurora/internal/tokens"
-	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"os"
@@ -39,5 +38,7 @@ func main() {
 
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
 	router.POST("/v1/chat/completions", nightmare)
-	endless.ListenAndServe(HOST+":"+PORT, router)
+
+	router.Run(HOST + ":" + PORT)
+
 }
