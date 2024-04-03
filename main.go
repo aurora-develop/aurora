@@ -9,7 +9,9 @@ import (
 	"os"
 
 	"github.com/acheong08/endless"
+
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -22,10 +24,12 @@ var (
 )
 
 func init() {
-	TLS_CERT = os.Getenv("TLS_CERT")
-	TLS_KEY = os.Getenv("TLS_KEY")
+	_ = godotenv.Load(".env")
+
 	HOST = os.Getenv("SERVER_HOST")
 	PORT = os.Getenv("SERVER_PORT")
+	TLS_CERT = os.Getenv("TLS_CERT")
+	TLS_KEY = os.Getenv("TLS_KEY")
 
 	if HOST == "" {
 		HOST = "0.0.0.0"
@@ -92,8 +96,8 @@ func main() {
 	})
 
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
-	router.POST("/v1/chat/completions", nightmare)
-	router.GET("/v1/models", engines_handler)
+	router.POST("/v1/chat/completions", Authorization, nightmare)
+	router.GET("/v1/models", Authorization, engines_handler)
 
 	if TLS_CERT != "" && TLS_KEY != "" {
 		endless.ListenAndServeTLS(HOST+":"+PORT, TLS_CERT, TLS_KEY, router)
