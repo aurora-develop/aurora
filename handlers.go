@@ -19,25 +19,6 @@ func optionsHandler(c *gin.Context) {
 	})
 }
 
-func simulateModel(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"object": "list",
-		"data": []gin.H{
-			{
-				"id":       "gpt-3.5-turbo",
-				"object":   "model",
-				"created":  1688888888,
-				"owned_by": "chatgpt-to-api",
-			},
-			{
-				"id":       "gpt-4",
-				"object":   "model",
-				"created":  1688888888,
-				"owned_by": "chatgpt-to-api",
-			},
-		},
-	})
-}
 func nightmare(c *gin.Context) {
 	var original_request official_types.APIRequest
 	err := c.BindJSON(&original_request)
@@ -54,15 +35,16 @@ func nightmare(c *gin.Context) {
 	proxy_url := ProxyIP.GetProxyIP()
 	secret := ACCESS_TOKENS.GetSecret()
 	authHeader := c.GetHeader("Authorization")
+
 	if authHeader != "" {
 		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		// Check if customAccessToken starts with sk-
 		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
 			secret = ACCESS_TOKENS.GenerateTempToken(customAccessToken)
 		}
 	}
 	if secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
+		c.Abort()
 		return
 	}
 
@@ -113,10 +95,10 @@ func nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		if chat_require.Arkose.Required {
-			chatgpt_request_converter.RenewTokenForRequest(&translated_request, puid, proxy_url)
+		if turnStile.Arkose {
+			chatgpt_request_converter.RenewTokenForRequest(&translated_request, secret.Token, proxy_url)
 		}
-		response, err = chatgpt.POSTconversation(translated_request, token, puid, chat_require.Token, proxy_url, oidDid)
+		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
 
 		if err != nil {
 			c.JSON(500, gin.H{
