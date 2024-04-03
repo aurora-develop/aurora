@@ -12,6 +12,7 @@ chmod +x ./aurora
 ./aurora
 ```
 
+.env.template中是默认环境变量配置需要的自己改.env后运行
 ### Docker部署
 ## Docker部署
 您需要安装Docker和Docker Compose。
