@@ -6,8 +6,8 @@
 
 ```bash
 go build -o aurora
-chmod +x ./myapp
-./myapp
+chmod +x ./aurora
+./aurora
 ```
 
 ### Docker部署
