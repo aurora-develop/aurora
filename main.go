@@ -53,7 +53,7 @@ func checkProxy() {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			proxy := scanner.Text()
-			parsedURL, _ := url.Parse(proxy)
+			parsedURL, err := url.Parse(proxy)
 			if err != nil {
 				fmt.Println("无法解析URL:", err)
 				return
@@ -95,6 +95,8 @@ func main() {
 		})
 	})
 
+	router.POST("/auth/session", session_handler)
+	router.POST("/auth/refresh", refresh_handler)
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
 	router.POST("/v1/chat/completions", Authorization, nightmare)
 	router.GET("/v1/models", Authorization, engines_handler)

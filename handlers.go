@@ -21,6 +21,58 @@ func optionsHandler(c *gin.Context) {
 	})
 }
 
+func refresh_handler(c *gin.Context) {
+	var refresh_token official_types.OpenAIRefreshToken
+	err := c.BindJSON(&refresh_token)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	proxy_url := ProxyIP.GetProxyIP()
+	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(refresh_token.RefreshToken, proxy_url)
+	if err != nil {
+		c.JSON(400, gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		})
+		return
+	}
+	c.JSON(status, openaiRefreshToken)
+}
+
+func session_handler(c *gin.Context) {
+	var session_token official_types.OpenAISessionToken
+	err := c.BindJSON(&session_token)
+	if err != nil {
+		c.JSON(400, gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		})
+		return
+	}
+	proxy_url := ProxyIP.GetProxyIP()
+	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(session_token.SessionToken, proxy_url)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	c.JSON(status, openaiSessionToken)
+}
+
 func nightmare(c *gin.Context) {
 	var original_request official_types.APIRequest
 	err := c.BindJSON(&original_request)
