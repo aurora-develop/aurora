@@ -2,51 +2,24 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 
 	"aurora/internal/proxys"
-	"aurora/internal/tokens"
 
 	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
-var (
-	HOST          string
-	PORT          string
-	ACCESS_TOKENS tokens.AccessToken
-	ProxyIP       proxys.IProxy
-	TLS_CERT      string
-	TLS_KEY       string
-)
-
-func init() {
-	_ = godotenv.Load(".env")
-
-	HOST = os.Getenv("SERVER_HOST")
-	PORT = os.Getenv("SERVER_PORT")
-	TLS_CERT = os.Getenv("TLS_CERT")
-	TLS_KEY = os.Getenv("TLS_KEY")
-
-	if HOST == "" {
-		HOST = "0.0.0.0"
+func checkProxy() *proxys.IProxy {
+	var proxies []string
+	proxyUrl := os.Getenv("PROXY_URL")
+	if proxyUrl != "" {
+		proxies = append(proxies, proxyUrl)
 	}
-	if PORT == "" {
-		PORT = "8080"
-	}
-	checkProxy()
-	readAccessToken()
-}
 
-func checkProxy() {
-	proxies := []string{}
-	PROXY_URL := os.Getenv("PROXY_URL")
-	if PROXY_URL != "" {
-		proxies = append(proxies, PROXY_URL)
-	}
 	if _, err := os.Stat("proxies.txt"); err == nil {
 		file, _ := os.Open("proxies.txt")
 		defer file.Close()
@@ -55,8 +28,8 @@ func checkProxy() {
 			proxy := scanner.Text()
 			parsedURL, err := url.Parse(proxy)
 			if err != nil {
-				fmt.Println("无法解析URL:", err)
-				return
+				slog.Warn("proxy url is invalid", "url", proxy, "err", err)
+				continue
 			}
 
 			// 如果缺少端口信息，不是完整的代理链接
@@ -74,13 +47,18 @@ func checkProxy() {
 			proxies = append(proxies, proxy)
 		}
 	}
-	ProxyIP = proxys.NewIProxyIP(proxies)
 
+	proxyIP := proxys.NewIProxyIP(proxies)
+	return &proxyIP
 }
 
-func main() {
-	router := gin.Default()
+func registerRouter() *gin.Engine {
+	handler := NewHandle(
+		checkProxy(),
+		readAccessToken(),
+	)
 
+	router := gin.Default()
 	router.Use(cors)
 
 	router.GET("/", func(c *gin.Context) {
@@ -95,16 +73,35 @@ func main() {
 		})
 	})
 
-	router.POST("/auth/session", session_handler)
-	router.POST("/auth/refresh", refresh_handler)
+	router.POST("/auth/session", handler.session)
+	router.POST("/auth/refresh", handler.refresh)
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
-	router.POST("/v1/chat/completions", Authorization, nightmare)
-	router.GET("/v1/models", Authorization, engines_handler)
 
-	if TLS_CERT != "" && TLS_KEY != "" {
-		endless.ListenAndServeTLS(HOST+":"+PORT, TLS_CERT, TLS_KEY, router)
-	} else {
-		endless.ListenAndServe(HOST+":"+PORT, router)
+	authGroup := router.Group("").Use(Authorization)
+	authGroup.POST("/v1/chat/completions", handler.nightmare)
+	authGroup.GET("/v1/models", handler.engines)
+	return router
+}
+
+func main() {
+	router := registerRouter()
+
+	_ = godotenv.Load(".env")
+	host := os.Getenv("SERVER_HOST")
+	port := os.Getenv("SERVER_PORT")
+	tlsCert := os.Getenv("TLS_CERT")
+	tlsKey := os.Getenv("TLS_KEY")
+
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	if port == "" {
+		port = "8080"
 	}
 
+	if tlsCert != "" && tlsKey != "" {
+		_ = endless.ListenAndServeTLS(host+":"+port, tlsCert, tlsKey, router)
+	} else {
+		_ = endless.ListenAndServe(host+":"+port, router)
+	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func readAccessToken() {
+func readAccessToken() *tokens.AccessToken {
 	var Secrets []*tokens.Secret
 	// Read accounts.txt and create a list of accounts
 	if _, err := os.Stat("access_tokens.txt"); err == nil {
@@ -63,5 +63,6 @@ func readAccessToken() {
 		}
 	}
 
-	ACCESS_TOKENS = tokens.NewAccessToken(Secrets)
+	token := tokens.NewAccessToken(Secrets)
+	return &token
 }
