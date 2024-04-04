@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/url"
@@ -220,7 +221,7 @@ func InitTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		result, err := POSTTurnStile(client, secret, proxy)
+		result, err := POSTTurnStile(client, secret, proxy, 0)
 		if err != nil {
 			return nil, 500, err
 		}
@@ -235,7 +236,7 @@ func InitTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 	return currTurnToken, 0, nil
 }
 
-func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy string) (*chatgpt_types.RequirementsResponse, error) {
+func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy string, retry int) (*chatgpt_types.RequirementsResponse, error) {
 	if proxy != "" {
 		client.Client.SetProxy(proxy)
 	}
@@ -256,9 +257,18 @@ func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 		return nil, err
 	}
 	if response.StatusCode() != 200 {
+		if response.StatusCode() == 401 {
+			if retry > 3 {
+				return nil, errors.New("error sending request")
+			}
+			time.Sleep(time.Second * 5)
+			secret.Token = uuid.NewString()
+			return POSTTurnStile(client, secret, proxy, retry+1)
+		}
 		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", response.String()))
 		return nil, errors.New("error sending request")
 	}
+
 	return result, err
 }
 
