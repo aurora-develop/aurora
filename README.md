@@ -1,6 +1,13 @@
+# AURORA
 
+免费的GPT3.5 api
+
+### 注：仅ip属地支持免登录使用ChatGpt可以使用
 
 ## Deploy
+
+### Render部署
+[![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
 ### 编译部署
 
@@ -16,9 +23,14 @@ chmod +x ./aurora
 ### Docker部署
 ## Docker部署
 您需要安装Docker和Docker Compose。
+
 ```bash
-docker run -d --name aurora -p 8080:8080 ghcr.io/aurora-develop/aurora:latest
+docker run -d \
+  --name aurora \
+  -p 8080:8080 \
+  ghcr.io/aurora-develop/aurora:latest
 ```
+
 ## Docker Compose部署
 创建一个新的目录，例如aurora-app，并进入该目录：
 ```bash
@@ -43,7 +55,25 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
    }'
 ```
 
-## 参考
+## 高级设置
+
+默认情况不需要设置，除非你有需求
+
+### 环境变量
+```
+Authorization=your_authorization
+TLS_CERT=path_to_your_tls_cert
+TLS_KEY=path_to_your_tls_key
+PROXY_URL=your_proxy_url
+```
+
+## 鸣谢
+
+感谢各位大佬的pr支持，感谢。
+
+
+## 参考项目
+
 
 https://github.com/xqdoo00o/ChatGPT-to-API
 

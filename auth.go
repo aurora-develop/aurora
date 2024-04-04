@@ -4,9 +4,10 @@ import (
 	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"strconv"
+
+	"github.com/google/uuid"
 )
 
 func readAccessToken() {
@@ -44,8 +45,7 @@ func readAccessToken() {
 			Secrets = append(Secrets, tokens.NewSecretWithFree(token))
 		}
 	}
-
-	if os.Getenv("FREE_ACCOUNTS") == "true" {
+	if os.Getenv("FREE_ACCOUNTS") == "" || os.Getenv("FREE_ACCOUNTS") == "true" {
 		freeAccountsNumStr := os.Getenv("FREE_ACCOUNTS_NUM")
 		numAccounts := 1024
 		if freeAccountsNumStr != "" {

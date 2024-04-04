@@ -2,25 +2,46 @@ package httpclient
 
 import (
 	"crypto/tls"
+	browser "github.com/EDDYCJY/fake-useragent"
+	"github.com/go-resty/resty/v2"
 	"net/http"
 	"time"
 )
 
-type StdClient struct {
-	httpClient *http.Client
+type RestyClient struct {
+	Client *resty.Client
 }
 
-func NewStdClient() *StdClient {
-	return &StdClient{
-		httpClient: &http.Client{
-			Timeout: time.Second * 10,
+func NewStdClient() *RestyClient {
+	client := &RestyClient{
+		Client: resty.NewWithClient(&http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				// 禁用长连接
+				DisableKeepAlives: true,
+				// 配置TLS设置，跳过证书验证
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
 			},
-		},
+		}),
 	}
-}
+	client.Client.SetRetryCount(3)
+	client.Client.SetRetryWaitTime(5 * time.Second)
+	client.Client.SetRetryMaxWaitTime(20 * time.Second)
 
-func (c *StdClient) Do(req *http.Request) (*http.Response, error) {
-	return c.httpClient.Do(req)
+	client.Client.SetTimeout(600 * time.Second)
+	client.Client.SetHeader("user-agent", browser.Random()).
+		SetHeader("accept", "*/*").
+		SetHeader("accept-language", "en-US,en;q=0.9").
+		SetHeader("cache-control", "no-cache").
+		SetHeader("content-type", "application/json").
+		SetHeader("oai-language", "en-US").
+		SetHeader("pragma", "no-cache").
+		SetHeader("sec-ch-ua", `"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"`).
+		SetHeader("sec-ch-ua-mobile", "?0").
+		SetHeader("sec-ch-ua-platform", "Windows").
+		SetHeader("sec-fetch-dest", "empty").
+		SetHeader("sec-fetch-mode", "cors").
+		SetHeader("sec-fetch-site", "same-origin")
+	return client
 }
