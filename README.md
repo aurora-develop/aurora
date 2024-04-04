@@ -2,6 +2,8 @@
 
 免费的GPT3.5 api
 
+### 注：仅ip属地支持免登录使用ChatGpt可以使用
+
 ## Deploy
 
 
