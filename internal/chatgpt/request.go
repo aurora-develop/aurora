@@ -265,13 +265,15 @@ func POSTTurnStile(secret *tokens.Secret, proxy string, retry int) (*http.Respon
 	if err != nil {
 		return response, err
 	}
-	if secret.IsFree {
-		if retry > 3 {
-			return response, err
+	if response.StatusCode == 401 {
+		if secret.IsFree {
+			if retry > 3 {
+				return response, err
+			}
+			time.Sleep(time.Second) // wait 1s to get ws url
+			secret.Token = uuid.NewString()
+			return POSTTurnStile(secret, proxy, retry+1)
 		}
-		time.Sleep(time.Second) // wait 1s to get ws url
-		secret.Token = uuid.NewString()
-		return POSTTurnStile(secret, proxy, retry+1)
 	}
 
 	return response, err
