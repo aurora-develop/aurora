@@ -29,6 +29,10 @@ func NewAccessToken(tokens []*Secret) AccessToken {
 }
 
 func (a *AccessToken) GetSecret() *Secret {
+	if a == nil {
+		return &Secret{}
+	}
+
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
