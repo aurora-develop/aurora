@@ -3,10 +3,13 @@ module aurora
 go 1.21
 
 require (
+	github.com/EDDYCJY/fake-useragent v0.2.0
 	github.com/acheong08/endless v0.0.0-20230615162514-90545c7793fd
+	github.com/aurorax-neo/go-logger v0.0.0-20240331061645-18b054649449
 	github.com/bogdanfinn/fhttp v0.5.24
 	github.com/bogdanfinn/tls-client v1.6.1
 	github.com/gin-gonic/gin v1.9.1
+	github.com/go-resty/resty/v2 v2.12.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1
@@ -14,11 +17,9 @@ require (
 )
 
 require (
-	github.com/EDDYCJY/fake-useragent v0.2.0 // indirect
 	github.com/PuerkitoBio/goquery v1.9.1 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
-	github.com/aurorax-neo/go-logger v0.0.0-20240331061645-18b054649449 // indirect
 	github.com/bogdanfinn/utls v1.5.16 // indirect
 	github.com/bytedance/sonic v1.10.1 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
@@ -28,7 +29,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.15.4 // indirect
-	github.com/go-resty/resty/v2 v2.12.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
