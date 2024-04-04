@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"aurora/util"
 	"crypto/tls"
 	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/go-resty/resty/v2"
@@ -35,7 +36,7 @@ func NewStdClient() *RestyClient {
 		SetHeader("accept-language", "en-US,en;q=0.9").
 		SetHeader("cache-control", "no-cache").
 		SetHeader("content-type", "application/json").
-		SetHeader("oai-language", "en-US").
+		SetHeader("oai-language", util.RandomLanguage()).
 		SetHeader("pragma", "no-cache").
 		SetHeader("sec-ch-ua", `"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"`).
 		SetHeader("sec-ch-ua-mobile", "?0").
