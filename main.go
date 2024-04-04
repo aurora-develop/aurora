@@ -5,6 +5,7 @@ import (
 	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
+	"github.com/acheong08/endless"
 	"net/url"
 	"os"
 

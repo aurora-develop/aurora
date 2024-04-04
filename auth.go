@@ -45,7 +45,6 @@ func readAccessToken() {
 			Secrets = append(Secrets, tokens.NewSecretWithFree(token))
 		}
 	}
-
 	if os.Getenv("FREE_ACCOUNTS") == "" || os.Getenv("FREE_ACCOUNTS") == "true" {
 		freeAccountsNumStr := os.Getenv("FREE_ACCOUNTS_NUM")
 		numAccounts := 1024
