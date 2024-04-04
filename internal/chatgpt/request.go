@@ -58,7 +58,7 @@ var (
 )
 
 func getWSURL(token string, retry int) (string, error) {
-	//request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-api/register-websocket", nil)
+	//request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-anon/register-websocket", nil)
 	//if err != nil {
 	//	return "", err
 	//}
@@ -72,7 +72,7 @@ func getWSURL(token string, retry int) (string, error) {
 	var WSSResp chatgpt_types.ChatGPTWSSResponse
 	_, err := httpclient.NewStdClient().Client.R().
 		SetResult(&WSSResp).
-		Post("https://chat.openai.com/backend-api/register-websocket")
+		Post("https://chat.openai.com/backend-anon/register-websocket")
 	logger.Logger.Info(fmt.Sprint("getWSURL: ", WSSResp.WssUrl))
 	if err != nil {
 		if retry > 3 {
@@ -245,7 +245,7 @@ func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 	if secret.IsFree {
 		client.Client.SetHeader("oai-device-id", secret.Token)
 	}
-	path := "/backend-api/sentinel/chat-requirements"
+	path := "/backend-anon/sentinel/chat-requirements"
 	var result *chatgpt_types.RequirementsResponse
 	response, err := client.Client.R().
 		SetBody(`{"conversation_mode_kind":"primary_assistant"}`).
@@ -270,7 +270,7 @@ type urlAttr struct {
 }
 
 func getURLAttribution(access_token string, puid string, url string) string {
-	request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-api/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
+	request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-anon/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
 	if err != nil {
 		return ""
 	}
@@ -370,7 +370,7 @@ func GETengines(secret *tokens.Secret, proxy string) (*EnginesData, int, error) 
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	reqUrl := "https://chat.openai.com/backend-api/models"
+	reqUrl := "https://chat.openai.com/backend-anon/models"
 	req, _ := fhttp.NewRequest("GET", reqUrl, nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
@@ -642,7 +642,7 @@ func Handler(c *gin.Context, response *http.Response, secret *tokens.Secret, uui
 				continue
 			}
 			if original_response.Message.Content.ContentType == "multimodal_text" {
-				apiUrl := "https://chat.openai.com/backend-api/files/"
+				apiUrl := "https://chat.openai.com/backend-anon/files/"
 				if FILES_REVERSE_PROXY != "" {
 					apiUrl = FILES_REVERSE_PROXY
 				}
