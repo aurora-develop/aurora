@@ -4,9 +4,10 @@ import (
 	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"strconv"
+
+	"github.com/google/uuid"
 )
 
 func readAccessToken() {
@@ -28,7 +29,7 @@ func readAccessToken() {
 		}
 	}
 
-	// 增加自定义free_tokens.txt，支持文件游客账号的uuid
+	// 增加自定义free_tokens.txt，支持文件设置每个账号的uuid
 	if _, err := os.Stat("free_tokens.txt"); err == nil {
 		// Each line is a proxy, put in proxies array
 		file, _ := os.Open("free_tokens.txt")

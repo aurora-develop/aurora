@@ -715,3 +715,96 @@ func Handler(c *gin.Context, response *http.Response, secret *tokens.Secret, uui
 		ParentID:       original_response.Message.ID,
 	}
 }
+
+type AuthSession struct {
+	User struct {
+		Id           string        `json:"id"`
+		Name         string        `json:"name"`
+		Email        string        `json:"email"`
+		Image        string        `json:"image"`
+		Picture      string        `json:"picture"`
+		Idp          string        `json:"idp"`
+		Iat          int           `json:"iat"`
+		Mfa          bool          `json:"mfa"`
+		Groups       []interface{} `json:"groups"`
+		IntercomHash string        `json:"intercom_hash"`
+	} `json:"user"`
+	Expires      time.Time `json:"expires"`
+	AccessToken  string    `json:"accessToken"`
+	AuthProvider string    `json:"authProvider"`
+}
+
+func GETTokenForRefreshToken(refresh_token string, proxy string) (interface{}, int, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	url := "https://auth0.openai.com/oauth/token"
+
+	data := map[string]interface{}{
+		"redirect_uri":  "com.openai.chat://auth0.openai.com/ios/com.openai.chat/callback",
+		"grant_type":    "refresh_token",
+		"client_id":     "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh",
+		"refresh_token": refresh_token,
+	}
+
+	reqBody, err := json.Marshal(data)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	req.Header.Set("authority", "auth0.openai.com")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var result interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, 0, err
+	}
+	return result, resp.StatusCode, nil
+}
+
+func GETTokenForSessionToken(session_token string, proxy string) (interface{}, int, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	url := "https://chat.openai.com/api/auth/session"
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("authority", "chat.openai.com")
+	req.Header.Set("accept-language", "zh-CN,zh;q=0.9")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("oai-language", "en-US")
+	req.Header.Set("origin", "https://chat.openai.com")
+	req.Header.Set("referer", "https://chat.openai.com/")
+	req.Header.Set("cookie", "__Secure-next-auth.session-token="+session_token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var result AuthSession
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	cookies := parseCookies(resp.Cookies())
+	if value, ok := cookies["__Secure-next-auth.session-token"]; ok {
+		session_token = value
+	}
+	openai_sessionToken := official_types.NewOpenAISessionToken(session_token, result.AccessToken)
+	return openai_sessionToken, resp.StatusCode, nil
+}
+
+func parseCookies(cookies []*http.Cookie) map[string]string {
+	cookieDict := make(map[string]string)
+	for _, cookie := range cookies {
+		cookieDict[cookie.Name] = cookie.Value
+	}
+	return cookieDict
+}
