@@ -35,7 +35,7 @@ func init() {
 		HOST = "0.0.0.0"
 	}
 	if PORT == "" {
-		PORT = "3040"
+		PORT = "8080"
 	}
 	checkProxy()
 	readAccessToken()
