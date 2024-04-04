@@ -245,12 +245,12 @@ func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 	if secret.IsFree {
 		client.Client.SetHeader("oai-device-id", secret.Token)
 	}
-	apiUrl := "https://chat.openai.com/backend-api/sentinel/chat-requirements"
+	path := "/backend-api/sentinel/chat-requirements"
 	var result *chatgpt_types.RequirementsResponse
 	response, err := client.Client.R().
 		SetBody(`{"conversation_mode_kind":"primary_assistant"}`).
 		SetResult(&result).
-		Post(apiUrl)
+		Post(path)
 	if err != nil {
 		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", err))
 		return nil, err
@@ -305,14 +305,11 @@ func POSTconversation(client *httpclient.RestyClient, message chatgpt_types.Chat
 	if proxy != "" {
 		client.Client.SetProxy(proxy)
 	}
-	apiUrl := "https://chat.openai.com/backend-anon/conversation"
-	if API_REVERSE_PROXY != "" {
-		apiUrl = API_REVERSE_PROXY
-	}
+	path := "/backend-anon/conversation"
 	arkoseToken := message.ArkoseToken
 	message.ArkoseToken = ""
 	// Clear cookies
-	index, err := client.Client.R().Get("https://chat.openai.com")
+	index, err := client.Client.R().Get("")
 	cookies := index.Cookies()
 	if secret.PUID != "" {
 		cookies = append(cookies, &http.Cookie{
@@ -336,7 +333,7 @@ func POSTconversation(client *httpclient.RestyClient, message chatgpt_types.Chat
 	response, err := client.Client.R().
 		SetBody(message).
 		SetDoNotParseResponse(true).
-		Post(apiUrl)
+		Post(path)
 	if err != nil {
 		return &http.Response{}, err
 	}
