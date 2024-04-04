@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/aurorax-neo/go-logger"
 	"io"
 	"net/http"
 	"net/url"
