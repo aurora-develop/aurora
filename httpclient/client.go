@@ -28,6 +28,7 @@ func NewStdClient() *RestyClient {
 	client.Client.SetRetryCount(3)
 	client.Client.SetRetryWaitTime(5 * time.Second)
 	client.Client.SetRetryMaxWaitTime(20 * time.Second)
+
 	client.Client.SetTimeout(600 * time.Second)
 	client.Client.SetHeader("user-agent", browser.Random()).
 		SetHeader("accept", "*/*").
