@@ -6,13 +6,5 @@ services:
     container_name: aurora
     restart: unless-stopped
     ports:
+
       - '8080:8080'
-    environment:
-      SERVER_HOST: 0.0.0.0
-      SERVER_PORT: 8080
-      # FREE_ACCOUNTS: true
-      # FREE_ACCOUNTS_NUM: 1024
-      # PROXY_URL: http://username:password@ip:port
-      # Authorization: sk-xxxxxxx
-      # TLS_CERT=
-      # TLS_KEY=
