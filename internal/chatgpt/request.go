@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/aurorax-neo/go-logger"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aurorax-neo/go-logger"
 
 	"github.com/gorilla/websocket"
 
@@ -304,7 +305,7 @@ func POSTconversation(client *httpclient.RestyClient, message chatgpt_types.Chat
 	if proxy != "" {
 		client.Client.SetProxy(proxy)
 	}
-	apiUrl := "https://chat.openai.com/backend-api/conversation"
+	apiUrl := "https://chat.openai.com/backend-anon/conversation"
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
@@ -753,7 +754,6 @@ func GETTokenForRefreshToken(refresh_token string, proxy string) (interface{}, i
 	}
 
 	req, _ := fhttp.NewRequest("POST", url, bytes.NewBuffer(reqBody))
-
 
 	req.Header.Set("authority", "auth0.openai.com")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
