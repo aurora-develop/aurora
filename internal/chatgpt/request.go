@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"io"
 	"net/url"
 	"os"
@@ -216,7 +217,7 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(secret, proxy)
+		response, err := POSTTurnStile(secret, proxy, 0)
 		if err != nil {
 			return nil, response.StatusCode, err
 		}
@@ -238,7 +239,7 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	return currTurnToken, 0, nil
 }
 
-func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) {
+func POSTTurnStile(secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -262,8 +263,17 @@ func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) 
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return &http.Response{}, err
+		return response, err
 	}
+	if secret.IsFree {
+		if retry > 3 {
+			return response, err
+		}
+		time.Sleep(time.Second) // wait 1s to get ws url
+		secret.Token = uuid.NewString()
+		return POSTTurnStile(secret, proxy, retry+1)
+	}
+
 	return response, err
 }
 
