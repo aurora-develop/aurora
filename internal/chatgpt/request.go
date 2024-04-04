@@ -216,7 +216,7 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(secret, proxy)
+		response, err := POSTTurnStile(secret, proxy, 0)
 		if err != nil {
 			return nil, response.StatusCode, err
 		}
@@ -238,7 +238,7 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	return currTurnToken, 0, nil
 }
 
-func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) {
+func POSTTurnStile(secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -262,7 +262,20 @@ func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) 
 	}
 	response, err := client.Do(request)
 	if err != nil {
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", err))
 		return &http.Response{}, err
+	}
+	if response.StatusCode() != 200 {
+		if response.StatusCode() == 401 {
+			if retry > 3 {
+				return nil, errors.New("error sending request")
+			}
+			time.Sleep(time.Second)
+			secret.Token = uuid.NewString()
+			return POSTTurnStile(client, secret, proxy, retry+1)
+		}
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", response.String()))
+		return &http.Response{}, errors.New("error sending request")
 	}
 	return response, err
 }
