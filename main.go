@@ -86,6 +86,7 @@ func registerRouter() *gin.Engine {
 }
 
 func main() {
+	gin.SetMode(gin.ReleaseMode)
 	router := registerRouter()
 
 	_ = godotenv.Load(".env")
