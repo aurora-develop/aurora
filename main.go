@@ -41,6 +41,23 @@ func init() {
 	readAccessToken()
 }
 
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+
+		// 如果是OPTIONS请求，直接返回
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func checkProxy() {
 	proxies := []string{}
 	PROXY_URL := os.Getenv("PROXY_URL")
@@ -80,8 +97,7 @@ func checkProxy() {
 
 func main() {
 	router := gin.Default()
-
-	router.Use(cors)
+	router.Use(CORSMiddleware())
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
