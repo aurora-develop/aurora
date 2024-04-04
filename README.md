@@ -2,8 +2,9 @@
 
 免费的GPT3.5 api
 
-## Deploy
+### 注：仅ip属地支持免登录使用ChatGpt可以使用
 
+## Deploy
 
 ### 编译部署
 
