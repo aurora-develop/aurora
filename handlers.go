@@ -2,6 +2,7 @@ package main
 
 import (
 	chatgpt_request_converter "aurora/conversion/requests/chatgpt"
+	"aurora/httpclient"
 	"aurora/internal/chatgpt"
 
 	official_types "aurora/typings/official"
@@ -101,8 +102,9 @@ func nightmare(c *gin.Context) {
 		return
 	}
 
+	client := httpclient.NewStdClient()
 	uid := uuid.NewString()
-	turnStile, status, err := chatgpt.InitTurnStile(secret, proxy_url)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxy_url)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -123,7 +125,7 @@ func nightmare(c *gin.Context) {
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgpt_request_converter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxy_url)
 
-	response, err := chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
+	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxy_url)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "error sending request",
@@ -151,7 +153,7 @@ func nightmare(c *gin.Context) {
 		if turnStile.Arkose {
 			chatgpt_request_converter.RenewTokenForRequest(&translated_request, secret.PUID, proxy_url)
 		}
-		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
+		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxy_url)
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",

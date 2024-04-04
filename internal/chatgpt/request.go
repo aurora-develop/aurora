@@ -1,6 +1,7 @@
 package chatgpt
 
 import (
+	"aurora/httpclient"
 	"aurora/internal/tokens"
 	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
@@ -10,7 +11,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/aurorax-neo/go-logger"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -20,7 +24,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	http "github.com/bogdanfinn/fhttp"
+	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
@@ -53,29 +57,28 @@ var (
 )
 
 func getWSURL(token string, retry int) (string, error) {
-	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-api/register-websocket", nil)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Accept", "*/*")
-	request.Header.Set("Oai-Language", "en-US")
-	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
-	response, err := client.Do(request)
+	//request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-api/register-websocket", nil)
+	//if err != nil {
+	//	return "", err
+	//}
+	//request.Header.Set("User-Agent", userAgent)
+	//request.Header.Set("Accept", "*/*")
+	//request.Header.Set("Oai-Language", "en-US")
+	//if token != "" {
+	//	request.Header.Set("Authorization", "Bearer "+token)
+	//}
+	//response, err := client.Do(request)
+	var WSSResp chatgpt_types.ChatGPTWSSResponse
+	_, err := httpclient.NewStdClient().Client.R().
+		SetResult(&WSSResp).
+		Post("https://chat.openai.com/backend-api/register-websocket")
+	logger.Logger.Info(fmt.Sprint("getWSURL: ", WSSResp.WssUrl))
 	if err != nil {
 		if retry > 3 {
 			return "", err
 		}
 		time.Sleep(time.Second) // wait 1s to get ws url
 		return getWSURL(token, retry+1)
-	}
-	defer response.Body.Close()
-	var WSSResp chatgpt_types.ChatGPTWSSResponse
-	err = json.NewDecoder(response.Body).Decode(&WSSResp)
-	if err != nil {
-		return "", err
 	}
 	return WSSResp.WssUrl, nil
 }
@@ -211,23 +214,16 @@ type TurnStile struct {
 	ExpireAt       time.Time
 }
 
-func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
+func InitTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(secret, proxy)
+		result, err := POSTTurnStile(client, secret, proxy)
 		if err != nil {
-			return nil, response.StatusCode, err
+			return nil, 500, err
 		}
-		defer response.Body.Close()
-		if response.StatusCode != 200 {
-			return nil, response.StatusCode, errors.New("response status code is not 200")
-		}
-		var result chatgpt_types.RequirementsResponse
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-			return nil, response.StatusCode, err
-		}
+
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
 			Arkose:         result.Arkose.Required,
@@ -238,33 +234,31 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	return currTurnToken, 0, nil
 }
 
-func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) {
+func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy string) (*chatgpt_types.RequirementsResponse, error) {
 	if proxy != "" {
-		client.SetProxy(proxy)
+		client.Client.SetProxy(proxy)
 	}
-	apiUrl := "https://chat.openai.com/backend-api/sentinel/chat-requirements"
-	payload := strings.NewReader(`{"conversation_mode_kind":"primary_assistant"}`)
-	request, err := http.NewRequest(http.MethodPost, apiUrl, payload)
-	if err != nil {
-		return &http.Response{}, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Accept", "*/*")
-	request.Header.Set("oai-language", "en-US")
-	request.Header.Set("origin", "https://chat.openai.com")
-	request.Header.Set("referer", "https://chat.openai.com/")
 	if !secret.IsFree && secret.Token != "" {
-		request.Header.Set("Authorization", "Bearer "+secret.Token)
+		client.Client.SetHeader("Authorization", "Bearer "+secret.Token)
 	}
 	if secret.IsFree {
-		request.Header.Set("oai-device-id", secret.Token)
+		client.Client.SetHeader("oai-device-id", secret.Token)
 	}
-	response, err := client.Do(request)
+	apiUrl := "https://chat.openai.com/backend-api/sentinel/chat-requirements"
+	var result *chatgpt_types.RequirementsResponse
+	response, err := client.Client.R().
+		SetBody(`{"conversation_mode_kind":"primary_assistant"}`).
+		SetResult(&result).
+		Post(apiUrl)
 	if err != nil {
-		return &http.Response{}, err
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", err))
+		return nil, err
 	}
-	return response, err
+	if response.StatusCode() != 200 {
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", response.String()))
+		return nil, errors.New("error sending request")
+	}
+	return result, err
 }
 
 var urlAttrMap = make(map[string]string)
@@ -275,7 +269,7 @@ type urlAttr struct {
 }
 
 func getURLAttribution(access_token string, puid string, url string) string {
-	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-api/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
+	request, err := fhttp.NewRequest(fhttp.MethodPost, "https://chat.openai.com/backend-api/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
 	if err != nil {
 		return ""
 	}
@@ -306,9 +300,9 @@ func getURLAttribution(access_token string, puid string, url string) string {
 	return attr.Attribution
 }
 
-func POSTconversation(message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
+func POSTconversation(client *httpclient.RestyClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
 	if proxy != "" {
-		client.SetProxy(proxy)
+		client.Client.SetProxy(proxy)
 	}
 	apiUrl := "https://chat.openai.com/backend-api/conversation"
 	if API_REVERSE_PROXY != "" {
@@ -316,41 +310,40 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, secret *tokens.Secre
 	}
 	arkoseToken := message.ArkoseToken
 	message.ArkoseToken = ""
-
-	// JSONify the body and add it to the request
-	body_json, err := json.Marshal(message)
-	if err != nil {
-		return &http.Response{}, err
-	}
-
-	request, err := http.NewRequest(http.MethodPost, apiUrl, bytes.NewBuffer(body_json))
-	if err != nil {
-		return &http.Response{}, err
-	}
 	// Clear cookies
+	index, err := client.Client.R().Get("https://chat.openai.com")
+	cookies := index.Cookies()
 	if secret.PUID != "" {
-		request.Header.Set("Cookie", "_puid="+secret.PUID+";")
+		cookies = append(cookies, &http.Cookie{
+			Name:  "_puid",
+			Value: secret.PUID,
+		})
 	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Accept", "*/*")
-	request.Header.Set("oai-language", "en-US")
-	request.Header.Set("origin", "https://chat.openai.com")
-	request.Header.Set("referer", "https://chat.openai.com/")
+	client.Client.SetCookies(index.Cookies())
 	if chat_token.Arkose {
-		request.Header.Set("openai-sentinel-arkose-token", arkoseToken)
+		client.Client.SetHeader("openai-sentinel-arkose-token", arkoseToken)
 	}
 	if chat_token.TurnStileToken != "" {
-		request.Header.Set("Openai-Sentinel-Chat-Requirements-Token", chat_token.TurnStileToken)
+		client.Client.SetHeader("Openai-Sentinel-Chat-Requirements-Token", chat_token.TurnStileToken)
 	}
 	if !secret.IsFree && secret.Token != "" {
-		request.Header.Set("Authorization", "Bearer "+secret.Token)
+		client.Client.SetHeader("Authorization", "Bearer "+secret.Token)
 	}
 	if secret.IsFree {
-		request.Header.Set("oai-device-id", secret.Token)
+		client.Client.SetHeader("oai-device-id", secret.Token)
 	}
-	response, err := client.Do(request)
-	return response, err
+	response, err := client.Client.R().
+		SetBody(message).
+		SetDoNotParseResponse(true).
+		Post(apiUrl)
+	if err != nil {
+		return &http.Response{}, err
+	}
+	if response.StatusCode() != 200 {
+		logger.Logger.Debug(fmt.Sprint("POSTconversation: ", response.String(), response.StatusCode()))
+		return response.RawResponse, errors.New("error sending request")
+	}
+	return response.RawResponse, err
 }
 
 type EnginesData struct {
@@ -380,7 +373,7 @@ func GETengines(secret *tokens.Secret, proxy string) (*EnginesData, int, error) 
 		client.SetProxy(proxy)
 	}
 	reqUrl := "https://chat.openai.com/backend-api/models"
-	req, _ := http.NewRequest("GET", reqUrl, nil)
+	req, _ := fhttp.NewRequest("GET", reqUrl, nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
@@ -448,7 +441,7 @@ type fileInfo struct {
 
 func GetImageSource(wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
 	defer wg.Done()
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	request, err := fhttp.NewRequest(fhttp.MethodGet, url, nil)
 	if err != nil {
 		return
 	}
