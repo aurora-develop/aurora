@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/aurorax-neo/go-logger"
 	"io"
 	"net/http"
 	"net/url"
@@ -754,7 +755,6 @@ func GETTokenForRefreshToken(refresh_token string, proxy string) (interface{}, i
 	}
 
 	req, _ := fhttp.NewRequest("POST", url, bytes.NewBuffer(reqBody))
-
 	req.Header.Set("authority", "auth0.openai.com")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Content-Type", "application/json")
