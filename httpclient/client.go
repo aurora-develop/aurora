@@ -1,12 +1,14 @@
 package httpclient
 
 import (
-	"aurora/util"
 	"crypto/tls"
-	browser "github.com/EDDYCJY/fake-useragent"
-	"github.com/go-resty/resty/v2"
 	"net/http"
 	"time"
+
+	"aurora/util"
+
+	browser "github.com/EDDYCJY/fake-useragent"
+	"github.com/go-resty/resty/v2"
 )
 
 type RestyClient struct {
