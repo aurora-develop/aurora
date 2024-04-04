@@ -1,9 +1,10 @@
 package main
 
 import (
-	gin "github.com/gin-gonic/gin"
 	"os"
 	"strings"
+
+	gin "github.com/gin-gonic/gin"
 )
 
 func cors(c *gin.Context) {
