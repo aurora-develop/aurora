@@ -753,6 +753,8 @@ func GETTokenForRefreshToken(refresh_token string, proxy string) (interface{}, i
 	}
 
 	req, _ := fhttp.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+
+
 	req.Header.Set("authority", "auth0.openai.com")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Content-Type", "application/json")
@@ -777,6 +779,7 @@ func GETTokenForSessionToken(session_token string, proxy string) (interface{}, i
 	}
 	url := "https://chat.openai.com/api/auth/session"
 	req, _ := fhttp.NewRequest("GET", url, nil)
+
 	req.Header.Set("authority", "chat.openai.com")
 	req.Header.Set("accept-language", "zh-CN,zh;q=0.9")
 	req.Header.Set("User-Agent", userAgent)
@@ -802,6 +805,7 @@ func GETTokenForSessionToken(session_token string, proxy string) (interface{}, i
 }
 
 func parseCookies(cookies []*fhttp.Cookie) map[string]string {
+
 	cookieDict := make(map[string]string)
 	for _, cookie := range cookies {
 		cookieDict[cookie.Name] = cookie.Value
