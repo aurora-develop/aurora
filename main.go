@@ -1,15 +1,15 @@
 package main
 
 import (
-	"aurora/internal/proxys"
-	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
 	"net/url"
 	"os"
 
-	"github.com/acheong08/endless"
+	"aurora/internal/proxys"
+	"aurora/internal/tokens"
 
+	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )

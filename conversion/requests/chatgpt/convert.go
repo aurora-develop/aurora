@@ -1,12 +1,14 @@
 package chatgpt
 
 import (
+	"fmt"
+	"strings"
+
 	"aurora/internal/tokens"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
-	"fmt"
+
 	arkose "github.com/xqdoo00o/funcaptcha"
-	"strings"
 )
 
 func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Secret, requireArk bool, proxy string) chatgpt_types.ChatGPTRequest {

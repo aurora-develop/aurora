@@ -1,10 +1,6 @@
 package chatgpt
 
 import (
-	"aurora/httpclient"
-	"aurora/internal/tokens"
-	"aurora/typings"
-	chatgpt_types "aurora/typings/chatgpt"
 	"bufio"
 	"bytes"
 	"context"
@@ -21,18 +17,19 @@ import (
 	"sync"
 	"time"
 
+	chatgpt_response_converter "aurora/conversion/response/chatgpt"
+	"aurora/httpclient"
+	"aurora/internal/tokens"
+	"aurora/typings"
+	chatgpt_types "aurora/typings/chatgpt"
+	official_types "aurora/typings/official"
+
 	"github.com/aurorax-neo/go-logger"
-
-	"github.com/gorilla/websocket"
-
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
-
-	chatgpt_response_converter "aurora/conversion/response/chatgpt"
-
-	official_types "aurora/typings/official"
+	"github.com/gorilla/websocket"
 )
 
 type connInfo struct {

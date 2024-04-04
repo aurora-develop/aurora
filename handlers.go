@@ -1,12 +1,12 @@
 package main
 
 import (
+	"strings"
+
 	chatgpt_request_converter "aurora/conversion/requests/chatgpt"
 	"aurora/httpclient"
 	"aurora/internal/chatgpt"
-
 	official_types "aurora/typings/official"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
