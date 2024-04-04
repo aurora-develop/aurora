@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/google/uuid"
 	"fmt"
 	"io"
 	"net/http"
@@ -237,7 +236,6 @@ func InitTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 }
 
 func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy string) (*chatgpt_types.RequirementsResponse, error) {
-
 	if proxy != "" {
 		client.Client.SetProxy(proxy)
 	}
@@ -254,22 +252,14 @@ func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 		SetResult(&result).
 		Post(apiUrl)
 	if err != nil {
-
-		return response, err
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", err))
+		return nil, err
 	}
-	if response.StatusCode == 401 {
-		if secret.IsFree {
-			if retry > 3 {
-				return response, err
-			}
-			time.Sleep(time.Second) // wait 1s to get ws url
-			secret.Token = uuid.NewString()
-			return POSTTurnStile(secret, proxy, retry+1)
-		}
+	if response.StatusCode() != 200 {
+		logger.Logger.Debug(fmt.Sprint("POSTTurnStile: ", response.String()))
+		return nil, errors.New("error sending request")
 	}
-
-	return response, err
-
+	return result, err
 }
 
 var urlAttrMap = make(map[string]string)
@@ -762,6 +752,7 @@ func GETTokenForRefreshToken(refresh_token string, proxy string) (interface{}, i
 	if err != nil {
 		return nil, 0, err
 	}
+
 	req, _ := fhttp.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 	req.Header.Set("authority", "auth0.openai.com")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
@@ -787,6 +778,7 @@ func GETTokenForSessionToken(session_token string, proxy string) (interface{}, i
 	}
 	url := "https://chat.openai.com/api/auth/session"
 	req, _ := fhttp.NewRequest("GET", url, nil)
+
 	req.Header.Set("authority", "chat.openai.com")
 	req.Header.Set("accept-language", "zh-CN,zh;q=0.9")
 	req.Header.Set("User-Agent", userAgent)
@@ -810,7 +802,9 @@ func GETTokenForSessionToken(session_token string, proxy string) (interface{}, i
 	openai_sessionToken := official_types.NewOpenAISessionToken(session_token, result.AccessToken)
 	return openai_sessionToken, resp.StatusCode, nil
 }
+
 func parseCookies(cookies []*fhttp.Cookie) map[string]string {
+
 	cookieDict := make(map[string]string)
 	for _, cookie := range cookies {
 		cookieDict[cookie.Name] = cookie.Value
