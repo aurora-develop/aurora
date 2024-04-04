@@ -11,3 +11,11 @@ type api_message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
+
+type OpenAISessionToken struct {
+	SessionToken string `json:"session_token"`
+}
+
+type OpenAIRefreshToken struct {
+	RefreshToken string `json:"refresh_token"`
+}
