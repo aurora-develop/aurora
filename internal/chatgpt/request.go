@@ -245,7 +245,7 @@ func POSTTurnStile(client *httpclient.RestyClient, secret *tokens.Secret, proxy 
 	if secret.IsFree {
 		client.Client.SetHeader("oai-device-id", secret.Token)
 	}
-	path := "/backend-api/sentinel/chat-requirements"
+	path := "/backend-anon/sentinel/chat-requirements"
 	var result *chatgpt_types.RequirementsResponse
 	response, err := client.Client.R().
 		SetBody(`{"conversation_mode_kind":"primary_assistant"}`).
