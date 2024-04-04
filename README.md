@@ -1,5 +1,7 @@
 # AURORA
 
+免费的GPT3.5 api
+
 ## Deploy
 
 
