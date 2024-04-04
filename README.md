@@ -50,6 +50,8 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
 
 ## 高级设置
 
+默认情况不需要设置，除非你有需求
+
 ### 环境变量
 ```
 Authorization=your_authorization
