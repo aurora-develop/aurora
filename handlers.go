@@ -1,14 +1,13 @@
 package main
 
 import (
-	"strings"
-
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
-	"aurora/httpclient"
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
+
 	officialtypes "aurora/typings/official"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,16 +20,6 @@ type Handler struct {
 
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
 	return &Handler{proxy: proxy, token: token}
-}
-
-func optionsHandler(c *gin.Context) {
-	// Set headers for CORS
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Methods", "POST")
-	c.Header("Access-Control-Allow-Headers", "*")
-	c.JSON(200, gin.H{
-		"message": "pong",
-	})
 }
 
 func (h *Handler) refresh(c *gin.Context) {
@@ -85,6 +74,68 @@ func (h *Handler) session(c *gin.Context) {
 	c.JSON(status, openaiSessionToken)
 }
 
+func optionsHandler(c *gin.Context) {
+	// Set headers for CORS
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Allow-Methods", "POST")
+	c.Header("Access-Control-Allow-Headers", "*")
+	c.JSON(200, gin.H{
+		"message": "pong",
+	})
+}
+
+func (h *Handler) refresh_handler(c *gin.Context) {
+	var refresh_token officialtypes.OpenAIRefreshToken
+	err := c.BindJSON(&refresh_token)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	proxy_url := h.proxy.GetProxyIP()
+	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(refresh_token.RefreshToken, proxy_url)
+	if err != nil {
+		c.JSON(400, gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		})
+		return
+	}
+	c.JSON(status, openaiRefreshToken)
+}
+
+func (h *Handler) session_handler(c *gin.Context) {
+	var session_token officialtypes.OpenAISessionToken
+	err := c.BindJSON(&session_token)
+	if err != nil {
+		c.JSON(400, gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		})
+		return
+	}
+	proxy_url := h.proxy.GetProxyIP()
+	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(session_token.SessionToken, proxy_url)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	c.JSON(status, openaiSessionToken)
+}
+
 func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
@@ -98,7 +149,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 
-	proxyUrl := h.proxy.GetProxyIP()
+	proxy_url := h.proxy.GetProxyIP()
 	secret := h.token.GetSecret()
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
@@ -113,9 +164,8 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 
-	client := httpclient.NewStdClient()
 	uid := uuid.NewString()
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := chatgpt.InitTurnStile(secret, proxy_url)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -126,7 +176,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	if !secret.IsFree {
-		err = chatgpt.InitWSConn(secret.Token, uid, proxyUrl)
+		err = chatgpt.InitWSConn(secret.Token, uid, proxy_url)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
 			return
@@ -134,9 +184,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 
 	// Convert the chat request to a ChatGPT request
-	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
+	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxy_url)
 
-	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+	response, err := chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "error sending request",
@@ -162,9 +212,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 		translated_request.ParentMessageID = continue_info.ParentID
 
 		if turnStile.Arkose {
-			chatgptrequestconverter.RenewTokenForRequest(&translated_request, secret.PUID, proxyUrl)
+			chatgptrequestconverter.RenewTokenForRequest(&translated_request, secret.PUID, proxy_url)
 		}
-		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+		response, err = chatgpt.POSTconversation(translated_request, secret, turnStile, proxy_url)
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "error sending request",
@@ -187,8 +237,8 @@ func (h *Handler) nightmare(c *gin.Context) {
 	chatgpt.UnlockSpecConn(secret.Token, uid)
 }
 
-func (h *Handler) engines(c *gin.Context) {
-	proxyUrl := h.proxy.GetProxyIP()
+func (h *Handler) engines_handler(c *gin.Context) {
+	proxy_url := h.proxy.GetProxyIP()
 	secret := h.token.GetSecret()
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
@@ -198,12 +248,12 @@ func (h *Handler) engines(c *gin.Context) {
 			secret = h.token.GenerateTempToken(customAccessToken)
 		}
 	}
-	if secret == nil || secret.Token == "" {
+	if secret.Token == "" || secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
 		return
 	}
 
-	resp, status, err := chatgpt.GETengines(secret, proxyUrl)
+	resp, status, err := chatgpt.GETengines(secret, proxy_url)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "error sending request",
