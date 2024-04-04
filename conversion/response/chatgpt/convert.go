@@ -1,10 +1,11 @@
 package chatgpt
 
 import (
+	"strings"
+
 	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
-	"strings"
 )
 
 func ConvertToString(chatgpt_response *chatgpt_types.ChatGPTResponse, previous_text *typings.StringStruct, role bool) string {
