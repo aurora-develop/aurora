@@ -2,22 +2,7 @@ name: Build Docker Image
 
 branches:
       - main
-workflow_dispatch:
-
-
-env:
-  GHCR_REPO: ghcr.io/aurora-develop/aurora
-
-
-jobs:
-  main:
-    runs-on: ubuntu-latest
-    steps:
-name: Build Docker Image
-
-    branches:
-      - main
-  workflow_dispatch:
+      workflow_dispatch:
 
 
 env:
