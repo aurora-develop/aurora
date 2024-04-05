@@ -6,17 +6,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
+var BaseURL string
+
+func init() {
+	_ = godotenv.Load(".env")
+	BaseURL = os.Getenv("BASE_URL")
+	if BaseURL == "" {
+		BaseURL = "https://chat.openai.com/backend-anon"
+	}
+}
 func TestTlsClient_Request(t *testing.T) {
 	client := NewStdClient()
 	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 	proxy := "http://127.0.0.1:7990"
 	client.SetProxy(proxy)
 
-	apiUrl := "https://chat.openai.com/backend-anon/sentinel/chat-requirements"
+	apiUrl := BaseURL + "/sentinel/chat-requirements"
 	payload := strings.NewReader(`{"conversation_mode_kind":"primary_assistant"}`)
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
