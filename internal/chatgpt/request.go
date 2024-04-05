@@ -13,12 +13,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net/http"
-
-	//http "github.com/bogdanfinn/fhttp"
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
 	"io"
 	"net/url"
 	"os"
@@ -26,6 +20,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
+
+	http "github.com/bogdanfinn/fhttp"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,12 +58,15 @@ var (
 	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 
-func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
+func getWSURL(token string, retry int) (string, error) {
 	requestURL := BaseURL + "/register-websocket"
-	header := make(httpclient.AuroraHeaders)
-	header.Set("User-Agent", userAgent)
-	header.Set("Accept", "*/*")
-	header.Set("Oai-Language", "en-US")
+	request, err := http.NewRequest(http.MethodPost, requestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "*/*")
+	request.Header.Set("Oai-Language", "en-US")
 	if token != "" {
 		header.Set("Authorization", "Bearer "+token)
 	}
@@ -219,7 +223,7 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(client, secret, proxy, 0)
+		response, err := POSTTurnStile(secret, proxy, 0)
 		if err != nil {
 			return nil, response.StatusCode, err
 		}
@@ -240,7 +244,7 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	}
 	return currTurnToken, 0, nil
 }
-func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
+func POSTTurnStile(secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -270,7 +274,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		}
 		time.Sleep(time.Second * 2)
 		secret.Token = uuid.NewString()
-		return POSTTurnStile(client, secret, proxy, retry+1)
+		return POSTTurnStile(secret, proxy, retry+1)
 	}
 	return response, err
 }
@@ -282,10 +286,13 @@ type urlAttr struct {
 	Attribution string `json:"attribution"`
 }
 
-func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, puid string, url string) string {
+func getURLAttribution(access_token string, puid string, url string) string {
 	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
-	header := make(httpclient.AuroraHeaders)
+	request, err := http.NewRequest(http.MethodPost, requestURL, payload)
+	if err != nil {
+		return ""
+	}
 	if puid != "" {
 		header.Set("Cookie", "_puid="+puid+";")
 	}
@@ -380,13 +387,13 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 		client.SetProxy(proxy)
 	}
 	reqUrl := BaseURL + "/models"
-	header := make(httpclient.AuroraHeaders)
-	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
-	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	req, _ := http.NewRequest("GET", reqUrl, nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("oai-language", "en-US")
+	req.Header.Set("origin", "https://chat.openai.com")
+	req.Header.Set("referer", "https://chat.openai.com/")
 
 	if !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)

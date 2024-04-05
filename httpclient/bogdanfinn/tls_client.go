@@ -2,11 +2,12 @@ package bogdanfinn
 
 import (
 	"aurora/httpclient"
+	"io"
+	"net/http"
+
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
-	"io"
-	"net/http"
 )
 
 type TlsClient struct {
@@ -74,10 +75,7 @@ func (t *TlsClient) handleCookies(req *fhttp.Request, cookies []*http.Cookie) {
 }
 
 func (t *TlsClient) Request(method httpclient.HttpMethod, url string, headers httpclient.AuroraHeaders, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
-	req, err := fhttp.NewRequest(string(method), url, body)
-	if err != nil {
-		return nil, err
-	}
+	req, _ := fhttp.NewRequest(string(method), url, body)
 	t.handleHeaders(req, headers)
 	t.handleCookies(req, cookies)
 	do, err := t.Client.Do(req)
