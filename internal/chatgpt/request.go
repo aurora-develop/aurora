@@ -16,6 +16,7 @@ import (
 	"net/http"
 
 	//http "github.com/bogdanfinn/fhttp"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -26,7 +27,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/gin-gonic/gin"
 )
 
 var BaseURL string
@@ -213,7 +213,7 @@ type TurnStile struct {
 	ExpireAt       time.Time
 }
 
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
+func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*TurnStile, int, error) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
@@ -223,11 +223,15 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 			return nil, response.StatusCode, err
 		}
 		defer response.Body.Close()
-		if response.StatusCode != 200 {
+		if response.StatusCode != 200 && retry > 0 {
+			return InitTurnStile(client, secret, proxy, retry-1)
+		} else if retry <= 0 {
 			return nil, response.StatusCode, errors.New("response status code is not 200")
 		}
 		var result chatgpt_types.RequirementsResponse
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil && retry > 0 {
+			return InitTurnStile(client, secret, proxy, retry-1)
+		} else if err != nil && retry <= 0 {
 			return nil, response.StatusCode, err
 		}
 		currTurnToken = &TurnStile{
@@ -309,7 +313,7 @@ func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, 
 	return attr.Attribution
 }
 
-func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
+func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -349,6 +353,9 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 		header.Set("oai-device-id", secret.Token)
 	}
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
+	if err != nil && retry > 0 {
+		return POSTconversation(client, message, secret, chat_token, proxy, retry+1)
+	}
 	return response, err
 }
 
