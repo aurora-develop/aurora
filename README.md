@@ -62,7 +62,8 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
 
 ### 环境变量
 ```
-BASE_URL="https://chat.openai.com/backend-anon"
+
+BASE_URL="https://auroraxf.glitch.me/api"
 Authorization=your_authorization
 TLS_CERT=path_to_your_tls_cert
 TLS_KEY=path_to_your_tls_key
