@@ -1,9 +1,11 @@
 package chatgpt
 
 import (
+	"aurora/conversion/response/chatgpt"
 	"aurora/internal/tokens"
 	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
+	official_types "aurora/typings/official"
 	"bufio"
 	"bytes"
 	"context"
@@ -18,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-
 	"github.com/gorilla/websocket"
 
 	http "github.com/bogdanfinn/fhttp"
@@ -26,7 +27,6 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 )
 
 type connInfo struct {
@@ -676,7 +676,7 @@ func Handler(c *gin.Context, response *http.Response, secret *tokens.Secret, uui
 				response_string = "data: " + translated_response.String() + "\n\n"
 			}
 			if response_string == "" {
-				response_string = chatgpt_response_converter.ConvertToString(&original_response, &previous_text, isRole)
+				response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole)
 			}
 			if response_string == "" {
 				if isEnd {
