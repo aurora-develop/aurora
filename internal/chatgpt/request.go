@@ -18,16 +18,15 @@ import (
 	"sync"
 	"time"
 
+
 	"github.com/gorilla/websocket"
 
 	http "github.com/bogdanfinn/fhttp"
+
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
-
-	chatgpt_response_converter "aurora/conversion/response/chatgpt"
-
-	official_types "aurora/typings/official"
+	"github.com/gorilla/websocket"
 )
 
 type connInfo struct {
@@ -53,6 +52,7 @@ var (
 )
 
 func getWSURL(token string, retry int) (string, error) {
+
 	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-api/register-websocket", nil)
 	if err != nil {
 		return "", err
@@ -64,6 +64,7 @@ func getWSURL(token string, retry int) (string, error) {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := client.Do(request)
+
 	if err != nil {
 		if retry > 3 {
 			return "", err
@@ -216,6 +217,7 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
+
 		response, err := POSTTurnStile(secret, proxy)
 		if err != nil {
 			return nil, response.StatusCode, err
@@ -237,7 +239,6 @@ func InitTurnStile(secret *tokens.Secret, proxy string) (*TurnStile, int, error)
 	}
 	return currTurnToken, 0, nil
 }
-
 func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
@@ -651,7 +652,7 @@ func Handler(c *gin.Context, response *http.Response, secret *tokens.Secret, uui
 				continue
 			}
 			if original_response.Message.Content.ContentType == "multimodal_text" {
-				apiUrl := "https://chat.openai.com/backend-api/files/"
+				apiUrl := "https://chat.openai.com/backend-anon/files/"
 				if FILES_REVERSE_PROXY != "" {
 					apiUrl = FILES_REVERSE_PROXY
 				}
