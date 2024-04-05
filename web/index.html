@@ -2413,10 +2413,33 @@
                         </svg>
                     </div>
                 </div>
-                <div class="divider"></div>
+                <style>
+                    .link {
+                        border-right: 1px solid white;
+                        padding-right: 10px;
+                        margin-right: 10px;
+                    }
+                
+                    @media (prefers-color-scheme: dark) {
+                        .link {
+                            border-right-color: white;
+                        }
+                    }
+                
+                    @media (prefers-color-scheme: light) {
+                        .link {
+                            border-right-color: black;
+                        }
+                    }
+                
+                    .link:last-child {
+                        border-right: none;
+                    }
+                </style>
+                
                 <div class="links">
-                    <a href="https://github.com/xqdoo00o/chatgpt-web" target="_blank"
-                        rel="noopener noreferrer">Github</a>
+                    <a class="link" href="https://github.com/aurora-develop/aurora" target="_blank" rel="noopener noreferrer">Aurora</a>
+                    <a class="link" href="https://github.com/xqdoo00o/chatgpt-web" target="_blank" rel="noopener noreferrer">chatgpt-web</a>
                 </div>
             </div>
         </nav>
