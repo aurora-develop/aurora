@@ -2,7 +2,9 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-免费的GPT3.5 api
+（带UI）免费的GPT3.5
+
+# Web端 访问 http://127.0.0.1:8080/web 即可
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
 
