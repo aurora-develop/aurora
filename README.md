@@ -1,5 +1,7 @@
 # AURORA
 
+[README_EN.MD](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
+
 免费的GPT3.5 api
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用
