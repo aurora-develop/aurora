@@ -1,14 +1,12 @@
-package httpclient
+package resty
 
 import (
-	"crypto/tls"
-	"net/http"
-	"time"
-
 	"aurora/util"
-
+	"crypto/tls"
 	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/go-resty/resty/v2"
+	"net/http"
+	"time"
 )
 
 type RestyClient struct {
@@ -49,3 +47,26 @@ func NewStdClient() *RestyClient {
 		SetHeader("sec-fetch-site", "same-origin")
 	return client
 }
+
+//func (c *RestyClient) Request(method string, url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+
+//func (c *RestyClient) Post(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) Get(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) Head(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) Options(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) Put(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) Delete(url string, headers map[string]string, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+//}
+//
+//func (c *RestyClient) SetProxy(url string) error {}

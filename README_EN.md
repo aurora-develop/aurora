@@ -1,19 +1,15 @@
 # AURORA
 
-[README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
+A free GPT-3.5 API
 
-（带UI）免费的GPT3.5，支持使用3.5的access 调用
-
-# Web端 访问 http://127.0.0.1:8080/web 即可
-
-### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
+### Note: Only IPs from supported regions can use ChatGPT without logging in
 
 ## Deploy
 
-### Render部署
+### Render Deployment
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
-### 编译部署
+### Compilation Deployment
 
 ```bash
 git clone https://github.com/aurora-develop/aurora
@@ -23,9 +19,9 @@ chmod +x ./aurora
 ./aurora
 ```
 
-### Docker部署
-## Docker部署
-您需要安装Docker和Docker Compose。
+### Docker Deployment
+## Docker Deployment
+You need to install Docker and Docker Compose.
 
 ```bash
 docker run -d \
@@ -34,13 +30,13 @@ docker run -d \
   ghcr.io/aurora-develop/aurora:latest
 ```
 
-## Docker Compose部署
-创建一个新的目录，例如aurora-app，并进入该目录：
+## Docker Compose Deployment
+Create a new directory, for example, aurora-app, and enter it:
 ```bash
 mkdir aurora
 cd aurora
 ```
-在此目录中下载库中的docker-compose.yml文件：
+In this directory, download the docker-compose.yml file from the library:
 
 ```bash
 docker-compose up -d
@@ -58,27 +54,23 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
    }'
 ```
 
-## 高级设置
+## Advanced Settings
 
-默认情况不需要设置，除非你有需求
+Default settings do not need to be adjusted unless you have specific requirements
 
-### 环境变量
+### Environment Variables
 ```
-
-BASE_URL="https://auroraxf.glitch.me/api"
 Authorization=your_authorization
 TLS_CERT=path_to_your_tls_cert
 TLS_KEY=path_to_your_tls_key
 PROXY_URL=your_proxy_url
 ```
 
-## 鸣谢
+## Acknowledgments
 
-感谢各位大佬的pr支持，感谢。
+Thank you for the PR support from various contributors, much appreciated.
 
-
-## 参考项目
-
+## Reference Projects
 
 https://github.com/xqdoo00o/ChatGPT-to-API
 
