@@ -2,7 +2,7 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-（带UI）免费的GPT3.5
+（带UI）免费的GPT3.5，支持使用3.5的access 调用
 
 # Web端 访问 http://127.0.0.1:8080/web 即可
 
