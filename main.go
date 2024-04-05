@@ -1,14 +1,11 @@
 package main
 
 import (
-	"aurora/internal/chatgpt"
+	"aurora/internal/proxys"
 	"bufio"
 	"log/slog"
 	"net/url"
 	"os"
-	"strings"
-
-	"aurora/internal/proxys"
 
 	"github.com/acheong08/endless"
 	"github.com/gin-gonic/gin"
@@ -107,68 +104,4 @@ func main() {
 	} else {
 		_ = endless.ListenAndServe(host+":"+port, router)
 	}
-}
-func (h *Handler) engines(c *gin.Context) {
-	proxyUrl := h.proxy.GetProxyIP()
-	secret := h.token.GetSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		// Check if customAccessToken starts with sk-
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
-	}
-	if secret == nil || secret.Token == "" {
-		c.JSON(400, gin.H{"error": "Not Account Found."})
-		return
-	}
-
-	resp, status, err := chatgpt.GETengines(secret, proxyUrl)
-	if err != nil {
-		c.JSON(500, gin.H{
-			"error": "error sending request",
-		})
-		return
-	}
-
-	type ResData struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int    `json:"created"`
-		OwnedBy string `json:"owned_by"`
-	}
-
-	type JSONData struct {
-		Object string    `json:"object"`
-		Data   []ResData `json:"data"`
-	}
-
-	modelS := JSONData{
-		Object: "list",
-	}
-	var resModelList []ResData
-	if len(resp.Models) > 2 {
-		res_data := ResData{
-			ID:      "gpt-4-mobile",
-			Object:  "model",
-			Created: 1685474247,
-			OwnedBy: "openai",
-		}
-		resModelList = append(resModelList, res_data)
-	}
-	for _, model := range resp.Models {
-		res_data := ResData{
-			ID:      model.Slug,
-			Object:  "model",
-			Created: 1685474247,
-			OwnedBy: "openai",
-		}
-		if model.Slug == "text-davinci-002-render-sha" {
-			res_data.ID = "gpt-3.5-turbo"
-		}
-		resModelList = append(resModelList, res_data)
-	}
-	modelS.Data = resModelList
-	c.JSON(status, modelS)
 }
