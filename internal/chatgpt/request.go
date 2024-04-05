@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
 
 	http "github.com/bogdanfinn/fhttp"
 
@@ -28,6 +29,16 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
 )
+
+var BaseURL string
+
+func init() {
+	_ = godotenv.Load(".env")
+	BaseURL = os.Getenv("BASE_URL")
+	if BaseURL == "" {
+		BaseURL = "https://chat.openai.com/backend-anon"
+	}
+}
 
 type connInfo struct {
 	conn   *websocket.Conn
@@ -52,7 +63,8 @@ var (
 )
 
 func getWSURL(token string, retry int) (string, error) {
-	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-anon/register-websocket", nil)
+	requestURL := BaseURL + "/register-websocket"
+	request, err := http.NewRequest(http.MethodPost, requestURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +254,7 @@ func POSTTurnStile(secret *tokens.Secret, proxy string) (*http.Response, error) 
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	apiUrl := "https://chat.openai.com/backend-anon/sentinel/chat-requirements"
+	apiUrl := BaseURL + "/sentinel/chat-requirements"
 	payload := strings.NewReader(`{"conversation_mode_kind":"primary_assistant"}`)
 	request, err := http.NewRequest(http.MethodPost, apiUrl, payload)
 	if err != nil {
@@ -275,7 +287,9 @@ type urlAttr struct {
 }
 
 func getURLAttribution(access_token string, puid string, url string) string {
-	request, err := http.NewRequest(http.MethodPost, "https://chat.openai.com/backend-anon/attributions", bytes.NewBuffer([]byte(`{"urls":["`+url+`"]}`)))
+	requestURL := BaseURL + "/attributions"
+	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
+	request, err := http.NewRequest(http.MethodPost, requestURL, payload)
 	if err != nil {
 		return ""
 	}
@@ -310,7 +324,7 @@ func POSTconversation(message chatgpt_types.ChatGPTRequest, secret *tokens.Secre
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	apiUrl := "https://chat.openai.com/backend-anon/conversation"
+	apiUrl := BaseURL + "/conversation"
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
@@ -379,7 +393,7 @@ func GETengines(secret *tokens.Secret, proxy string) (*EnginesData, int, error) 
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	reqUrl := "https://chat.openai.com/backend-anon/models"
+	reqUrl := BaseURL + "/models"
 	req, _ := http.NewRequest("GET", reqUrl, nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
@@ -651,7 +665,7 @@ func Handler(c *gin.Context, response *http.Response, secret *tokens.Secret, uui
 				continue
 			}
 			if original_response.Message.Content.ContentType == "multimodal_text" {
-				apiUrl := "https://chat.openai.com/backend-anon/files/"
+				apiUrl := BaseURL + "/files/"
 				if FILES_REVERSE_PROXY != "" {
 					apiUrl = FILES_REVERSE_PROXY
 				}
