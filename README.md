@@ -4,7 +4,7 @@
 
 免费的GPT3.5 api
 
-### 注：仅ip属地支持免登录使用ChatGpt可以使用
+### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
 
 ## Deploy
 
@@ -62,6 +62,7 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
 
 ### 环境变量
 ```
+BASE_URL="https://chat.openai.com/backend-anon"
 Authorization=your_authorization
 TLS_CERT=path_to_your_tls_cert
 TLS_KEY=path_to_your_tls_key
