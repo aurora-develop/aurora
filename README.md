@@ -16,7 +16,7 @@ https://t.me/aurora_develop
 ## Deploy
 
 ### Vercel部署
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fxiaozhou26%2Fdeeplx-pro&env=STREAM_MODE=False&project-name=deeplx-pro&repository-name=deeplx-pro)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faurora-develop%2Faurora&env=STREAM_MODE=False&project-name=aurora&repository-name=aurora)
 
 ### Render部署
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
