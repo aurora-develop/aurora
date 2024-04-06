@@ -15,7 +15,7 @@ FROM alpine:latest
 WORKDIR /app
 
 COPY --from=builder /app/aurora /app/aurora
-COPY harpool /app/harpool
+COPY harPool /app/harPool
 
 EXPOSE 8080
 
