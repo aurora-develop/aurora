@@ -29,4 +29,4 @@ COPY harPool /app/harPool
 EXPOSE 8080
 
 # 运行应用，重定向日志输出到 /dev/null
-CMD [ "/bin/sh", "-c", "./aurora > /dev/null 2>&1" ]
+CMD ["/app/aurora"]
