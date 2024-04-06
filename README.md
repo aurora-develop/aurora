@@ -4,6 +4,9 @@
 
 （带UI）免费的GPT3.5，支持使用3.5的access 调用
 
+# 交流群
+https://t.me/aurora_develop
+
 # Web端 
 访问 http://127.0.0.1:8080/web 即可
 
