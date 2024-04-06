@@ -16,7 +16,8 @@ https://t.me/aurora_develop
 
 ### Render部署
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-
+### Koyeb部署
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
 ### 编译部署
 
 ```bash
