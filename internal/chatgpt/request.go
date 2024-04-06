@@ -157,9 +157,6 @@ func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, p
 			return err
 		}
 		createWSConn(client, wssURL, connInfo, 0)
-		if err != nil {
-			return err
-		}
 		return nil
 	} else {
 		ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*100)
