@@ -9,6 +9,7 @@ import (
 	officialtypes "aurora/typings/official"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"os"
 	"strings"
 )
 
@@ -204,6 +205,10 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	var full_response string
+
+	if os.Getenv("STREAM_MODE") == "false" {
+		original_request.Stream = false
+	}
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string

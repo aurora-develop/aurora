@@ -2,10 +2,10 @@ package main
 
 import (
 	"aurora/initialize"
+	"github.com/gin-gonic/gin"
 	"os"
 
 	"github.com/acheong08/endless"
-	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
