@@ -225,14 +225,14 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		defer response.Body.Close()
 		if response.StatusCode != 200 && retry > 0 {
 			return InitTurnStile(client, secret, proxy, retry-1)
-		} else if retry <= 0 {
-			return nil, response.StatusCode, errors.New("response status code is not 200")
 		}
 		var result chatgpt_types.RequirementsResponse
 		if err := json.NewDecoder(response.Body).Decode(&result); err != nil && retry > 0 {
 			return InitTurnStile(client, secret, proxy, retry-1)
-		} else if err != nil && retry <= 0 {
-			return nil, response.StatusCode, err
+		}
+		//  retry stop
+		if retry <= 0 {
+			return nil, response.StatusCode, errors.New("retry limit exceeded")
 		}
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
@@ -355,6 +355,10 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
 	if err != nil && retry > 0 {
 		return POSTconversation(client, message, secret, chat_token, proxy, retry-1)
+	}
+	//  retry stop
+	if retry <= 0 {
+		return nil, errors.New("retry limit exceeded")
 	}
 	return response, err
 }
