@@ -29,7 +29,7 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 		}
 	}
 	if requireArk {
-		token, err := arkose.GetOpenAIToken(api_version, secret.PUID, proxy)
+		token, err := arkose.GetOpenAIToken(api_version, secret.PUID, "", proxy)
 		if err == nil {
 			chatgpt_request.ArkoseToken = token
 		} else {
@@ -57,7 +57,7 @@ func RenewTokenForRequest(request *chatgpt_types.ChatGPTRequest, puid string, pr
 	} else {
 		api_version = 3
 	}
-	token, err := arkose.GetOpenAIToken(api_version, puid, proxy)
+	token, err := arkose.GetOpenAIToken(api_version, puid, "", proxy)
 	if err == nil {
 		request.ArkoseToken = token
 	} else {

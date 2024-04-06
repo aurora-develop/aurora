@@ -15,7 +15,6 @@ import (
 	"errors"
 	"net/http"
 
-	//http "github.com/bogdanfinn/fhttp"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"

@@ -1,4 +1,4 @@
-package main
+package initialize
 
 import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"

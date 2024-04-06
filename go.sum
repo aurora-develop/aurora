@@ -12,10 +12,16 @@ github.com/aurorax-neo/go-logger v0.0.0-20240331061645-18b054649449 h1:rDAVeb3Vw
 github.com/aurorax-neo/go-logger v0.0.0-20240331061645-18b054649449/go.mod h1:BJsRG1ECcXTHwiz2zaMYxFkeXh+MpQVs6nWYphLT244=
 github.com/bogdanfinn/fhttp v0.5.24 h1:OlyBKjvJp6a3TotN3wuj4mQHHRbfK7QUMrzCPOZGhRc=
 github.com/bogdanfinn/fhttp v0.5.24/go.mod h1:brqi5woc5eSCVHdKYBV8aZLbO7HGqpwyDLeXW+fT18I=
+github.com/bogdanfinn/fhttp v0.5.27 h1:+glR3k8v5nxfUSk7+J3M246zEQ2yadhS0vLq1utK71A=
+github.com/bogdanfinn/fhttp v0.5.27/go.mod h1:oJiYPG3jQTKzk/VFmogH8jxjH5yiv2rrOH48Xso2lrE=
 github.com/bogdanfinn/tls-client v1.6.1 h1:GTIqQssFoIvLaDf4btoYRzDhUzudLqYD4axvfUCXl3I=
 github.com/bogdanfinn/tls-client v1.6.1/go.mod h1:FtwQ3DndVZ0xAOO704v4iNAgbHOcEc5kPk9tjICTNQ0=
+github.com/bogdanfinn/tls-client v1.7.2 h1:vpL5qBYUfT9ueygEf1yLfymrXyUEZQatL25amfqGV8M=
+github.com/bogdanfinn/tls-client v1.7.2/go.mod h1:pOGa2euqTbEkGNqE5idx5jKKfs9ytlyn3fwEw8RSP+g=
 github.com/bogdanfinn/utls v1.5.16 h1:NhhWkegEcYETBMj9nvgO4lwvc6NcLH+znrXzO3gnw4M=
 github.com/bogdanfinn/utls v1.5.16/go.mod h1:mHeRCi69cUiEyVBkKONB1cAbLjRcZnlJbGzttmiuK4o=
+github.com/bogdanfinn/utls v1.6.1 h1:dKDYAcXEyFFJ3GaWaN89DEyjyRraD1qb4osdEK89ass=
+github.com/bogdanfinn/utls v1.6.1/go.mod h1:VXIbRZaiY/wHZc6Hu+DZ4O2CgTzjhjCg/Ou3V4r/39Y=
 github.com/bytedance/sonic v1.5.0/go.mod h1:ED5hyg4y6t3/9Ku1R6dU/4KyJ48DZ4jPhfY1O2AihPM=
 github.com/bytedance/sonic v1.10.0-rc/go.mod h1:ElCzW+ufi8qKqNW0FY314xriJhyJhuoJ3gFZdAHF7NM=
 github.com/bytedance/sonic v1.10.1 h1:7a1wuFXL1cMy7a3f7/VFcEtriuXQnUBhtoVfOZiaysc=
@@ -26,6 +32,8 @@ github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d h1:77cEq6EriyTZ
 github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d/go.mod h1:8EPpVsBuRksnlj1mLy4AWzRNQYxauNi62uWcE3to6eA=
 github.com/chenzhuoyu/iasm v0.9.0 h1:9fhXjVzq5hUy2gkhhgHl95zG2cEAhw9OSGs8toWWAwo=
 github.com/chenzhuoyu/iasm v0.9.0/go.mod h1:Xjy2NpN3h7aUqeqM+woSuuvxmIe6+DDsiNLIrkAmYog=
+github.com/cloudflare/circl v1.3.6 h1:/xbKIqSHbZXHwkhbrhrt2YOHIwYJlXH94E3tI/gDlUg=
+github.com/cloudflare/circl v1.3.6/go.mod h1:5XYMA4rFBvNIrhs50XuiBJ15vF2pZn4nnUKZrLbUZFA=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -78,6 +86,8 @@ github.com/pelletier/go-toml/v2 v2.1.0 h1:FnwAJ4oYMvbT/34k9zzHuZNrhlz48GB3/s6at6
 github.com/pelletier/go-toml/v2 v2.1.0/go.mod h1:tJU2Z3ZkXwnxa4DPO899bsyIoywizdUvyaeZurnPPDc=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/quic-go/quic-go v0.37.4 h1:ke8B73yMCWGq9MfrCCAw0Uzdm7GaViC3i39dsIdDlH4=
+github.com/quic-go/quic-go v0.37.4/go.mod h1:YsbH1r4mSHPJcLF4k4zruUkLBqctEMBDR6VPvcYjIsU=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
@@ -97,6 +107,8 @@ github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4d
 github.com/ugorji/go/codec v1.2.11/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
 github.com/xqdoo00o/funcaptcha v0.0.0-20240313153914-4ab805804232 h1:K8+8YdWdDzmmhVqNflEXV4RLpZPf56wwxo0k0nAtQO4=
 github.com/xqdoo00o/funcaptcha v0.0.0-20240313153914-4ab805804232/go.mod h1:7aCyoW5MHDUsoooMVLqKe0F7W9HMPUvDG3bXqw++8XA=
+github.com/xqdoo00o/funcaptcha v0.0.0-20240403090732-1b604d808f6c h1:nj17XsSTwprsZUDXLldOUZmqz7VlHsLCeXXFOE6Q+Mk=
+github.com/xqdoo00o/funcaptcha v0.0.0-20240403090732-1b604d808f6c/go.mod h1:7aCyoW5MHDUsoooMVLqKe0F7W9HMPUvDG3bXqw++8XA=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
 go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
