@@ -102,7 +102,10 @@ func main() {
 
 	_ = godotenv.Load(".env")
 	host := os.Getenv("SERVER_HOST")
-	port := os.Getenv("SERVER_PORT")
+	port := os.Getenv("PORT") // 在heroku中部署，无法指定端口，必须获取PORT环境变量作为web端口
+	if port == "" {
+		port = os.Getenv("SERVER_PORT")
+	}
 	tlsCert := os.Getenv("TLS_CERT")
 	tlsKey := os.Getenv("TLS_KEY")
 
