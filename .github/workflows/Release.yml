@@ -6,7 +6,6 @@ on:
       - 'v*'
 
 jobs:
-
   release:
     name: Release
     runs-on: ubuntu-latest
@@ -35,7 +34,6 @@ jobs:
             "darwin/amd64"
             "windows/386"
             "linux/386"
-            "darwin/386"
             "linux/arm"
             "linux/arm64"
         )
