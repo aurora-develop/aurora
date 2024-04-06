@@ -28,5 +28,4 @@ COPY harPool /app/harPool
 # 暴露端口
 EXPOSE 8080
 
-# 运行应用，重定向日志输出到 /dev/null
 CMD ["/app/aurora"]
