@@ -19,6 +19,8 @@ jobs:
           - os: windows-latest  
             target: windows
           - os: macos-latest
+            target: darwin
+          - os: macos-latest
             target: freebsd
             
     runs-on: ${{ matrix.os }}
