@@ -1,4 +1,4 @@
-package main
+package initialize
 
 import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
@@ -7,9 +7,11 @@ import (
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
 	officialtypes "aurora/typings/official"
+	"os"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"strings"
 )
 
 type Handler struct {
@@ -205,6 +207,10 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	var full_response string
+
+	if os.Getenv("STREAM_MODE") == "false" {
+		original_request.Stream = false
+	}
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string
