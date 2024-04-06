@@ -54,8 +54,12 @@ jobs:
       with:
         name: aurora
         path: bin
-        
-    - name: Create Release
+    - name: Set up permissions
+      run: |
+          git config --global url."https://${{ secrets.GHCR_PAT }}:@github.com/".insteadOf "https://github.com/"
+      env:
+    GHCR_PAT: ${{ secrets.GHCR_PAT }}        
+        - name: Create Release
       uses: ncipollo/release-action@v1
       with:
         artifacts: "bin/*"
