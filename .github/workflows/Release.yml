@@ -9,21 +9,7 @@ jobs:
 
   release:
     name: Release
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        arch: [amd64, arm64]
-        include:
-          - os: ubuntu-latest
-            target: linux
-          - os: windows-latest  
-            target: windows
-          - os: macos-latest
-            target: darwin
-          - os: macos-latest
-            target: freebsd
-            
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v3
@@ -38,25 +24,42 @@ jobs:
     - name: Run tests
       run: go test -v ./...
         
-    - name: Build
-      env:
-        GOARCH: ${{ matrix.arch }}
-        GOOS: ${{ matrix.target }}  
+    - name: Cross compile
       run: |
-        export RELEASE_NAME=aurora-${{ matrix.target }}-${{ matrix.arch }}
-        go build -v -o ${RELEASE_NAME}
-        tar czf ${RELEASE_NAME}.tar.gz ${RELEASE_NAME}
-      
+        go get
+        export CGO_ENABLED=0
+        PKG=aurora
+        targets=(
+            "windows/amd64"
+            "linux/amd64"
+            "darwin/amd64"
+            "windows/386"
+            "linux/386"
+            "darwin/386"
+            "linux/arm"
+            "linux/arm64"
+        )
+        upxPath=$(command -v upx)
+        for target in "${targets[@]}"; do
+            GOOS=${target%/*}
+            GOARCH=${target#*/}
+            output="bin/${GOOS}_${GOARCH}/${PKG}"
+            mkdir -p $(dirname ${output})
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -extldflags '-static'" -o ${output} *.go
+            if [ -n "$upxPath" ]; then
+                $upxPath -9 ${output}
+            fi
+        done
+        
     - name: Upload artifacts
       uses: actions/upload-artifact@v3
       with:
         name: aurora
-        path: aurora-*.tar.gz
+        path: bin
         
     - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "aurora-*.tar.gz"
-        token: ${{ secrets.GHCR_PAT }}
+        artifacts: "bin/*"
+        token: ${{ secrets.GITHUB_TOKEN }}
         generateReleaseNotes: true
