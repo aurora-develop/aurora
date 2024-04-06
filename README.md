@@ -19,6 +19,7 @@ https://t.me/aurora_develop
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
 ### Koyeb部署
+必须更改Base_Url地址才行
 [![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
 
 ### Railway部署
