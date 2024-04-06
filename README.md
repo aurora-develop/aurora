@@ -2,7 +2,14 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-免费的GPT3.5 api
+（带UI）免费的GPT3.5，支持使用3.5的access 调用
+
+# 交流群
+https://t.me/aurora_develop
+
+# Web端 
+访问 http://你的服务器ip:8080/web 即可
+在web设置页面的填写服务器的http://你的服务器ip:8080
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
 
@@ -10,6 +17,16 @@
 
 ### Render部署
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+### Koyeb部署
+地区选美国
+
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
+
+### Railway部署
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/jcl2Es?referralCode=XXqY_5)
+### Zeabur部署
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
 
 ### 编译部署
 
@@ -47,7 +64,7 @@ docker-compose up -d
 ## Usage
 
 ```bash
-curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
+curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 --header 'Content-Type: application/json' \
 --data '{
      "model": "gpt-3.5-turbo",
@@ -62,11 +79,12 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
 
 ### 环境变量
 ```
-BASE_URL="https://chat.openai.com/backend-anon"
-Authorization=your_authorization
-TLS_CERT=path_to_your_tls_cert
-TLS_KEY=path_to_your_tls_key
-PROXY_URL=your_proxy_url
+
+BASE_URL="https://auroraxf.glitch.me/api" 代理网关
+Authorization=your_authorization  用户认证 key。
+TLS_CERT=path_to_your_tls_cert 存储TLS（传输层安全协议）证书的路径。
+TLS_KEY=path_to_your_tls_key 存储TLS（传输层安全协议）证书的路径。
+PROXY_URL=your_proxy_url 添加代理池来。
 ```
 
 ## 鸣谢

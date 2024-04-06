@@ -2,8 +2,9 @@ package main
 
 import (
 	"aurora/initialize"
-	"github.com/gin-gonic/gin"
 	"os"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/acheong08/endless"
 	"github.com/joho/godotenv"
@@ -15,7 +16,7 @@ func main() {
 
 	_ = godotenv.Load(".env")
 	host := os.Getenv("SERVER_HOST")
-	port := os.Getenv("SERVER_PORT")
+	port := os.Getenv("PORT") // 在heroku中部署，无法指定端口，必须获取PORT环境变量作为web端口
 	tlsCert := os.Getenv("TLS_CERT")
 	tlsKey := os.Getenv("TLS_KEY")
 

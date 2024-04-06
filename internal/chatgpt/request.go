@@ -15,9 +15,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
+	//http "github.com/bogdanfinn/fhttp"
 	"io"
 	"net/url"
 	"os"
@@ -27,8 +25,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
 )
 
+var HostURL string
 var BaseURL string
 
 func init() {
@@ -36,6 +38,9 @@ func init() {
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
 		BaseURL = "https://chat.openai.com/backend-anon"
+	}
+	if HostURL == "" {
+		HostURL = "https://chat.openai.com/backend-anon"
 	}
 }
 
@@ -57,7 +62,7 @@ var (
 )
 
 func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
-	requestURL := BaseURL + "/register-websocket"
+	requestURL := HostURL + "/register-websocket"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
@@ -156,7 +161,7 @@ func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, p
 		if err != nil {
 			return err
 		}
-		createWSConn(client, wssURL, connInfo, 0)
+		err = createWSConn(client, wssURL, connInfo, 0)
 		if err != nil {
 			return err
 		}
@@ -213,7 +218,7 @@ type TurnStile struct {
 	ExpireAt       time.Time
 }
 
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
+func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*TurnStile, int, error) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
@@ -223,12 +228,16 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 			return nil, response.StatusCode, err
 		}
 		defer response.Body.Close()
-		if response.StatusCode != 200 {
-			return nil, response.StatusCode, errors.New("response status code is not 200")
+		if response.StatusCode != 200 && retry > 0 {
+			return InitTurnStile(client, secret, proxy, retry-1)
 		}
 		var result chatgpt_types.RequirementsResponse
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-			return nil, response.StatusCode, err
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil && retry > 0 {
+			return InitTurnStile(client, secret, proxy, retry-1)
+		}
+		//  retry stop
+		if retry <= 0 {
+			return nil, response.StatusCode, errors.New("retry limit exceeded")
 		}
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
@@ -282,7 +291,7 @@ type urlAttr struct {
 }
 
 func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, puid string, url string) string {
-	requestURL := BaseURL + "/attributions"
+	requestURL := HostURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
 	header := make(httpclient.AuroraHeaders)
 	if puid != "" {
@@ -309,11 +318,11 @@ func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, 
 	return attr.Attribution
 }
 
-func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
+func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	apiUrl := BaseURL + "/conversation"
+	apiUrl := HostURL + "/conversation"
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
@@ -349,6 +358,13 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 		header.Set("oai-device-id", secret.Token)
 	}
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
+	if err != nil && retry > 0 {
+		return POSTconversation(client, message, secret, chat_token, proxy, retry-1)
+	}
+	//  retry stop
+	if retry <= 0 {
+		return nil, errors.New("retry limit exceeded")
+	}
 	return response, err
 }
 
@@ -378,7 +394,7 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	reqUrl := BaseURL + "/models"
+	reqUrl := HostURL + "/models"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", userAgent)
@@ -629,8 +645,8 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 					attr := urlAttrMap[citation.Metadata.URL]
 					if attr == "" {
 						u, _ := url.Parse(citation.Metadata.URL)
-						baseURL := u.Scheme + "://" + u.Host + "/"
-						attr = getURLAttribution(client, secret.Token, secret.PUID, baseURL)
+						HostURL := u.Scheme + "://" + u.Host + "/"
+						attr = getURLAttribution(client, secret.Token, secret.PUID, HostURL)
 						if attr != "" {
 							urlAttrMap[citation.Metadata.URL] = attr
 						}
@@ -647,7 +663,7 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 				continue
 			}
 			if original_response.Message.Content.ContentType == "multimodal_text" {
-				apiUrl := BaseURL + "/files/"
+				apiUrl := HostURL + "/files/"
 				if FILES_REVERSE_PROXY != "" {
 					apiUrl = FILES_REVERSE_PROXY
 				}

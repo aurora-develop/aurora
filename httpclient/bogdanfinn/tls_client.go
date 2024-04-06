@@ -2,11 +2,11 @@ package bogdanfinn
 
 import (
 	"aurora/httpclient"
+	"io"
+	"net/http"
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
-	"io"
-	"net/http"
 )
 
 type TlsClient struct {
