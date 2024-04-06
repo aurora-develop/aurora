@@ -156,7 +156,7 @@ func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, p
 		if err != nil {
 			return err
 		}
-		createWSConn(client, wssURL, connInfo, 0)
+		err = createWSConn(client, wssURL, connInfo, 0)
 		if err != nil {
 			return err
 		}

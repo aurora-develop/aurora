@@ -4,7 +4,11 @@
 
 （带UI）免费的GPT3.5，支持使用3.5的access 调用
 
-# Web端 访问 http://127.0.0.1:8080/web 即可
+# 交流群
+https://t.me/aurora_develop
+
+# Web端 
+访问 http://127.0.0.1:8080/web 即可
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
 
