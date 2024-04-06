@@ -58,7 +58,7 @@ var (
 	connPool            = map[string][]*connInfo{}
 	poolMutex           = sync.Mutex{}
 	TurnStilePool       = map[string]*TurnStile{}
-	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.0.0 Safari/537.36"
 )
 
 func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
@@ -701,15 +701,15 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 				waitSource = true
 				continue
 			}
+		endProcess:
 			isRole = false
 			if stream {
 				_, err = c.Writer.WriteString(response_string)
 				if err != nil {
 					return "", nil
 				}
+				c.Writer.Flush()
 			}
-		endProcess:
-			c.Writer.Flush()
 
 			if original_response.Message.Metadata.FinishDetails != nil {
 				if original_response.Message.Metadata.FinishDetails.Type == "max_tokens" {
