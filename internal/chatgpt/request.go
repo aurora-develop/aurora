@@ -354,7 +354,7 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	}
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
 	if err != nil && retry > 0 {
-		return POSTconversation(client, message, secret, chat_token, proxy, retry+1)
+		return POSTconversation(client, message, secret, chat_token, proxy, retry-1)
 	}
 	return response, err
 }
