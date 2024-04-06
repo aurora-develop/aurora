@@ -9,6 +9,7 @@ import (
 var router *gin.Engine
 
 func init() {
+	// 初始化gin
 	router = initialize.RegisterRouter()
 }
 
