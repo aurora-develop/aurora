@@ -32,7 +32,10 @@ https://t.me/aurora_develop
 
 ### Railway部署
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/jcl2Es?referralCode=XXqY_5)
+
 ### Zeabur部署
+进入修改镜像名称aurora+任何字母数字
+
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
 
 ### 编译部署
