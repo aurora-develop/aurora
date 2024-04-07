@@ -1,13 +1,38 @@
 # AURORA
 
-A free GPT-3.5 API
+(Free GPT-3.5 with UI) Supports the use of GPT-3.5 through access calls.
 
-### Note: Only IPs from supported regions can use ChatGPT without logging in
+# Communication Group
+https://t.me/aurora_develop
 
-## Deploy
+# Web Interface
+Access http://your-server-ip:8080/web and fill in the server's http://your-server-ip:8080 on the web settings page.
+![web usage](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/2024-04-07%20112100.png)
 
-### Render Deployment
+### Note: Only users in IP regions that support login-free use of ChatGpt can use this (it's also possible to bypass restrictions by customizing Baseurl).
+
+## Deployment
+
+### Deployment on Vercel
+Since Vercel does not support streaming, if deploying on Vercel, please fill in False in STREAM_MODE. It does not support any default streaming client but supports immersive translation.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faurora-develop%2Faurora&env=STREAM_MODE&project-name=aurora&repository-name=aurora)
+
+### Deployment on Render
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+### Deployment on Koyeb
+Choose United States as the region.
+
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
+
+### Deployment on Railway
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/jcl2Es?referralCode=XXqY_5)
+
+### Deployment on Zeabur
+Go in and change the image name to aurora plus any letter or number.
+
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
 
 ### Compilation Deployment
 
@@ -20,7 +45,6 @@ chmod +x ./aurora
 ```
 
 ### Docker Deployment
-## Docker Deployment
 You need to install Docker and Docker Compose.
 
 ```bash
@@ -31,12 +55,12 @@ docker run -d \
 ```
 
 ## Docker Compose Deployment
-Create a new directory, for example, aurora-app, and enter it:
+Create a new directory, for example, aurora-app, and enter that directory:
 ```bash
 mkdir aurora
 cd aurora
 ```
-In this directory, download the docker-compose.yml file from the library:
+In this directory, download the docker-compose.yml file from the repository:
 
 ```bash
 docker-compose up -d
@@ -45,7 +69,7 @@ docker-compose up -d
 ## Usage
 
 ```bash
-curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
+curl --location 'http://your-server-ip:8080/v1/chat/completions' \
 --header 'Content-Type: application/json' \
 --data '{
      "model": "gpt-3.5-turbo",
@@ -56,19 +80,20 @@ curl --location 'http://127.0.0.1:8080/v1/chat/completions' \
 
 ## Advanced Settings
 
-Default settings do not need to be adjusted unless you have specific requirements
+Default settings do not need to be changed unless you have specific needs.
 
 ### Environment Variables
 ```
-Authorization=your_authorization
-TLS_CERT=path_to_your_tls_cert
-TLS_KEY=path_to_your_tls_key
-PROXY_URL=your_proxy_url
+BASE_URL="https://auroraxf.glitch.me/api" Proxy gateway.
+Authorization=your_authorization User authentication key.
+TLS_CERT=path_to_your_tls_cert Path to your TLS (Transport Layer Security) certificate.
+TLS_KEY=path_to_your_tls_key Path to your TLS (Transport Layer Security) key.
+PROXY_URL=your_proxy_url Add a proxy pool.
 ```
 
-## Acknowledgments
+## Acknowledgements
 
-Thank you for the PR support from various contributors, much appreciated.
+Thanks to all the great developers for their PR support, thank you.
 
 ## Reference Projects
 
