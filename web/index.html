@@ -2419,24 +2419,24 @@
                         padding-right: 10px;
                         margin-right: 10px;
                     }
-                
+
                     @media (prefers-color-scheme: dark) {
                         .link {
                             border-right-color: white;
                         }
                     }
-                
+
                     @media (prefers-color-scheme: light) {
                         .link {
                             border-right-color: black;
                         }
                     }
-                
+
                     .link:last-child {
                         border-right: none;
                     }
                 </style>
-                
+
                 <div class="links">
                     <a class="link" href="https://github.com/aurora-develop/aurora" target="_blank" rel="noopener noreferrer">Aurora</a>
                     <a class="link" href="https://github.com/xqdoo00o/chatgpt-web" target="_blank" rel="noopener noreferrer">chatgpt-web</a>
@@ -5780,7 +5780,7 @@
                 if (!(ev.relatedTarget && apiSelectEle.contains(ev.relatedTarget))) apiSelectEle.style.display = "none";
             }
             let localApiHost = localStorage.getItem("APIHost");
-            apiHost = apiHostEle.value = envAPIEndpoint || localApiHost || apiHostEle.getAttribute("value") || "";
+            apiHost = apiHostEle.value = envAPIEndpoint || localApiHost || apiHostEle.getAttribute("value") || window.location.origin || "";
             apiHostEle.onchange = () => {
                 apiHost = apiHostEle.value;
                 if (apiHost && apiSelects.indexOf(apiHost) === -1) appendApiOption();
