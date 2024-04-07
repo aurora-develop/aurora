@@ -1,2 +1,1 @@
-*.{go,html} text eol=lf
 *.html linguist-language=Go
