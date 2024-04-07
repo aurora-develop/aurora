@@ -5780,7 +5780,7 @@
                 if (!(ev.relatedTarget && apiSelectEle.contains(ev.relatedTarget))) apiSelectEle.style.display = "none";
             }
             let localApiHost = localStorage.getItem("APIHost");
-            apiHost = apiHostEle.value = envAPIEndpoint || localApiHost || apiHostEle.getAttribute("value") || window.origin || "";
+            apiHost = apiHostEle.value = envAPIEndpoint || localApiHost || apiHostEle.getAttribute("value") || window.location.origin || "";
             apiHostEle.onchange = () => {
                 apiHost = apiHostEle.value;
                 if (apiHost && apiSelects.indexOf(apiHost) === -1) appendApiOption();
