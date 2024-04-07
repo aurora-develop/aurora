@@ -58,5 +58,5 @@ jobs:
       uses: ncipollo/release-action@v1
       with:
         artifacts: "aurora-*.tar.gz"
-        token: ${{ secrets.GH_PAT }}
+        token: ${{ secrets.GHCR_PAT }}
         generateReleaseNotes: true
