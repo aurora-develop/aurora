@@ -1,3 +1,2 @@
 *.{go,html} text eol=lf
-*.json merge=ours
 *.html linguist-language=Go
