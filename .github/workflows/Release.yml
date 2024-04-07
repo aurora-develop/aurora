@@ -27,15 +27,17 @@ jobs:
       run: |
         env GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}
         
-    - name: Package
+    - name: Build and Package
       run: |
-        tar -czvf ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}
-        
+       FILE_NAME="${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${{ github.ref_name }}.tar.gz"
+       env GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o $FILE_NAME
+       tar -czvf $FILE_NAME $FILE_NAME
+    
     - name: Upload Artifact
       uses: actions/upload-artifact@v2
       with:
-        name: ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz
-        path: ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz
+      name: $FILE_NAME
+      path: ${{ github.workspace }}/$FILE_NAME
 
   release:
     needs: build
