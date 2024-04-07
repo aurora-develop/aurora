@@ -4,7 +4,6 @@ tools/authenticator/proxies.txt
 tools/authenticator/authenticated_accounts.txt
 tools/authenticator/access_tokens.txt
 *.txt
-*.json
 aurora
 chatgpttoapi
 tools/authenticator/.proxies.txt.swp
@@ -13,4 +12,3 @@ tools/authenticator/.proxies.txt.swp
 .idea/
 /logs/
 /target/
-vercel.json
