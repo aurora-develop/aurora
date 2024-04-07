@@ -8,8 +8,8 @@
 https://t.me/aurora_develop
 
 # Web端 
-访问 http://你的服务器ip:8080/web 在web设置页面的填写服务器的http://你的服务器ip:8080
-![web使用](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/2024-04-07%20112100.png)
+
+![web使用](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202024-04-07%20111706.png)
 
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
