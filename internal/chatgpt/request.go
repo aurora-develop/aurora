@@ -30,7 +30,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var HostURL string
 var BaseURL string
 
 func init() {
@@ -38,9 +37,6 @@ func init() {
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
 		BaseURL = "https://chat.openai.com/backend-anon"
-	}
-	if HostURL == "" {
-		HostURL = "https://chat.openai.com/backend-anon"
 	}
 }
 
@@ -62,7 +58,7 @@ var (
 )
 
 func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
-	requestURL := HostURL + "/register-websocket"
+	requestURL := BaseURL + "/register-websocket"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
@@ -291,7 +287,7 @@ type urlAttr struct {
 }
 
 func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, puid string, url string) string {
-	requestURL := HostURL + "/attributions"
+	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
 	header := make(httpclient.AuroraHeaders)
 	if puid != "" {
@@ -322,7 +318,7 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	apiUrl := HostURL + "/conversation"
+	apiUrl := BaseURL + "/conversation"
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
@@ -394,7 +390,7 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	reqUrl := HostURL + "/models"
+	reqUrl := BaseURL + "/models"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", userAgent)
@@ -645,8 +641,8 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 					attr := urlAttrMap[citation.Metadata.URL]
 					if attr == "" {
 						u, _ := url.Parse(citation.Metadata.URL)
-						HostURL := u.Scheme + "://" + u.Host + "/"
-						attr = getURLAttribution(client, secret.Token, secret.PUID, HostURL)
+						BaseURL := u.Scheme + "://" + u.Host + "/"
+						attr = getURLAttribution(client, secret.Token, secret.PUID, BaseURL)
 						if attr != "" {
 							urlAttrMap[citation.Metadata.URL] = attr
 						}
@@ -663,7 +659,7 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 				continue
 			}
 			if original_response.Message.Content.ContentType == "multimodal_text" {
-				apiUrl := HostURL + "/files/"
+				apiUrl := BaseURL + "/files/"
 				if FILES_REVERSE_PROXY != "" {
 					apiUrl = FILES_REVERSE_PROXY
 				}
