@@ -172,7 +172,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, 5)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -194,7 +194,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
 
-	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl, 5)
+	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -227,7 +227,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		if turnStile.Arkose {
 			chatgptrequestconverter.RenewTokenForRequest(&translated_request, secret.PUID, proxyUrl)
 		}
-		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl, 5)
+		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 
 		if err != nil {
 			c.JSON(500, gin.H{

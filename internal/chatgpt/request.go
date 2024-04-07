@@ -12,7 +12,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 
 	//http "github.com/bogdanfinn/fhttp"
@@ -214,26 +214,22 @@ type TurnStile struct {
 	ExpireAt       time.Time
 }
 
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*TurnStile, int, error) {
+func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(client, secret, proxy, 0)
+		response, err := POSTTurnStile(client, secret, proxy)
 		if err != nil {
 			return nil, response.StatusCode, err
 		}
 		defer response.Body.Close()
-		if response.StatusCode != 200 && retry > 0 {
-			return InitTurnStile(client, secret, proxy, retry-1)
+		if response.StatusCode != 200 {
+			return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
 		}
 		var result chatgpt_types.RequirementsResponse
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil && retry > 0 {
-			return InitTurnStile(client, secret, proxy, retry-1)
-		}
-		//  retry stop
-		if retry <= 0 {
-			return nil, response.StatusCode, errors.New("retry limit exceeded")
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			return nil, response.StatusCode, err
 		}
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
@@ -244,7 +240,7 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	}
 	return currTurnToken, 0, nil
 }
-func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
+func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -269,12 +265,9 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		return &http.Response{}, err
 	}
 	if response.StatusCode == 401 && secret.IsFree {
-		if retry > 3 {
-			return &http.Response{}, err
-		}
 		time.Sleep(time.Second * 2)
 		secret.Token = uuid.NewString()
-		return POSTTurnStile(client, secret, proxy, retry+1)
+		return response, err
 	}
 	return response, err
 }
@@ -314,7 +307,7 @@ func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, 
 	return attr.Attribution
 }
 
-func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string, retry int) (*http.Response, error) {
+func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -354,14 +347,10 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 		header.Set("oai-device-id", secret.Token)
 	}
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
-	if err != nil && retry > 0 {
-		return POSTconversation(client, message, secret, chat_token, proxy, retry-1)
+	if err != nil {
+		return nil, err
 	}
-	//  retry stop
-	if retry <= 0 {
-		return nil, errors.New("retry limit exceeded")
-	}
-	return response, err
+	return response, nil
 }
 
 type EnginesData struct {
