@@ -221,7 +221,7 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
 		response, err := POSTTurnStile(client, secret, proxy)
 		if err != nil {
-			return nil, response.StatusCode, err
+			return nil, http.StatusInternalServerError, err
 		}
 		defer response.Body.Close()
 		if response.StatusCode != 200 {
