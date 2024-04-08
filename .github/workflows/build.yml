@@ -41,8 +41,9 @@ jobs:
             
     - name: Get latest version
       run: |
-        version=$(git describe --tags $(git rev-list --tags --max-count=1))
+        version=$(date +'%Y.%m.%d')
         echo "VERSION=$version" >> $GITHUB_ENV
+
         
     - name: Create release
       uses: softprops/action-gh-release@v1
