@@ -1,4 +1,4 @@
-name: Build
+name: Release
 
 on: workflow_dispatch
 
@@ -45,7 +45,7 @@ jobs:
         echo "VERSION=$version" >> $GITHUB_ENV
       uses: softprops/action-gh-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GHCR_PAT: ${{ secrets.GHCR_PAT }}
       with:
         tag_name: ${{ env.VERSION }}
         files: |
