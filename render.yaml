@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: aurora
+    name: freechatgptapi
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
