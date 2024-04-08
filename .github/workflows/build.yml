@@ -1,12 +1,7 @@
-name: build
+name: Build
 
-on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'README.md'
-  workflow_dispatch:
+on: workflow_dispatch
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -44,13 +39,15 @@ jobs:
             aurora/aurora-darwin-amd64.tar.gz
             aurora/aurora-freebsd-amd64.tar.gz
             
-    - name: Create release
+    - name: Get latest version
       run: |
         version=$(git describe --tags $(git rev-list --tags --max-count=1))
         echo "VERSION=$version" >> $GITHUB_ENV
+        
+    - name: Create release
       uses: softprops/action-gh-release@v1
       env:
-        GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.VERSION }}
         files: |
@@ -62,4 +59,7 @@ jobs:
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
       with:
-        token: $
+        token: ${{ github.token }}
+        repository: ${{ github.repository }}
+        retain_days: 1
+        keep_minimum_runs: 8
