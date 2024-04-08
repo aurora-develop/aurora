@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  GHCR_REPO: ghcr.io/aurora-develop/aurora
+  GHCR_REPO: ghcr.io/airainchen/chatgptapi
 
 jobs:
   main:
