@@ -1,7 +1,12 @@
 name: Release
 
-on: workflow_dispatch
-
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
