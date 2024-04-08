@@ -1,0 +1,24 @@
+{
+    "name": "aurora",
+    "version": "0.1.0",
+    "main": "index.js",
+    "scripts": {
+      "start": "node index.js"
+    },
+    "dependencies": {
+      "express": "^4.19.2",
+      "http-proxy-middleware": "^3.0.0",
+      "request": "^2.88.2"
+    },
+    "engines": {
+      "node": "16.x"
+    },
+    "repository": {
+      "url": "https://glitch.com/edit/#!/glitch-mvp-node"
+    },
+    "license": "MIT",
+    "keywords": [
+      "node",
+      "glitch"
+    ]
+  }

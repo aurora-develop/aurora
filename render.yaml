@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: aurora
-    env: docker
-    dockerfilePath: ./Dockerfile
-    plan: free
-
