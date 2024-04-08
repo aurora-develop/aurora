@@ -1,65 +1,99 @@
-name: Go Build and Release
+name: Build and Release
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'README.md'
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
-    name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: [1.21]
-        os: [linux, windows, darwin]
-        arch: [amd64, arm64]
+    name: Build and Release
     steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-      
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: ${{ matrix.go-version }}
-      
-    - name: Build
-      run: |
-        env GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}
-        
-    - name: Package
-      run: |
-        tar -czvf ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}
-        
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz
-        path: ${{ github.event.repository.name }}_${{ matrix.os }}_${{ matrix.arch }}_${GITHUB_REF_NAME}.tar.gz
+    - uses: actions/checkout@v4
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v2
-      
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GHCR_PAT }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-          files: |
-            ${{ github.event.repository.name }}_linux_amd64_${GITHUB_REF_NAME}.tar.gz
-            ${{ github.event.repository.name }}_linux_arm64_${GITHUB_REF_NAME}.tar.gz
-            ${{ github.event.repository.name }}_windows_amd64_${GITHUB_REF_NAME}.tar.gz
-            ${{ github.event.repository.name }}_windows_arm64_${GITHUB_REF_NAME}.tar.gz
-            ${{ github.event.repository.name }}_darwin_amd64_${GITHUB_REF_NAME}.tar.gz
-            ${{ github.event.repository.name }}_darwin_arm64_${GITHUB_REF_NAME}.tar.gz
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 'stable'
+        check-latest: true
+
+    - name: Clone Repo
+      run: |
+        git clone -b ${GITHUB_REF#refs/tags/} https://github.com/aurora-develop/aurora
+
+    - name: Build binary for various platforms
+      run: |
+        cd aurora
+        mkdir -p artifact
+        platforms=("linux/amd64" "windows/amd64" "darwin/amd64" "freebsd/amd64" "linux/arm64" "linux/armv7" "linux/s390x")
+        for platform in "${platforms[@]}"; do
+          os=$(echo $platform | cut -d'/' -f1)
+          arch=$(echo $platform | cut -d'/' -f2)
+          output="aurora-$os-$arch"
+          if [ "$os" == "linux" ] && [ "$arch" == "armv7" ]; then
+            GOOS=$os GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o $output -a -ldflags '-s -w -extldflags "-static"' .
+          else
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o $output -a -ldflags '-s -w -extldflags "-static"' .
+          fi
+          mv $output artifact/
+          tar -czvf ../$output.tar.gz -C artifact $output
+          rm -f artifact/$output
+        done
+        cd ..
+
+
+    - name: Build binary with musl
+      run: |
+        docker run --rm -v "$(pwd):/src" -w /src golang:1.18-alpine sh -c '
+          apk add --no-cache musl-dev gcc &&
+          cd aurora &&
+          CGO_ENABLED=1 CC=musl-gcc go build -o aurora -a -tags netgo -ldflags "-s -w -extldflags \"-static\"" . &&
+          mv aurora ../artifact/aurora-linux-musl-amd64 &&
+          cd ../artifact &&
+          tar -czvf ../aurora-linux-musl-amd64.tar.gz aurora-linux-musl-amd64
+        '
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@main
+      with:
+        name: aurora-pre-built.zip
+        path: |
+          aurora-linux-amd64.tar.gz
+          aurora-windows-amd64.tar.gz
+          aurora-darwin-amd64.tar.gz
+          aurora-freebsd-amd64.tar.gz
+          aurora-linux-musl-amd64.tar.gz
+          aurora-linux-arm64.tar.gz
+          aurora-linux-armv7.tar.gz
+          aurora-linux-s390x.tar.gz
+
+            
+    - name: Create and publish release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        files: |
+          aurora-linux-amd64.tar.gz
+          aurora-windows-amd64.tar.gz
+          aurora-darwin-amd64.tar.gz
+          aurora-freebsd-amd64.tar.gz
+          aurora-linux-musl-amd64.tar.gz
+          aurora-linux-arm64.tar.gz
+          aurora-linux-armv7.tar.gz
+          aurora-linux-s390x.tar.gz
+
+        draft: false
+        prerelease: false
+              
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ github.token }}
+        repository: ${{ github.repository }}
+        retain_days: 1
+        keep_minimum_runs: 8
