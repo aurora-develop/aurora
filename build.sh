@@ -16,6 +16,7 @@ targets=(
     "darwin/386"
     "linux/arm"
     "linux/arm64"
+    "linux/s390x"    
 )
 
 upxPath=$(command -v upx)
