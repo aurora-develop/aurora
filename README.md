@@ -96,7 +96,7 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 ### 环境变量
 ```
 
-BASE_URL="https://auroraxf.glitch.me/api" 代理网关
+BASE_URL="https://chat.openai.com/backend-api" 代理网关
 Authorization=your_authorization  用户认证 key。
 TLS_CERT=path_to_your_tls_cert 存储TLS（传输层安全协议）证书的路径。
 TLS_KEY=path_to_your_tls_key 存储TLS（传输层安全协议）证书的路径。
