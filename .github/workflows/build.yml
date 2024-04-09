@@ -41,7 +41,7 @@ jobs:
     - name: Create release
       uses: softprops/action-gh-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GHCR_PAT }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         files: |
