@@ -18,6 +18,10 @@ https://t.me/aurora_develop
 
 ## Deploy
 
+### Glitch部署
+
+[![Deploy to Glitch](https://button.glitch.me/button.svg)](https://github.com/aurora-develop/aurora-glitch)
+
 ### Vercel部署
 
 由于vercel的go不支持流式，如果在vercel部署请在STREAM_MODE中填False，不支持任何默认流式的客户端，支持沉浸式翻译。
