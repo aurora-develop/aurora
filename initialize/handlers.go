@@ -7,9 +7,6 @@ import (
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
 	officialtypes "aurora/typings/official"
-	"aurora/util"
-	browser "github.com/EDDYCJY/fake-useragent"
-	fhttp "github.com/bogdanfinn/fhttp"
 	"os"
 	"strings"
 
@@ -40,10 +37,6 @@ func (h *Handler) refresh(c *gin.Context) {
 	}
 	proxyUrl := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		return nil
-	}
 	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(client, refreshToken.RefreshToken, proxyUrl)
 	if err != nil {
 		c.JSON(400, gin.H{
@@ -71,10 +64,6 @@ func (h *Handler) session(c *gin.Context) {
 	}
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		return nil
-	}
 	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, sessionToken.SessionToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
@@ -113,10 +102,6 @@ func (h *Handler) refresh_handler(c *gin.Context) {
 
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		return nil
-	}
 	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(client, refresh_token.RefreshToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{
@@ -144,10 +129,6 @@ func (h *Handler) session_handler(c *gin.Context) {
 	}
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		return nil
-	}
 	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, session_token.SessionToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
@@ -190,11 +171,6 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		r.Header.Set("oai-language", util.RandomLanguage())
-		return nil
-	}
 	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
@@ -221,7 +197,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	if err != nil {
 		c.JSON(500, gin.H{
-			"error": "error sending request",
+			"error": "request conversion error",
 		})
 		return
 	}
@@ -254,7 +230,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 		if err != nil {
 			c.JSON(500, gin.H{
-				"error": "error sending request",
+				"error": "request conversion error",
 			})
 			return
 		}
@@ -290,10 +266,6 @@ func (h *Handler) engines(c *gin.Context) {
 		return
 	}
 	client := bogdanfinn.NewStdClient()
-	client.ReqBefore = func(r *fhttp.Request) error {
-		r.Header.Set("User-Agent", browser.Random())
-		return nil
-	}
 	resp, status, err := chatgpt.GETengines(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(500, gin.H{

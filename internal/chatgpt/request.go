@@ -418,7 +418,7 @@ func Handle_request_error(c *gin.Context, response *http.Response) bool {
 		if err != nil {
 			// Read response body
 			body, _ := io.ReadAll(response.Body)
-			c.JSON(500, gin.H{"error": gin.H{
+			c.JSON(response.StatusCode, gin.H{"error": gin.H{
 				"message": "Unknown error",
 				"type":    "internal_server_error",
 				"param":   nil,
