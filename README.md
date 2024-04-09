@@ -20,7 +20,7 @@ https://t.me/aurora_develop
 
 ### Glitch部署
 
-[![Deploy to Glitch](https://button.glitch.me/button.svg)](https://github.com/aurora-develop/aurora-glitch)
+[![Deploy to Glitch](https://cdn.glitch.com/2703baf2-b643-4da7-ab91-7ee2a2d00b5b%2Fremix-button.svg)](https://github.com/aurora-develop/aurora-glitch)
 
 ### Vercel部署
 
