@@ -28,7 +28,7 @@ func main() {
 
 	_ = godotenv.Load(".env")
 	host := os.Getenv("SERVER_HOST")
-	port := os.Getenv("PORT")
+	port := os.Getenv("SERVER_PORT")
 	tlsCert := os.Getenv("TLS_CERT")
 	tlsKey := os.Getenv("TLS_KEY")
 
@@ -36,7 +36,9 @@ func main() {
 		host = "0.0.0.0"
 	}
 	if port == "" {
-		port = "8080"
+		port = os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
 		}
 	}
 
