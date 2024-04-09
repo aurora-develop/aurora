@@ -36,7 +36,10 @@ func main() {
 		host = "0.0.0.0"
 	}
 	if port == "" {
-		port = "8080"
+		port = os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
 	}
 
 	if tlsCert != "" && tlsKey != "" {
