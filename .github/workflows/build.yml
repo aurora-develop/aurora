@@ -1,4 +1,4 @@
-name: Build
+name: Build and Release
 
 on: workflow_dispatch
 
@@ -15,47 +15,40 @@ jobs:
         go-version: 'stable'
         check-latest: true
 
-    - name: Clone Repo
-      run: |
-        git clone https://github.com/aurora-develop/aurora
-
     - name: Build binary
       run: |
-        cd aurora
         mkdir -p artifact
         GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o aurora -a -ldflags '-s -w -extldflags "-static"' . && rm -f artifact/aurora && cp aurora artifact/aurora && cd artifact && tar -czvf ../aurora-linux-amd64.tar.gz * && cd ..
         GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o aurora -a -ldflags '-s -w -extldflags "-static"' . && rm -f artifact/aurora && cp aurora artifact/aurora && cd artifact && tar -czvf ../aurora-windows-amd64.tar.gz * && cd ..
         GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o aurora -a -ldflags '-s -w -extldflags "-static"' . && rm -f artifact/aurora && cp aurora artifact/aurora && cd artifact && tar -czvf ../aurora-darwin-amd64.tar.gz * && cd ..
         GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 go build -o aurora -a -ldflags '-s -w -extldflags "-static"' . && rm -f artifact/aurora && cp aurora artifact/aurora && cd artifact && tar -czvf ../aurora-freebsd-amd64.tar.gz * && cd ..
-        cd ..
         
     - name: Upload artifact
       uses: actions/upload-artifact@main
       with:
         name: aurora-pre-built.zip
         path: |
-            aurora/aurora-linux-amd64.tar.gz
-            aurora/aurora-windows-amd64.tar.gz
-            aurora/aurora-darwin-amd64.tar.gz
-            aurora/aurora-freebsd-amd64.tar.gz
+            aurora-linux-amd64.tar.gz
+            aurora-windows-amd64.tar.gz
+            aurora-darwin-amd64.tar.gz
+            aurora-freebsd-amd64.tar.gz
             
-    - name: Get latest version
-      run: |
-        version=$(date +'%Y.%m.%d')
-        echo "VERSION=$version" >> $GITHUB_ENV
+    - name: Generate release tag
+      id: tag
+      run: echo "v$(cat VERSION)" >> $GITHUB_OUTPUT
 
         
     - name: Create release
       uses: softprops/action-gh-release@v1
       env:
-        GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ env.VERSION }}
+        tag_name: ${{ steps.tag.outputs.release_tag }}
         files: |
-            aurora/aurora-linux-amd64.tar.gz
-            aurora/aurora-windows-amd64.tar.gz
-            aurora/aurora-darwin-amd64.tar.gz
-            aurora/aurora-freebsd-amd64.tar.gz
+            aurora-linux-amd64.tar.gz
+            aurora-windows-amd64.tar.gz
+            aurora-darwin-amd64.tar.gz
+            aurora-freebsd-amd64.tar.gz
               
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
