@@ -3,7 +3,7 @@ name: Build Docker Image
 on:
   push:
     branches:
-      - main
+      - deploy
     paths-ignore:
       - 'README.md'
   workflow_dispatch:
