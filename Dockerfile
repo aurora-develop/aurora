@@ -13,19 +13,19 @@ RUN go mod download
 
 # 复制源代码并构建应用
 COPY . .
-RUN go build -ldflags "-s -w" -o /app/aurora .
+RUN go build -ldflags "-s -w" -o /app/rgzn .
 
 # 使用 Alpine Linux 作为最终镜像
-FROM alpine:latest
+FROM alpine:3.18
 
 # 设置工作目录
 WORKDIR /app
 
 # 从构建阶段复制编译好的应用和资源
-COPY --from=builder /app/aurora /app/aurora
+COPY --from=builder /app/rgzn /app/rgzn
 COPY harPool /app/harPool
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["/app/aurora"]
+CMD ["/app/rgzn"]
