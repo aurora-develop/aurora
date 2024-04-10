@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  GHCR_REPO: ghcr.io/airainchen/chatgptapi
+  GHCR_REPO: ghcr.io/airainchen/rgzn
 
 jobs:
   main:
