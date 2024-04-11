@@ -15,11 +15,16 @@ func Authorization(c *gin.Context) {
 			c.Abort()
 			return
 		}
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		tokenParts := strings.Split(strings.Replace(authHeader, "Bearer ", "", 1)," ")
+		customAccessToken := tokenParts[0]
 		if customer_key != customAccessToken {
 			c.JSON(401, gin.H{"error": "Unauthorized"})
 			c.Abort()
 			return
+		}
+		if len(tokenParts) > 1 {
+			openaiAccessToken := tokenParts[1]
+			c.Request.Header.Set("Authorization", "Bearer " + openaiAccessToken)
 		}
 	}
 	c.Next()
