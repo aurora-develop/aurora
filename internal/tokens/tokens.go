@@ -58,7 +58,3 @@ func (a *AccessToken) UpdateSecret(tokens []*Secret) {
 func (a *AccessToken) GenerateTempToken(token string) *Secret {
 	return &Secret{Token: token, PUID: "", IsFree: false}
 }
-
-func (a *AccessToken) GenerateDeviceId(token string) *Secret {
-	return &Secret{Token: token, PUID: "", IsFree: true}
-}

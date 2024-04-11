@@ -34,6 +34,5 @@ func RegisterRouter() *gin.Engine {
 	authGroup := router.Group("").Use(middlewares.Authorization)
 	authGroup.POST("/v1/chat/completions", handler.nightmare)
 	authGroup.GET("/v1/models", handler.engines)
-	authGroup.POST("/backend-api/conversation", handler.chatgptConversation)
 	return router
 }
