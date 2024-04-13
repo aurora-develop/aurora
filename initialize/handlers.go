@@ -11,49 +11,14 @@ import (
 	"io"
 	"os"
 	"strings"
-	"log"
-	"bufio"
-	"bytes"
-	"encoding/json"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type Handler struct {
 	proxy *proxys.IProxy
 	token *tokens.AccessToken
-}
-
-var db *sql.DB
-
-func init() {
-	if os.Getenv("USE_DB") == "true" {
-		if _, err := os.Stat("aurora.db"); os.IsNotExist(err) {
-			file, err := os.Create("aurora.db")
-			if err != nil {
-				panic(err)
-			}
-			file.Close()
-		}
-
-		var err error
-		db, err = sql.Open("sqlite3", "aurora.db")
-		if err != nil {
-			panic(err)
-		}
-		_, err = db.Exec(`
-			CREATE TABLE IF NOT EXISTS conversation_tokens (
-				conversation_id TEXT PRIMARY KEY,
-				device_id TEXT
-			)
-		`)
-		if err != nil {
-			panic(err)
-		}
-	}
 }
 
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
@@ -369,7 +334,6 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	}
 
 	proxyUrl := h.proxy.GetProxyIP()
-	conversationID := original_request.ConversationID
 
 	var secret *tokens.Secret
 
@@ -389,26 +353,6 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 		}
 	}
 
-	saveConversationToken := func(conversationID, deviceID string) error {
-		_, err := db.Exec("INSERT OR REPLACE INTO conversation_tokens (conversation_id, device_id) VALUES (?, ?)", conversationID, deviceID)
-		if err != nil {
-			log.Println("error saving ConversationID to database:", err)
-			return err
-		}
-		return nil
-	}
-
-	if conversationID != "" && os.Getenv("USE_DB") == "true" {
-		row := db.QueryRow("SELECT device_id FROM conversation_tokens WHERE conversation_id = ?", conversationID)
-		var deviceID string
-		err := row.Scan(&deviceID)
-		if err == nil {
-			secret = h.token.GenerateDeviceId(deviceID)
-		} else {
-			secret = h.token.GetSecret()
-			saveConversationToken(conversationID, secret.Token)
-		}
-	}
 	if secret == nil {
 		secret = h.token.GetSecret()
 	}
@@ -443,58 +387,8 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 		c.Header("Cache-Control", cacheControl)
 	}
 
-	if conversationID != "" {
-		_, err := io.Copy(c.Writer, response.Body)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Error sending response"})
-		}
-		return
-	}
-
-	reader := bufio.NewReader(response.Body)
-	if os.Getenv("USE_DB") == "true" {
-		var buffer bytes.Buffer
-		for {
-			line, _, err := reader.ReadLine()
-			if err != nil {
-				if err != io.EOF {
-					log.Println("Error reading from SSE stream:", err)
-				}
-				break
-			}
-
-			buffer.Write(line)
-			buffer.WriteString("\n")
-
-			if len(line) < 6 {
-				continue
-			}
-
-			dataLine := string(line[6:])
-			if !strings.HasPrefix(dataLine, "[DONE]") {
-				var chatgptResponse chatgpt_types.ChatGPTResponse
-				err = json.Unmarshal([]byte(dataLine), &chatgptResponse)
-				if err != nil {
-					continue
-				}
-				if chatgptResponse.ConversationID != "" {
-					conversationID = chatgptResponse.ConversationID
-					saveConversationToken(conversationID, secret.Token)
-					break
-				}
-			}
-		}
-
-		_, err = c.Writer.Write(buffer.Bytes())
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Error sending buffered response"})
-			return
-		}
-	}
-
-	_, err = io.Copy(c.Writer, reader)
+	_, err = io.Copy(c.Writer, response.Body)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Error sending remaining response"})
-		return
+		c.JSON(500, gin.H{"error": "Error sending response"})
 	}
 }
