@@ -6,8 +6,9 @@ import (
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
-	officialtypes "aurora/typings/official"
 	chatgpt_types "aurora/typings/chatgpt"
+	officialtypes "aurora/typings/official"
+	"aurora/util"
 	"io"
 	"os"
 	"strings"
@@ -147,6 +148,7 @@ func (h *Handler) session_handler(c *gin.Context) {
 func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
+	input_tokens := util.CountToken(original_request.Messages[0].Content)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Request must be proper JSON",
@@ -192,7 +194,6 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 
 	// Convert the chat request to a ChatGPT request
-
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
@@ -245,7 +246,8 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	if !original_request.Stream {
-		c.JSON(200, officialtypes.NewChatCompletion(full_response))
+		output_tokens := util.CountToken(full_response)
+		c.JSON(200, officialtypes.NewChatCompletion(full_response, input_tokens, output_tokens))
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}

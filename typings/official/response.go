@@ -82,16 +82,16 @@ type usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-func NewChatCompletion(full_test string) ChatCompletion {
+func NewChatCompletion(full_test string, input_tokens, output_tokens int) ChatCompletion {
 	return ChatCompletion{
 		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 		Object:  "chat.completion",
 		Created: int64(0),
 		Model:   "gpt-3.5-turbo-0125",
 		Usage: usage{
-			PromptTokens:     0,
-			CompletionTokens: 0,
-			TotalTokens:      0,
+			PromptTokens:     input_tokens,
+			CompletionTokens: output_tokens,
+			TotalTokens:      input_tokens + output_tokens,
 		},
 		Choices: []Choice{
 			{

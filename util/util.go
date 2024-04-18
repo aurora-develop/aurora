@@ -3,6 +3,8 @@ package util
 import (
 	"math/rand"
 	"time"
+	"log/slog"
+	"github.com/pkoukk/tiktoken-go"
 )
 
 func RandomLanguage() string {
@@ -13,4 +15,14 @@ func RandomLanguage() string {
 	// 随机选择一个语言
 	randomIndex := rand.Intn(len(languages))
 	return languages[randomIndex]
+}
+func CountToken(input string) int {
+	encoding := "gpt-3.5-turbo"
+	tkm, err := tiktoken.EncodingForModel(encoding)
+	if err != nil {
+		slog.Warn("tiktoken.EncodingForModel error:", err)
+		return 0
+	}
+	token := tkm.Encode(input, nil, nil)
+	return len(token)
 }
