@@ -2,11 +2,12 @@ package bogdanfinn
 
 import (
 	"aurora/httpclient"
+	"io"
+	"net/http"
+
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
-	"io"
-	"net/http"
 )
 
 type TlsClient struct {
@@ -20,7 +21,7 @@ func NewStdClient() *TlsClient {
 	client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
 		tls_client.WithTimeoutSeconds(600),
-		tls_client.WithClientProfile(profiles.Okhttp4Android13),
+		tls_client.WithClientProfile(profiles.Safari_15_6_1),
 	}...)
 
 	stdClient := &TlsClient{Client: client}
