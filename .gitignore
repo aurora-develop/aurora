@@ -12,3 +12,4 @@ tools/authenticator/.proxies.txt.swp
 .idea/
 /logs/
 /target/
+/bin/
