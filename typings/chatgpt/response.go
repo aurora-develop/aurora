@@ -79,11 +79,18 @@ type DalleContent struct {
 	} `json:"metadata"`
 }
 
+type ProofWork struct {
+	Difficulty string `json:"difficulty,omitempty"`
+	Required   bool   `json:"required"`
+	Seed       string `json:"seed,omitempty"`
+}
+
 type RequirementsResponse struct {
 	Arkose struct {
 		Required bool        `json:"required"`
 		Dx       interface{} `json:"dx"`
 	} `json:"arkose"`
+	Proof     ProofWork `json:"proofofwork,omitempty"`
 	Turnstile struct {
 		Required bool `json:"required"`
 	} `json:"turnstile"`
