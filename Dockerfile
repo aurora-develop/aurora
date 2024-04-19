@@ -20,6 +20,7 @@ FROM alpine:latest
 
 # 设置工作目录
 WORKDIR /app
+RUN apk add --no-cache tzdata
 
 # 从构建阶段复制编译好的应用和资源
 COPY --from=builder /app/aurora /app/aurora
