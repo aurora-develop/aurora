@@ -56,7 +56,7 @@ var (
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
 	poolMutex           = sync.Mutex{}
-	TurnStilePool       = map[string]*TurnStile{}
+	TurnStilePool       = map[string]*ChatRequire{}
 	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.0.0 Safari/537.36"
 	answers             = map[string]string{}
 	cores               = []int{8, 12, 16, 24}
@@ -245,25 +245,25 @@ func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, p
 	}
 }
 
-type TurnStile struct {
-	Token  string    `json:"token"`
-	Proof  ProofWork `json:"proofofwork,omitempty"`
-	Arkose struct {
-		Required bool   `json:"required"`
-		DX       string `json:"dx,omitempty"`
+type ChatRequire struct {
+	Persona string `json:"persona"`
+	Arkose  struct {
+		Required bool        `json:"required"`
+		Dx       interface{} `json:"dx"`
 	} `json:"arkose"`
-
 	Turnstile struct {
 		Required bool `json:"required"`
-	}
-	ExpireAt time.Time
+	} `json:"turnstile"`
+	ProofWork ProofWork `json:"proofofwork"` // Note: The field name is changed to match the new struct
+	Token     string    `json:"token"`
+	ExpireAt  time.Time
 }
 
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
+func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*ChatRequire, int, error) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 	currTurnToken := TurnStilePool[secret.Token]
-	if currTurnToken == nil || currTurnToken.Turnstile.ExpireAt.Before(time.Now()) {
+	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
 		response, err := POSTTurnStile(client, secret, proxy, 0)
 		if err != nil {
 			return nil, http.StatusInternalServerError, err
@@ -272,31 +272,17 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		if response.StatusCode != 200 {
 			return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
 		}
-		var result chatgpt_types.RequirementsResponse
+		var result *ChatRequire
 		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 			return nil, response.StatusCode, err
 		}
-		currTurnToken := &TurnStile{
-			Token: result.Token,
-			Proof: result.Proof,
-			Arkose: struct {
-				Required bool   `json:"required"`
-				DX       string `json:"dx,omitempty"`
-			}{
-				Required: result.ArkoseReq,
-				DX:       result.ArkoseDX,
-			},
-			Turnstile: struct {
-				Required bool `json:"required"`
-			}{
-				Required: result.TurnstileReq,
-			},
-			ExpireAt: time.Now().Add(5 * time.Minute),
-		}
+		result.ExpireAt = time.Now().Add(5 * time.Minute)
+		currTurnToken = result
 		TurnStilePool[secret.Token] = currTurnToken
 	}
 	return currTurnToken, 0, nil
 }
+
 func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
@@ -366,7 +352,7 @@ func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, 
 	return attr.Attribution
 }
 
-func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
+func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *ChatRequire, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
@@ -396,8 +382,11 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if chat_token.Arkose.Required {
 		header.Set("openai-sentinel-arkose-token", arkoseToken)
 	}
-	if chat_token.Turnstile.Required && chat_token.Turnstile.TurnStileToken != "" {
-		header.Set("Openai-Sentinel-Chat-Requirements-Token", chat_token.Turnstile.TurnStileToken)
+	if chat_token.Turnstile.Required && chat_token.Token != "" {
+		header.Set("Openai-Sentinel-Chat-Requirements-Token", chat_token.Token)
+	}
+	if chat_token.ProofWork.Required {
+		header.Set("Openai-Sentinel-Proof-Token", chat_token.ProofWork.Seed)
 	}
 	if !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)

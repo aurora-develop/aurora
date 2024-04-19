@@ -16,11 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-var proofToken string
-	// current proof not necessary...
-	if false && chat_require.Proof.Required {
-		proofToken = chatgpt.CalcProofToken(chat_require.Proof.Seed, chat_require.Proof.Difficulty)
-	}
 
 type Handler struct {
 	proxy *proxys.IProxy
@@ -72,7 +67,7 @@ func (h *Handler) session(c *gin.Context) {
 	}
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, sessionToken.SessionToken, proofToken, proxy_url)
+	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, sessionToken.SessionToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Request must be proper JSON",
@@ -110,7 +105,7 @@ func (h *Handler) refresh_handler(c *gin.Context) {
 
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(client, refresh_token.RefreshToken, proofToken, proxy_url)
+	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(client, refresh_token.RefreshToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{
 			"message": "Request must be proper JSON",
@@ -137,7 +132,7 @@ func (h *Handler) session_handler(c *gin.Context) {
 	}
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, session_token.SessionToken, proofToken, proxy_url)
+	openaiSessionToken, status, err := chatgpt.GETTokenForSessionToken(client, session_token.SessionToken, proxy_url)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Request must be proper JSON",
