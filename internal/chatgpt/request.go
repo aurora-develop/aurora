@@ -14,9 +14,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"golang.org/x/crypto/sha3"
 	"math/rand"
 	"net/http"
+
+	"golang.org/x/crypto/sha3"
 
 	//http "github.com/bogdanfinn/fhttp"
 	"io"
@@ -280,7 +281,7 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
 			Arkose:         result.Arkose.Required,
-			ExpireAt:       time.Now().Add(5 * time.Minute),
+			ExpireAt:       time.Now().Add(1 * time.Second),
 		}
 		if result.Proof.Required == true {
 			currTurnToken.ProofOfWorkToken = CalcProofToken(result.Proof.Seed, result.Proof.Difficulty)
