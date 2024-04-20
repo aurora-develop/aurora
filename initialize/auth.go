@@ -1,12 +1,11 @@
 package initialize
 
 import (
+	"aurora/internal/tokens"
 	"bufio"
 	"fmt"
 	"os"
 	"strconv"
-
-	"aurora/internal/tokens"
 
 	"github.com/google/uuid"
 )
