@@ -8,17 +8,23 @@
 https://t.me/aurora_develop
 
 # Web端 
-访问 http://你的服务器ip:8080/web 在web设置页面的填写服务器的http://你的服务器ip:8080
-![web使用](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/2024-04-07%20112100.png)
+
+访问http://你的服务器ip:8080/web
+
+![web使用](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202024-04-07%20111706.png)
 
 
 ### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
 
 ## Deploy
 
+### Glitch部署
+
+[![Deploy to Glitch](https://cdn.glitch.com/2703baf2-b643-4da7-ab91-7ee2a2d00b5b%2Fremix-button.svg)](https://github.com/aurora-develop/aurora-glitch)
+
 ### Vercel部署
 
-由于vercel不支持流式，如果在vercel部署请在STREAM_MODE中填False，不支持任何默认流式的客户端，支持沉浸式翻译。
+由于vercel的go不支持流式，如果在vercel部署请在STREAM_MODE中填False，不支持任何默认流式的客户端，支持沉浸式翻译。
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faurora-develop%2Faurora&env=STREAM_MODE&project-name=aurora&repository-name=aurora)
 
@@ -90,7 +96,7 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 ### 环境变量
 ```
 
-BASE_URL="https://auroraxf.glitch.me/api" 代理网关
+BASE_URL="https://chat.openai.com/backend-api" 代理网关
 Authorization=your_authorization  用户认证 key。
 TLS_CERT=path_to_your_tls_cert 存储TLS（传输层安全协议）证书的路径。
 TLS_KEY=path_to_your_tls_key 存储TLS（传输层安全协议）证书的路径。

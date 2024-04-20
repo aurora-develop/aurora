@@ -6,7 +6,10 @@ import (
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
+	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
+	"aurora/util"
+	"io"
 	"os"
 	"strings"
 
@@ -145,6 +148,7 @@ func (h *Handler) session_handler(c *gin.Context) {
 func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
+	input_tokens := util.CountToken(original_request.Messages[0].Content)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Request must be proper JSON",
@@ -171,7 +175,6 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-
 	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
@@ -191,14 +194,13 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 
 	// Convert the chat request to a ChatGPT request
-
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 
 	if err != nil {
 		c.JSON(500, gin.H{
-			"error": "error sending request",
+			"error": "request conversion error",
 		})
 		return
 	}
@@ -231,7 +233,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 		if err != nil {
 			c.JSON(500, gin.H{
-				"error": "error sending request",
+				"error": "request conversion error",
 			})
 			return
 		}
@@ -244,7 +246,8 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	if !original_request.Stream {
-		c.JSON(200, officialtypes.NewChatCompletion(full_response))
+		output_tokens := util.CountToken(full_response)
+		c.JSON(200, officialtypes.NewChatCompletion(full_response, input_tokens, output_tokens))
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}
@@ -314,4 +317,80 @@ func (h *Handler) engines(c *gin.Context) {
 	}
 	modelS.Data = resModelList
 	c.JSON(status, modelS)
+}
+
+func (h *Handler) chatgptConversation(c *gin.Context) {
+	var original_request chatgpt_types.ChatGPTRequest
+	err := c.BindJSON(&original_request)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	if original_request.Messages[0].Author.Role == "" {
+		original_request.Messages[0].Author.Role = "user"
+	}
+
+	proxyUrl := h.proxy.GetProxyIP()
+
+	var secret *tokens.Secret
+
+	isUUID := func(str string) bool {
+		_, err := uuid.Parse(str)
+		return err == nil
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = h.token.GenerateTempToken(customAccessToken)
+		}
+		if isUUID(customAccessToken) {
+			secret = h.token.GenerateDeviceId(customAccessToken)
+		}
+	}
+
+	if secret == nil {
+		secret = h.token.GetSecret()
+	}
+
+	client := bogdanfinn.NewStdClient()
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{
+			"message": err.Error(),
+			"type":    "InitTurnStile_request_error",
+			"param":   err,
+			"code":    status,
+		})
+		return
+	}
+
+	response, err := chatgpt.POSTconversation(client, original_request, secret, turnStile, proxyUrl)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": "error sending request",
+		})
+		return
+	}
+	defer response.Body.Close()
+
+	if chatgpt.Handle_request_error(c, response) {
+		return
+	}
+
+	c.Header("Content-Type", response.Header.Get("Content-Type"))
+	if cacheControl := response.Header.Get("Cache-Control"); cacheControl != "" {
+		c.Header("Cache-Control", cacheControl)
+	}
+
+	_, err = io.Copy(c.Writer, response.Body)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Error sending response"})
+	}
 }

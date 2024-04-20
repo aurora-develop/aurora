@@ -4,20 +4,24 @@ import (
 	"aurora/httpclient"
 	"io"
 	"net/http"
+
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 )
 
 type TlsClient struct {
-	Client tls_client.HttpClient
+	Client    tls_client.HttpClient
+	ReqBefore handler
 }
+
+type handler func(r *fhttp.Request) error
 
 func NewStdClient() *TlsClient {
 	client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
 		tls_client.WithTimeoutSeconds(600),
-		tls_client.WithClientProfile(profiles.Okhttp4Android13),
+		tls_client.WithClientProfile(profiles.Safari_15_6_1),
 	}...)
 
 	stdClient := &TlsClient{Client: client}
@@ -80,6 +84,11 @@ func (t *TlsClient) Request(method httpclient.HttpMethod, url string, headers ht
 	}
 	t.handleHeaders(req, headers)
 	t.handleCookies(req, cookies)
+	if t.ReqBefore != nil {
+		if err := t.ReqBefore(req); err != nil {
+			return nil, err
+		}
+	}
 	do, err := t.Client.Do(req)
 	if err != nil {
 		return nil, err
