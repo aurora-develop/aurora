@@ -38,7 +38,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GHCR_PAT }}
       with:
-        tag_name: v2.0.3
+        tag_name: v2.0.4
         files: |
             aurora-linux-amd64.tar.gz
             aurora-windows-amd64.tar.gz
