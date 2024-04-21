@@ -281,12 +281,16 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		currTurnToken = &TurnStile{
 			TurnStileToken: result.Token,
 			Arkose:         result.Arkose.Required,
-			ExpireAt:       time.Now().Add(1 * time.Second),
+			ExpireAt:       time.Now().Add(5 * time.Second),
 		}
 		if result.Proof.Required == true {
 			currTurnToken.ProofOfWorkToken = CalcProofToken(result.Proof.Seed, result.Proof.Difficulty)
 		}
-		TurnStilePool[secret.Token] = currTurnToken
+
+		// 如果是免登账号，将其放入池子
+		if secret.IsFree {
+			TurnStilePool[secret.Token] = currTurnToken
+		}
 	}
 	return currTurnToken, 0, nil
 }
@@ -296,13 +300,9 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	}
 	apiUrl := BaseURL + "/sentinel/chat-requirements"
 	payload := strings.NewReader(`{"conversation_mode_kind":"primary_assistant"}`)
-	header := make(httpclient.AuroraHeaders)
-	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
-	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+
+	header := createBaseHeader()
+	header.Set("content-type", "application/json")
 	if !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
 	}
@@ -334,15 +334,11 @@ type urlAttr struct {
 func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, puid string, url string) string {
 	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
-	header := make(httpclient.AuroraHeaders)
+	header := createBaseHeader()
 	if puid != "" {
 		header.Set("Cookie", "_puid="+puid+";")
 	}
 	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
-	header.Set("Oai-Language", "en-US")
-	header.Set("Origin", "https://chat.openai.com")
-	header.Set("Referer", "https://chat.openai.com/")
 	if access_token != "" {
 		header.Set("Authorization", "Bearer "+access_token)
 	}
@@ -375,17 +371,12 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if err != nil {
 		return &http.Response{}, err
 	}
-	header := make(httpclient.AuroraHeaders)
+	header := createBaseHeader()
 	// Clear cookies
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
-	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	header.Set("content-type", "application/json")
 	if chat_token.Arkose {
 		header.Set("openai-sentinel-arkose-token", arkoseToken)
 	}
@@ -797,7 +788,7 @@ func GETTokenForRefreshToken(client httpclient.AuroraHttpClient, refresh_token s
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	url := "https://auth0.openai.com/oauth/token"
+	rawUrl := "https://auth0.openai.com/oauth/token"
 
 	data := map[string]interface{}{
 		"redirect_uri":  "com.openai.chat://auth0.openai.com/ios/com.openai.chat/callback",
@@ -818,7 +809,7 @@ func GETTokenForRefreshToken(client httpclient.AuroraHttpClient, refresh_token s
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36")
 	header.Set("Accept", "*/*")
-	resp, err := client.Request(http.MethodPost, url, header, nil, bytes.NewBuffer(reqBody))
+	resp, err := client.Request(http.MethodPost, rawUrl, header, nil, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -867,4 +858,23 @@ func parseCookies(cookies []*http.Cookie) map[string]string {
 		cookieDict[cookie.Name] = cookie.Value
 	}
 	return cookieDict
+}
+
+func createBaseHeader() httpclient.AuroraHeaders {
+	header := make(httpclient.AuroraHeaders)
+	// 完善补充完整的请求头
+	header.Set("accept", "*/*")
+	header.Set("accept-language", "en-US,en;q=0.9")
+	//header.Set("content-type", "application/json")
+	header.Set("oai-language", "en-US")
+	header.Set("origin", "https://chat.openai.com")
+	header.Set("referer", "https://chat.openai.com/")
+	header.Set("sec-ch-ua", `"Google Chrome";v="", "Not:A-Brand";v="8", "Chromium";v=""`)
+	header.Set("sec-ch-ua-mobile", "?0")
+	header.Set("sec-ch-ua-platform", `"Linux"`)
+	header.Set("sec-fetch-dest", "empty")
+	header.Set("sec-fetch-mode", "cors")
+	header.Set("sec-fetch-site", "same-origin")
+	header.Set("user-agent", userAgent)
+	return header
 }
