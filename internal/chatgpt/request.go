@@ -438,7 +438,8 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if err != nil {
 		return &http.Response{}, err
 	}
-	header := createBaseHeader()	header.Set("content-type", "application/json")
+	header := createBaseHeader()
+	header.Set("content-type", "application/json")
 
 	// Clear cookies
 	if secret.PUID != "" {
