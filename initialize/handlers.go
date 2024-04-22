@@ -175,6 +175,12 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
+	err = chatgpt.InitCfClearance(proxyUrl)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		c.Abort()
+		return
+	}
 	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
