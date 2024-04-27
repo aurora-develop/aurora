@@ -44,6 +44,39 @@ func NewChatCompletionChunk(text string) ChatCompletionChunk {
 	}
 }
 
+func NewChatCompletionChunkWithModel(text string, model string) ChatCompletionChunk {
+	return ChatCompletionChunk{
+		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:  "chat.completion.chunk",
+		Created: 0,
+		Model:   model,
+		Choices: []Choices{
+			{
+				Index: 0,
+				Delta: Delta{
+					Content: text,
+				},
+				FinishReason: nil,
+			},
+		},
+	}
+}
+
+func StopChunkWithModel(reason string, model string) ChatCompletionChunk {
+	return ChatCompletionChunk{
+		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:  "chat.completion.chunk",
+		Created: 0,
+		Model:   model,
+		Choices: []Choices{
+			{
+				Index:        0,
+				FinishReason: reason,
+			},
+		},
+	}
+}
+
 func StopChunk(reason string) ChatCompletionChunk {
 	return ChatCompletionChunk{
 		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
@@ -80,6 +113,29 @@ type usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+func NewChatCompletionWithModel(text string, model string) ChatCompletion {
+	return ChatCompletion{
+		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:  "chat.completion",
+		Created: int64(0),
+		Model:   model,
+		Usage: usage{
+			PromptTokens:     0,
+			CompletionTokens: 0,
+			TotalTokens:      0,
+		},
+		Choices: []Choice{
+			{
+				Message: Msg{
+					Content: text,
+					Role:    "assistant",
+				},
+				Index: 0,
+			},
+		},
+	}
 }
 
 func NewChatCompletion(full_test string, input_tokens, output_tokens int) ChatCompletion {

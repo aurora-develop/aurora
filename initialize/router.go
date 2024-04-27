@@ -32,7 +32,7 @@ func RegisterRouter() *gin.Engine {
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
 
 	authGroup := router.Group("").Use(middlewares.Authorization)
-	authGroup.POST("/v1/chat/completions", handler.nightmare)
+	authGroup.POST("/v1/chat/completions", handler.duckduckgo)
 	authGroup.GET("/v1/models", handler.engines)
 	authGroup.POST("/backend-api/conversation", handler.chatgptConversation)
 	return router

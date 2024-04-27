@@ -37,3 +37,17 @@ func CountToken(input string) int {
 	token := tkm.Encode(input, nil, nil)
 	return len(token)
 }
+
+func RandomIntStr(num int) string {
+	rand.Seed(time.Now().UnixNano())
+	const charset = "0123456789"
+	var length = 16 // The length of the string you want to generate
+	if num > 0 {
+		length = num
+	}
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
+}

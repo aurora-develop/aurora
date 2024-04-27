@@ -2,6 +2,7 @@ package initialize
 
 import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
+	"aurora/duckgo"
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxys"
@@ -145,6 +146,55 @@ func (h *Handler) session_handler(c *gin.Context) {
 	c.JSON(status, openaiSessionToken)
 }
 
+func (h *Handler) duckduckgo(c *gin.Context) {
+	var original_request officialtypes.APIRequest
+	err := c.BindJSON(&original_request)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	proxyUrl := h.proxy.GetProxyIP()
+	client := bogdanfinn.NewStdClient()
+	token, err := duckgo.InitXVQD(c, client, proxyUrl)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	translated_request := duckgo.ConvertAPIRequest(original_request)
+	response, err := duckgo.POSTconversation(client, translated_request, token, proxyUrl)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": "request conversion error",
+		})
+		return
+	}
+
+	defer response.Body.Close()
+	if duckgo.Handle_request_error(c, response) {
+		return
+	}
+	c.Header("Next-Token", response.Header.Get("x-vqd-4"))
+	var response_part string
+
+	response_part = duckgo.Handler(c, response, original_request.Stream)
+	if c.Writer.Status() != 200 {
+		return
+	}
+	if !original_request.Stream {
+		c.JSON(200, officialtypes.NewChatCompletionWithModel(response_part, translated_request.Model))
+	} else {
+		c.String(200, "data: [DONE]\n\n")
+	}
+}
+
 func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
@@ -175,12 +225,12 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	err = chatgpt.InitCfClearance(proxyUrl)
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		c.Abort()
-		return
-	}
+	//err = chatgpt.InitCfClearance(proxyUrl)
+	//if err != nil {
+	//	c.JSON(500, gin.H{"error": err.Error()})
+	//	c.Abort()
+	//	return
+	//}
 	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
