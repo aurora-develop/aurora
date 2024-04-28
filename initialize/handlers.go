@@ -160,7 +160,7 @@ func (h *Handler) duckduckgo(c *gin.Context) {
 	}
 	proxyUrl := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	token, err := duckgo.InitXVQD(c, client, proxyUrl)
+	token, err := duckgo.InitXVQD(client, proxyUrl)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
@@ -181,9 +181,7 @@ func (h *Handler) duckduckgo(c *gin.Context) {
 	if duckgo.Handle_request_error(c, response) {
 		return
 	}
-	c.Header("Next-Token", response.Header.Get("x-vqd-4"))
 	var response_part string
-
 	response_part = duckgo.Handler(c, response, original_request.Stream)
 	if c.Writer.Status() != 200 {
 		return
@@ -193,6 +191,7 @@ func (h *Handler) duckduckgo(c *gin.Context) {
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}
+
 }
 
 func (h *Handler) nightmare(c *gin.Context) {

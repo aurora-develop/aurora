@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type ApiRequest struct {
@@ -37,20 +39,30 @@ func NewApiRequest(model string) ApiRequest {
 	}
 }
 
-func InitXVQD(c *gin.Context, client httpclient.AuroraHttpClient, proxyUrl string) (string, error) {
-	if c.GetHeader("x-vqd-4") != "" {
-		return c.GetHeader("x-vqd-4"), nil
+func InitXVQD(client httpclient.AuroraHttpClient, proxyUrl string) (string, error) {
+	if Token == nil {
+		Token = &XqdgToken{
+			Token: "",
+			M:     sync.Mutex{},
+		}
 	}
-	status, err := postStatus(client, proxyUrl)
-	if err != nil {
-		return "", err
+	Token.M.Lock()
+	defer Token.M.Unlock()
+	if Token.Token == "" || Token.ExpireAt.Before(time.Now()) {
+		status, err := postStatus(client, proxyUrl)
+		if err != nil {
+			return "", err
+		}
+		defer status.Body.Close()
+		token := status.Header.Get("x-vqd-4")
+		if token == "" {
+			return "", errors.New("no x-vqd-4 token")
+		}
+		Token.Token = token
+		Token.ExpireAt = time.Now().Add(time.Minute * 5)
 	}
-	defer status.Body.Close()
-	token := status.Header.Get("x-vqd-4")
-	if token == "" {
-		return "", errors.New("x-vqd-4 not found")
-	}
-	return token, nil
+
+	return Token.Token, nil
 }
 
 func postStatus(client httpclient.AuroraHttpClient, proxyUrl string) (*http.Response, error) {

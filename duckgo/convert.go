@@ -13,8 +13,18 @@ func ConvertAPIRequest(api_request officialtypes.APIRequest) ApiRequest {
 	if strings.HasPrefix(duckgo_request.Model, "claude") {
 		duckgo_request.Model = Claude
 	}
+	content := ""
 	for _, apiMessage := range api_request.Messages {
-		duckgo_request.AddMessage(apiMessage.Role, apiMessage.Content)
+		if apiMessage.Role == "user" {
+			content += "user:" + apiMessage.Content + "\r\n"
+		}
+		if apiMessage.Role == "system" {
+			content += "system:" + apiMessage.Content + "\r\n"
+		}
+		if apiMessage.Role == "assistant" {
+			content += "assistant:" + apiMessage.Content + "\r\n"
+		}
 	}
+	duckgo_request.AddMessage("user", content)
 	return duckgo_request
 }
