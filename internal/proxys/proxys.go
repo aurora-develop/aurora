@@ -1,10 +1,7 @@
 package proxys
 
-import "sync"
-
 type IProxy struct {
-	ips  []string
-	lock sync.Mutex
+	ips []string
 }
 
 func NewIProxyIP(ips []string) IProxy {
@@ -21,14 +18,9 @@ func (p *IProxy) GetProxyIP() string {
 	if p == nil {
 		return ""
 	}
-
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
 	if len(p.ips) == 0 {
 		return ""
 	}
-
 	proxyIp := p.ips[0]
 	p.ips = append(p.ips[1:], proxyIp)
 	return proxyIp
