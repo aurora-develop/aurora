@@ -16,10 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/crypto/sha3"
 	"math/rand"
 	"net/http"
-
-	"golang.org/x/crypto/sha3"
 
 	//http "github.com/bogdanfinn/fhttp"
 	"io"
@@ -42,8 +42,15 @@ func init() {
 	_ = godotenv.Load(".env")
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
-		BaseURL = "https://chat.openai.com/backend-anon"
+		BaseURL = "https://chatgpt.com/backend-anon"
 	}
+	cores := []int{8, 12, 16, 24}
+	screens := []int{3000, 4000, 6000}
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	core := cores[rand.Intn(4)]
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	screen := screens[rand.Intn(3)]
+	cachedHardware = core + screen
 }
 
 type connInfo struct {
@@ -58,19 +65,55 @@ var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
-	poolMutex           = sync.Mutex{}
-	TurnStilePool       = map[string]*TurnStile{}
-	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.0.0 Safari/537.36"
-	cores               = []int{8, 12, 16, 24}
-	screens             = []int{3000, 4000, 6000}
+	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	timeLocation, _     = time.LoadLocation("Asia/Shanghai")
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
-	cf_clearance        *CfClearance
+	BasicCookies        []*http.Cookie
+	cachedHardware      = 0
+	cachedScripts       = []string{}
+	cachedDpl           = ""
+	cachedRequireProof  = ""
 )
 
-type CfClearance struct {
-	cfClearance string
-	ExpireAt    time.Time
+func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
+	if len(cachedScripts) > 0 {
+		return
+	}
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	header := createBaseHeader()
+	response, err := client.Request(http.MethodGet, "https://chatgpt.com/?oai-dm=1", header, nil, nil)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	doc, _ := goquery.NewDocumentFromReader(response.Body)
+	cachedScripts = nil
+	doc.Find("script[src]").Each(func(i int, s *goquery.Selection) {
+		src, exists := s.Attr("src")
+		if exists {
+			cachedScripts = append(cachedScripts, src)
+			if cachedDpl == "" {
+				idx := strings.Index(src, "dpl")
+				if idx >= 0 {
+					cachedDpl = src[idx:]
+				}
+			}
+		}
+	})
+	if BasicCookies == nil {
+		for _, cookie := range response.Cookies() {
+			if cookie.Name == "oai-did" {
+				continue
+			}
+			BasicCookies = append(BasicCookies, cookie)
+		}
+	}
+	if len(cachedScripts) == 0 {
+		cachedScripts = append(cachedScripts, "https://cdn.oaistatic.com/_next/static/chunks/polyfills-78c92fac7aa8fdd8.js?dpl=baf36960d05dde6d8b941194fa4093fb5cb78c6a")
+		cachedDpl = "dpl=baf36960d05dde6d8b941194fa4093fb5cb78c6a"
+	}
 }
 
 func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
@@ -213,23 +256,10 @@ func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, p
 	}
 }
 
-type ChatRequire struct {
-	Token  string `json:"token"`
-	Arkose struct {
-		Required bool   `json:"required"`
-		DX       string `json:"dx,omitempty"`
-	} `json:"arkose"`
-
-	Turnstile struct {
-		Required bool `json:"required"`
-	}
-}
-
 type TurnStile struct {
 	TurnStileToken   string
 	ProofOfWorkToken string
 	Arkose           bool
-	ExpireAt         time.Time
 }
 
 type ProofWork struct {
@@ -245,86 +275,72 @@ func getParseTime() string {
 }
 func getConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
-	core := cores[rand.Intn(4)]
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-	screen := screens[rand.Intn(3)]
-	return []interface{}{core + screen, getParseTime(), int64(4294705152), 0, userAgent}
+	script := cachedScripts[rand.Intn(len(cachedScripts))]
+	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0}
 
 }
-func CalcProofToken(seed string, diff string) string {
+func CalcProofToken(client httpclient.AuroraHttpClient, require *ChatRequire, proxy string) string {
+	proof := generateAnswer(client, require.Proof.Seed, require.Proof.Difficulty, proxy)
+	return "gAAAAAB" + proof
+}
+
+func generateAnswer(client httpclient.AuroraHttpClient, seed string, diff string, proxy string) string {
+	GetDpl(client, proxy)
 	config := getConfig()
-	diffLen := len(diff) / 2
+	diffLen := len(diff)
 	hasher := sha3.New512()
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 500000; i++ {
 		config[3] = i
+		config[9] = (i + 2) / 2
 		json, _ := json.Marshal(config)
 		base := base64.StdEncoding.EncodeToString(json)
 		hasher.Write([]byte(seed + base))
 		hash := hasher.Sum(nil)
 		hasher.Reset()
-		if hex.EncodeToString(hash[:diffLen]) <= diff {
-			return "gAAAAAB" + base
+		if hex.EncodeToString(hash[:diffLen])[:diffLen] <= diff {
+			return base
 		}
 	}
-	return "gAAAAABwQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + base64.StdEncoding.EncodeToString([]byte(`"`+seed+`"`))
+	return "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + base64.StdEncoding.EncodeToString([]byte(`"`+seed+`"`))
 }
 
-func InitCfClearance(proxy string) error {
-	poolMutex.Lock()
-	defer poolMutex.Unlock()
-	if cf_clearance == nil || cf_clearance.ExpireAt.Before(time.Now()) {
-		resp, err := getCf(proxy)
-		if err != nil {
-			return err
-		}
-		cf_clearance = &CfClearance{
-			cfClearance: resp,
-			ExpireAt:    time.Now().Add(30 * time.Minute),
-		}
-	}
-	return nil
+type ChatRequire struct {
+	Token  string    `json:"token"`
+	Proof  ProofWork `json:"proofofwork,omitempty"`
+	Arkose struct {
+		Required bool   `json:"required"`
+		DX       string `json:"dx,omitempty"`
+	} `json:"arkose"`
 }
 
 func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
-	poolMutex.Lock()
-	defer poolMutex.Unlock()
-	currTurnToken := TurnStilePool[secret.Token]
-	if currTurnToken == nil || currTurnToken.ExpireAt.Before(time.Now()) {
-		response, err := POSTTurnStile(client, secret, proxy, 0)
-		if err != nil {
-			return nil, http.StatusInternalServerError, err
-		}
-		defer response.Body.Close()
-		if response.StatusCode != 200 {
-			return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
-		}
-		var result chatgpt_types.RequirementsResponse
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-			return nil, response.StatusCode, err
-		}
-
-		currTurnToken = &TurnStile{
-			TurnStileToken: result.Token,
-			Arkose:         result.Arkose.Required,
-			ExpireAt:       time.Now().Add(5 * time.Second),
-		}
-		if result.Proof.Required == true {
-			currTurnToken.ProofOfWorkToken = CalcProofToken(result.Proof.Seed, result.Proof.Difficulty)
-		}
-
-		// 如果是免登账号，将其放入池子
-		if secret.IsFree {
-			TurnStilePool[secret.Token] = currTurnToken
-		}
+	response, err := POSTTurnStile(client, secret, proxy, 0)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
 	}
-	return currTurnToken, 0, nil
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
+	}
+	var result ChatRequire
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, response.StatusCode, err
+	}
+	return &TurnStile{
+		TurnStileToken:   result.Token,
+		Arkose:           result.Arkose.Required,
+		ProofOfWorkToken: CalcProofToken(client, &result, proxy),
+	}, 0, nil
 }
 func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
+	if cachedRequireProof == "" {
+		cachedRequireProof = "gAAAAAC" + generateAnswer(client, strconv.FormatFloat(rand.Float64(), 'f', -1, 64), "0", proxy)
+	}
 	apiUrl := BaseURL + "/sentinel/chat-requirements"
-	payload := strings.NewReader(`{"conversation_mode_kind":"primary_assistant"}`)
+	payload := bytes.NewBuffer([]byte(`{"p":"` + cachedRequireProof + `"}`))
 
 	header := createBaseHeader()
 	header.Set("content-type", "application/json")
@@ -334,10 +350,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if secret.IsFree {
 		header.Set("oai-device-id", secret.Token)
 	}
-	var cookie *http.Cookie
-	// 补全伪装环境参数，无实质用处。
-	cookie = &http.Cookie{Name: "cf_clearance", Value: cf_clearance.cfClearance}
-	response, err := client.Request(http.MethodPost, apiUrl, header, []*http.Cookie{cookie}, payload)
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, payload)
 	if err != nil {
 		return &http.Response{}, err
 	}
@@ -394,14 +407,14 @@ func getCf(proxy string) (string, error) {
 	}
 
 	var data = strings.NewReader(`{}`)
-	req, err := http.NewRequest("POST", "https://chat.openai.com/cdn-cgi/challenge-platform/h/b/jsd/r/"+util.RandomHexadecimalString(), data)
+	req, err := http.NewRequest("POST", "https://chatgpt.com/cdn-cgi/challenge-platform/h/b/jsd/r/"+util.RandomHexadecimalString(), data)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("accept", "*/*")
 	req.Header.Set("accept-language", "zh-CN,zh;q=0.9")
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("origin", "https://chat.openai.com")
+	req.Header.Set("origin", "https://chatgpt.com")
 	req.Header.Set("sec-ch-ua", `"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"`)
 	req.Header.Set("sec-ch-ua-mobile", "?0")
 	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
@@ -460,10 +473,8 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if secret.IsFree {
 		header.Set("oai-device-id", secret.Token)
 	}
-	var cookie *http.Cookie
-	// 补全伪装环境参数，无实质用处。
-	cookie = &http.Cookie{Name: "cf_clearance", Value: cf_clearance.cfClearance}
-	response, err := client.Request(http.MethodPost, apiUrl, header, []*http.Cookie{cookie}, bytes.NewBuffer(body_json))
+
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewBuffer(body_json))
 	if err != nil {
 		return nil, err
 	}
@@ -502,8 +513,8 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	header.Set("origin", "https://chatgpt.com")
+	header.Set("referer", "https://chatgpt.com/")
 
 	if !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -897,15 +908,15 @@ func GETTokenForSessionToken(client httpclient.AuroraHttpClient, session_token s
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	url := "https://chat.openai.com/api/auth/session"
+	url := "https://chatgpt.com/api/auth/session"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("authority", "chat.openai.com")
 	header.Set("accept-language", "zh-CN,zh;q=0.9")
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	header.Set("origin", "https://chatgpt.com")
+	header.Set("referer", "https://chatgpt.com/")
 	header.Set("cookie", "__Secure-next-auth.session-token="+session_token)
 	resp, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
@@ -936,10 +947,10 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	// 完善补充完整的请求头
 	header.Set("accept", "*/*")
 	header.Set("accept-language", "en-US,en;q=0.9")
-	header.Set("oai-language", util.RandomLanguage())
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
-	header.Set("sec-ch-ua", `"Google Chrome";v="44", "Not:A-Brand";v="8", "Chromium";v="44"`)
+	header.Set("oai-language", "en-US")
+	header.Set("origin", "https://chatgpt.com")
+	header.Set("referer", "https://chatgpt.com/")
+	header.Set("sec-ch-ua", `"Google Chrome";v="120", "Not:A-Brand";v="120", "Chromium";v="99"`)
 	header.Set("sec-ch-ua-mobile", "?0")
 	header.Set("sec-ch-ua-platform", `"Linux"`)
 	header.Set("sec-fetch-dest", "empty")
