@@ -12,6 +12,9 @@ func RegisterRouter() *gin.Engine {
 		readAccessToken(),
 	)
 
+	// 初始化基础前置参数
+	handler.InitBasicConfigForChatGPT()
+
 	router := gin.Default()
 	router.Use(middlewares.Cors)
 
