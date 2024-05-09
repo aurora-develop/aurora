@@ -20,7 +20,7 @@ func init() {
 	_ = godotenv.Load(".env")
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
-		BaseURL = "https://chat.openai.com/backend-anon"
+		BaseURL = "https://chatgpt.com/backend-anon"
 	}
 }
 func TestTlsClient_Request(t *testing.T) {
@@ -36,8 +36,8 @@ func TestTlsClient_Request(t *testing.T) {
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	header.Set("origin", "https://chatgpt.com")
+	header.Set("referer", "https://chatgpt.com/")
 	header.Set("oai-device-id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, payload)
 	if err != nil {
@@ -58,17 +58,15 @@ func TestTlsClient_Request(t *testing.T) {
 func TestChatGPTModel(t *testing.T) {
 	client := NewStdClient()
 	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-	proxy := "http://127.0.0.1:7990"
-	client.SetProxy(proxy)
-	apiUrl := "https://chat.openai.com/backend-anon/models"
+	apiUrl := "https://chatgpt.com/backend-anon/models"
 
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chat.openai.com")
-	header.Set("referer", "https://chat.openai.com/")
+	header.Set("origin", "https://chatgpt.com")
+	header.Set("referer", "https://chatgpt.com/")
 	header.Set("oai-device-id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
 	response, err := client.Request(http.MethodGet, apiUrl, header, nil, nil)
 	if err != nil {
