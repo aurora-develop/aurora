@@ -26,7 +26,7 @@ func NewStdClient() *RestyClient {
 			},
 		}),
 	}
-	client.Client.SetBaseURL("https://chat.openai.com")
+	client.Client.SetBaseURL("https://chatgpt.com")
 	client.Client.SetRetryCount(3)
 	client.Client.SetRetryWaitTime(5 * time.Second)
 	client.Client.SetRetryMaxWaitTime(20 * time.Second)
