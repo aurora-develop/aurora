@@ -76,6 +76,7 @@ var (
 )
 
 func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
+	requestURL := strings.Replace(BaseURL, "/backend-anon", "", 1) + "/?oai-dm=1"
 	if len(cachedScripts) > 0 {
 		return
 	}
@@ -83,7 +84,7 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 		client.SetProxy(proxy)
 	}
 	header := createBaseHeader()
-	response, err := client.Request(http.MethodGet, "https://chatgpt.com/?oai-dm=1", header, nil, nil)
+	response, err := client.Request(http.MethodGet, requestURL, header, nil, nil)
 	if err != nil {
 		return
 	}
