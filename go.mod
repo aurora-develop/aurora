@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/EDDYCJY/fake-useragent v0.2.0
+	github.com/PuerkitoBio/goquery v1.9.1
 	github.com/acheong08/endless v0.0.0-20230615162514-90545c7793fd
 	github.com/bogdanfinn/fhttp v0.5.27
 	github.com/bogdanfinn/tls-client v1.7.2
@@ -14,10 +15,10 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pkoukk/tiktoken-go v0.1.6
 	github.com/xqdoo00o/funcaptcha v0.0.0-20240403090732-1b604d808f6c
+	golang.org/x/crypto v0.21.0
 )
 
 require (
-	github.com/PuerkitoBio/goquery v1.9.1 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/bogdanfinn/utls v1.6.1 // indirect
@@ -47,7 +48,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	golang.org/x/arch v0.5.0 // indirect
-	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/net v0.22.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
