@@ -301,15 +301,6 @@ func (h *Handler) engines(c *gin.Context) {
 		Object: "list",
 	}
 	var resModelList []ResData
-	if len(resp.Models) > 2 {
-		res_data := ResData{
-			ID:      "gpt-4-mobile",
-			Object:  "model",
-			Created: 1685474247,
-			OwnedBy: "openai",
-		}
-		resModelList = append(resModelList, res_data)
-	}
 	for _, model := range resp.Models {
 		res_data := ResData{
 			ID:      model.Slug,

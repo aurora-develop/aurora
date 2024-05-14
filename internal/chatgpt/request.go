@@ -77,6 +77,7 @@ var (
 
 func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 	requestURL := strings.Replace(BaseURL, "/backend-anon", "", 1) + "/?oai-dm=1"
+
 	if len(cachedScripts) > 0 {
 		return
 	}
@@ -85,6 +86,7 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 	}
 	header := createBaseHeader()
 	response, err := client.Request(http.MethodGet, requestURL, header, nil, nil)
+
 	if err != nil {
 		return
 	}
@@ -104,9 +106,12 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 		}
 	})
 	if BasicCookies == nil {
-		for _, cookie := range response.Cookies() {
+		for _, cookie := range client.GetCookies("https://chatgpt.com") {
 			if cookie.Name == "oai-did" {
 				continue
+			}
+			if cookie.Name == "__Secure-next-auth.callback-url" {
+				cookie.Value = "https://chatgpt.com"
 			}
 			BasicCookies = append(BasicCookies, cookie)
 		}
@@ -277,7 +282,8 @@ func getParseTime() string {
 func getConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
-	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0}
+
+	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0, "userAgentData−[object NavigatorUAData]", "_reactListening4pw0k9ttxw", "onpopstate"}
 
 }
 func CalcProofToken(client httpclient.AuroraHttpClient, require *ChatRequire, proxy string) string {
@@ -952,11 +958,13 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	header.Set("origin", "https://chatgpt.com")
 	header.Set("referer", "https://chatgpt.com/")
 	header.Set("sec-ch-ua", `"Google Chrome";v="120", "Not:A-Brand";v="120", "Chromium";v="99"`)
+	header.Set("priority", "u=1, i")
 	header.Set("sec-ch-ua-mobile", "?0")
 	header.Set("sec-ch-ua-platform", `"Linux"`)
 	header.Set("sec-fetch-dest", "empty")
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
+	header.Set("Connection", "close")
 	header.Set("user-agent", userAgent)
 	return header
 }

@@ -8,6 +8,8 @@ import (
 type AuroraHttpClient interface {
 	Request(method HttpMethod, url string, headers AuroraHeaders, cookies []*http.Cookie, body io.Reader) (*http.Response, error)
 	SetProxy(url string) error
+	SetCookies(rawUrl string, cookies []*http.Cookie)
+	GetCookies(rawUrl string) []*http.Cookie
 }
 
 type HttpMethod string
