@@ -152,3 +152,4 @@ func (t *TlsClient) GetCookies(rawUrl string) []*http.Cookie {
 	}
 	return cookies
 }
+

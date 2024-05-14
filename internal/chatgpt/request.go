@@ -76,6 +76,8 @@ var (
 )
 
 func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
+	requestURL := strings.Replace(BaseURL, "/backend-anon", "", 1) + "/?oai-dm=1"
+
 	if len(cachedScripts) > 0 {
 		return
 	}
@@ -83,7 +85,8 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 		client.SetProxy(proxy)
 	}
 	header := createBaseHeader()
-	response, err := client.Request(http.MethodGet, "https://chatgpt.com/?oai-dm=1", header, nil, nil)
+	response, err := client.Request(http.MethodGet, requestURL, header, nil, nil)
+
 	if err != nil {
 		return
 	}
@@ -279,6 +282,7 @@ func getParseTime() string {
 func getConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
+
 	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0, "userAgentData−[object NavigatorUAData]", "_reactListening4pw0k9ttxw", "onpopstate"}
 
 }
