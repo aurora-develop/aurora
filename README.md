@@ -30,7 +30,7 @@ docker run -d \
 ## 更新容器
 
 ```bash
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR free-gpt3.5-2api --debug
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR aurora --debug
 ```
 ### 编译部署
 
