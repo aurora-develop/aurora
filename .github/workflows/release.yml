@@ -19,20 +19,20 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Create tag
-        run: git tag v2.1.3
+        run: git tag v2.1.4
 
       - name: Push tag
         env:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-        run: git push origin v2.1.3
+        run: git push origin v2.1.4
 
       - name: Create and Upload Release
         uses: softprops/action-gh-release@v1
         env:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
-          tag_name: v2.1.3
-          name: Release v2.1.3
+          tag_name: v2.1.4
+          name: Release v2.1.4
           files: |
             aurora-linux-amd64.tar.gz
             aurora-windows-amd64.tar.gz
