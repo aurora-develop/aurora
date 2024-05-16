@@ -1,5 +1,7 @@
 # AURORA
 
+已闭源发布，只用开源的可以绕行
+
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
 （带UI）免费的GPT3.5，支持使用3.5的access 调用
