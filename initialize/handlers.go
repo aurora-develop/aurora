@@ -182,7 +182,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+
+	pConfig := chatgpt.GetConfig()
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, pConfig)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -358,7 +360,7 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, chatgpt.GetConfig())
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
