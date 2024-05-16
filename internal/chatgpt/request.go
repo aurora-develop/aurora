@@ -410,6 +410,7 @@ type ChatRequire struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
 	} `json:"arkose"`
+	ForceLogin bool `json:"force_login"`
 }
 
 func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, pConfig []interface{}) (*TurnStile, int, error) {
@@ -421,10 +422,16 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if response.StatusCode != 200 {
 		return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
 	}
+
 	var result ChatRequire
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return nil, response.StatusCode, err
 	}
+
+	if secret.IsFree && result.ForceLogin {
+		return nil, http.StatusForbidden, fmt.Errorf("you ip not support noauth")
+	}
+
 	return &TurnStile{
 		TurnStileToken:   result.Token,
 		Arkose:           result.Arkose.Required,
