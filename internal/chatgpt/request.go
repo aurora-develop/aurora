@@ -38,6 +38,93 @@ import (
 
 var BaseURL string
 
+var navigatorFp = []string{
+	"vendorSub−",
+	"productSub−20030107",
+	"vendor−Google Inc.",
+	"maxTouchPoints−0",
+	"scheduling−[object Scheduling]",
+	"userActivation−[object UserActivation]",
+	"doNotTrack",
+	"geolocation−[object Geolocation]",
+	"connection−[object NetworkInformation]",
+	"plugins−[object PluginArray]",
+	"mimeTypes−[object MimeTypeArray]",
+	"pdfViewerEnabled−true",
+	"webkitTemporaryStorage−[object DeprecatedStorageQuota]",
+	"webkitPersistentStorage−[object DeprecatedStorageQuota]",
+	"windowControlsOverlay−[object WindowControlsOverlay]",
+	"hardwareConcurrency−8",
+	"cookieEnabled−true",
+	"appCodeName−Mozilla",
+	"appName−Netscape",
+	"appVersion−5.0 (Macintosh; Intel Mac OS X 10_15_7)…KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"platform−MacIntel",
+	"product−Gecko",
+	"userAgent−Mozilla/5.0 (Macintosh; Intel Mac OS X 1…KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"language−zh-CN",
+	"languages−zh-CN,zh",
+	"onLine−true",
+	"webdriver−false",
+	"getGamepads−function getGamepads() { [native code] }",
+	"javaEnabled−function javaEnabled() { [native code] }",
+	"sendBeacon−function sendBeacon() { [native code] }",
+	"vibrate−function vibrate() { [native code] }",
+	"deprecatedRunAdAuctionEnforcesKAnonymity−false",
+	"bluetooth−[object Bluetooth]",
+	"storageBuckets−[object StorageBucketManager]",
+	"clipboard−[object Clipboard]",
+	"credentials−[object CredentialsContainer]",
+	"keyboard−[object Keyboard]",
+	"managed−[object NavigatorManagedData]",
+	"mediaDevices−[object MediaDevices]",
+	"storage−[object StorageManager]",
+	"serviceWorker−[object ServiceWorkerContainer]",
+	"virtualKeyboard−[object VirtualKeyboard]",
+	"wakeLock−[object WakeLock]",
+	"deviceMemory−8",
+	"userAgentData−[object NavigatorUAData]",
+	"login−[object NavigatorLogin]",
+	"ink−[object Ink]",
+	"mediaCapabilities−[object MediaCapabilities]",
+	"hid−[object HID]",
+	"locks−[object LockManager]",
+	"gpu−[object GPU]",
+	"mediaSession−[object MediaSession]",
+	"permissions−[object Permissions]",
+	"presentation−[object Presentation]",
+	"usb−[object USB]",
+	"xr−[object XRSystem]",
+	"serial−[object Serial]",
+	"adAuctionComponents−function adAuctionComponents() { [native code] }",
+	"runAdAuction−function runAdAuction() { [native code] }",
+	"canLoadAdAuctionFencedFrame−function canLoadAdAuctionFencedFrame() { [native code] }",
+	"clearAppBadge−function clearAppBadge() { [native code] }",
+	"getBattery−function getBattery() { [native code] }",
+	"getUserMedia−function getUserMedia() { [native code] }",
+	"requestMIDIAccess−function requestMIDIAccess() { [native code] }",
+	"requestMediaKeySystemAccess−function requestMediaKeySystemAccess() { [native code] }",
+	"setAppBadge−function setAppBadge() { [native code] }",
+	"webkitGetUserMedia−function webkitGetUserMedia() { [native code] }",
+	"clearOriginJoinedAdInterestGroups−function clearOriginJoinedAdInterestGroups() { [native code] }",
+	"createAuctionNonce−function createAuctionNonce() { [native code] }",
+	"deprecatedReplaceInURN−function deprecatedReplaceInURN() { [native code] }",
+	"deprecatedURNToURL−function deprecatedURNToURL() { [native code] }",
+	"getInstalledRelatedApps−function getInstalledRelatedApps() { [native code] }",
+	"joinAdInterestGroup−function joinAdInterestGroup() { [native code] }",
+	"leaveAdInterestGroup−function leaveAdInterestGroup() { [native code] }",
+	"updateAdInterestGroups−function updateAdInterestGroups() { [native code] }",
+	"registerProtocolHandler−function registerProtocolHandler() { [native code] }",
+	"unregisterProtocolHandler−function unregisterProtocolHandler() { [native code] }",
+}
+
+var documentKeys = []string{
+	"location",
+	"_reactListeningebqqk1eqhpo",
+}
+
+var jsGlobals = []string{"0", "1", "window", "self", "document", "name", "location", "customElements", "history", "navigation", "locationbar", "menubar", "personalbar", "scrollbars", "statusbar", "toolbar", "status", "closed", "frames", "length", "top", "opener", "parent", "frameElement", "navigatorFp", "origin", "external", "screen", "innerWidth", "innerHeight", "scrollX", "pageXOffset", "scrollY", "pageYOffset", "visualViewport", "screenX", "screenY", "outerWidth", "outerHeight", "devicePixelRatio", "clientInformation", "screenLeft", "screenTop", "styleMedia", "onsearch", "isSecureContext", "trustedTypes", "performance", "onappinstalled", "onbeforeinstallprompt", "crypto", "indexedDB", "sessionStorage", "localStorage", "onbeforexrselect", "onabort", "onbeforeinput", "onbeforematch", "onbeforetoggle", "onblur", "oncancel", "oncanplay", "oncanplaythrough", "onchange", "onclick", "onclose", "oncontentvisibilityautostatechange", "oncontextlost", "oncontextmenu", "oncontextrestored", "oncuechange", "ondblclick", "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover", "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended", "onerror", "onfocus", "onformdata", "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup", "onload", "onloadeddata", "onloadedmetadata", "onloadstart", "onmousedown", "onmouseenter", "onmouseleave", "onmousemove", "onmouseout", "onmouseover", "onmouseup", "onmousewheel", "onpause", "onplay", "onplaying", "onprogress", "onratechange", "onreset", "onresize", "onscroll", "onsecuritypolicyviolation", "onseeked", "onseeking", "onselect", "onslotchange", "onstalled", "onsubmit", "onsuspend", "ontimeupdate", "ontoggle", "onvolumechange", "onwaiting", "onwebkitanimationend", "onwebkitanimationiteration", "onwebkitanimationstart", "onwebkittransitionend", "onwheel", "onauxclick", "ongotpointercapture", "onlostpointercapture", "onpointerdown", "onpointermove", "onpointerrawupdate", "onpointerup", "onpointercancel", "onpointerover", "onpointerout", "onpointerenter", "onpointerleave", "onselectstart", "onselectionchange", "onanimationend", "onanimationiteration", "onanimationstart", "ontransitionrun", "ontransitionstart", "ontransitionend", "ontransitioncancel", "onafterprint", "onbeforeprint", "onbeforeunload", "onhashchange", "onlanguagechange", "onmessage", "onmessageerror", "onoffline", "ononline", "onpagehide", "onpageshow", "onpopstate", "onrejectionhandled", "onstorage", "onunhandledrejection", "onunload", "crossOriginIsolated", "scheduler", "alert", "atob", "blur", "btoa", "cancelAnimationFrame", "cancelIdleCallback", "captureEvents", "clearInterval", "clearTimeout", "close", "confirm", "createImageBitmap", "fetch", "find", "focus", "getComputedStyle", "getSelection", "matchMedia", "moveBy", "moveTo", "open", "postMessage", "print", "prompt", "queueMicrotask", "releaseEvents", "reportError", "requestAnimationFrame", "requestIdleCallback", "resizeBy", "resizeTo", "scroll", "scrollBy", "scrollTo", "setInterval", "setTimeout", "stop", "structuredClone", "webkitCancelAnimationFrame", "webkitRequestAnimationFrame", "chrome", "fence", "caches", "cookieStore", "ondevicemotion", "ondeviceorientation", "ondeviceorientationabsolute", "launchQueue", "sharedStorage", "documentPictureInPicture", "getScreenDetails", "queryLocalFonts", "showDirectoryPicker", "showOpenFilePicker", "showSaveFilePicker", "originAgentCluster", "onpageswap", "onpagereveal", "credentialless", "speechSynthesis", "onscrollend", "webkitRequestFileSystem", "webkitResolveLocalFileSystemURL", "_sentryDebugIds", "webpackChunk_N_E", "__next_set_public_path__", "next", "__NEXT_DATA__", "__SSG_MANIFEST_CB", "__NEXT_P", "_N_E", "regeneratorRuntime", "__REACT_INTL_CONTEXT__", "DD_RUM", "_", "filterCSS", "filterXSS", "__SEGMENT_INSPECTOR__", "__NEXT_PRELOADREADY", "Intercom", "__MIDDLEWARE_MATCHERS", "__BUILD_MANIFEST", "__SSG_MANIFEST", "__STATSIG_SDK__", "__STATSIG_JS_SDK__", "__STATSIG_RERENDER_OVERRIDE__", "_oaiHandleSessionExpired", "__intercomAssignLocation", "__intercomReloadLocation"}
+
 func init() {
 	_ = godotenv.Load(".env")
 	BaseURL = os.Getenv("BASE_URL")
@@ -65,7 +152,7 @@ var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
-	userAgent           = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	userAgent           = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 	timeLocation, _     = time.LoadLocation("Asia/Shanghai")
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
@@ -279,32 +366,37 @@ func getParseTime() string {
 	now = now.In(timeLocation)
 	return now.Format(timeLayout) + " GMT+0800 (中国标准时间)"
 }
-func getConfig() []interface{} {
+func GetConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
-
-	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0, "userAgentData−[object NavigatorUAData]", "_reactListening4pw0k9ttxw", "onpopstate"}
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	nfp := navigatorFp[rand.Intn(len(navigatorFp))]
+	dk := documentKeys[rand.Intn(len(documentKeys))]
+	wk := jsGlobals[rand.Intn(len(jsGlobals))]
+	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0, nfp, dk, wk}
 
 }
-func CalcProofToken(client httpclient.AuroraHttpClient, require *ChatRequire, proxy string) string {
-	proof := generateAnswer(client, require.Proof.Seed, require.Proof.Difficulty, proxy)
+func CalcProofToken(client httpclient.AuroraHttpClient, require *ChatRequire, proxy string, config []interface{}) string {
+	proof := generateAnswer(client, require.Proof.Seed, require.Proof.Difficulty, proxy, config)
 	return "gAAAAAB" + proof
 }
 
-func generateAnswer(client httpclient.AuroraHttpClient, seed string, diff string, proxy string) string {
+func generateAnswer(client httpclient.AuroraHttpClient, seed string, diff string, proxy string, config []interface{}) string {
 	GetDpl(client, proxy)
-	config := getConfig()
-	diffLen := len(diff)
+	diffLen := len(diff) / 2
 	hasher := sha3.New512()
+	startTime := time.Now()
 	for i := 0; i < 500000; i++ {
 		config[3] = i
-		config[9] = (i + 2) / 2
+		endTime := time.Now()
+		elapsed := endTime.Sub(startTime)
+		config[9] = elapsed.Milliseconds()
 		json, _ := json.Marshal(config)
 		base := base64.StdEncoding.EncodeToString(json)
 		hasher.Write([]byte(seed + base))
 		hash := hasher.Sum(nil)
 		hasher.Reset()
-		if hex.EncodeToString(hash[:diffLen])[:diffLen] <= diff {
+		if hex.EncodeToString(hash[:diffLen]) <= diff {
 			return base
 		}
 	}
@@ -318,10 +410,11 @@ type ChatRequire struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
 	} `json:"arkose"`
+	ForceLogin bool `json:"force_login"`
 }
 
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
-	response, err := POSTTurnStile(client, secret, proxy, 0)
+func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, pConfig []interface{}) (*TurnStile, int, error) {
+	response, err := POSTTurnStile(client, secret, proxy, 0, pConfig)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -329,22 +422,28 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if response.StatusCode != 200 {
 		return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
 	}
+
 	var result ChatRequire
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return nil, response.StatusCode, err
 	}
+
+	if secret.IsFree && result.ForceLogin {
+		return nil, http.StatusForbidden, fmt.Errorf("you ip not support noauth")
+	}
+
 	return &TurnStile{
 		TurnStileToken:   result.Token,
 		Arkose:           result.Arkose.Required,
-		ProofOfWorkToken: CalcProofToken(client, &result, proxy),
+		ProofOfWorkToken: CalcProofToken(client, &result, proxy, pConfig),
 	}, 0, nil
 }
-func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*http.Response, error) {
+func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int, pConfig []interface{}) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
 	if cachedRequireProof == "" {
-		cachedRequireProof = "gAAAAAC" + generateAnswer(client, strconv.FormatFloat(rand.Float64(), 'f', -1, 64), "0", proxy)
+		cachedRequireProof = "gAAAAAC" + generateAnswer(client, strconv.FormatFloat(rand.Float64(), 'f', -1, 64), "0", proxy, pConfig)
 	}
 	apiUrl := BaseURL + "/sentinel/chat-requirements"
 	payload := bytes.NewBuffer([]byte(`{"p":"` + cachedRequireProof + `"}`))
@@ -367,7 +466,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		}
 		time.Sleep(time.Second * 2)
 		secret.Token = uuid.NewString()
-		return POSTTurnStile(client, secret, proxy, retry+1)
+		return POSTTurnStile(client, secret, proxy, retry+1, pConfig)
 	}
 	return response, err
 }
