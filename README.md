@@ -4,7 +4,11 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-（带UI）免费的GPT3.5，支持使用3.5的access 调用
+
+# 免登录只支持未被oai拉黑的ip，建议用accesstoken来请求，或者在项目同目录下加入access_tokens.txt
+
+
+（带UI）免费的GPT3.5，支持使用access 调用
 
 
 # Web端 
@@ -35,32 +39,6 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtow
 ## 现闭源发布
 
 ## Deploy
-
-### Glitch部署
-
-[![Deploy to Glitch](https://cdn.glitch.com/2703baf2-b643-4da7-ab91-7ee2a2d00b5b%2Fremix-button.svg)](https://github.com/aurora-develop/aurora-glitch)
-
-### Vercel部署
-
-由于vercel的go不支持流式，如果在vercel部署请在STREAM_MODE中填False，不支持任何默认流式的客户端，支持沉浸式翻译。
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faurora-develop%2Faurora&env=STREAM_MODE&project-name=aurora&repository-name=aurora)
-
-### Render部署
-[![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-
-### Koyeb部署
-地区选美国
-
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
-
-### Railway部署
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/jcl2Es?referralCode=XXqY_5)
-
-### Zeabur部署
-进入修改镜像名称aurora+任何字母数字
-
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
 
 ## Docker Compose部署
 创建一个新的目录，例如aurora-app，并进入该目录：
