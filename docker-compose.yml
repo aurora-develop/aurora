@@ -1,9 +1,19 @@
 version: '3'
 
 services:
-  app:
+  aurora:
     image: ghcr.io/aurora-develop/aurora:latest
     container_name: aurora
     restart: unless-stopped
     ports:
-      - '8080:8080'
+      - "8080:8080"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300 # 每5分钟检查一次更新
+    restart: unless-stopped
