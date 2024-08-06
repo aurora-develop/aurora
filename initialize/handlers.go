@@ -9,11 +9,12 @@ import (
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -57,6 +58,11 @@ func (h *Handler) InitBasicConfigForChatGPT() {
 	proxy_url := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
 	chatgpt.GetDpl(client, proxy_url)
+	//cfStr, err := chatgpt.GetCf(proxy_url)
+	//if err != nil {
+	//	fmt.Println(err.Error())
+	//}
+	//chatgpt.BasicCookies = append(chatgpt.BasicCookies, &http.Cookie{Name: "cf_clearance", Value: cfStr, Domain: "https://chatgpt.com"})
 }
 
 func (h *Handler) session(c *gin.Context) {
@@ -154,7 +160,6 @@ func (h *Handler) session_handler(c *gin.Context) {
 func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
-	input_tokens := util.CountToken(original_request.Messages[0].Content)
 	if err != nil {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Request must be proper JSON",
@@ -165,6 +170,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	proxyUrl := h.proxy.GetProxyIP()
+	input_tokens := util.CountToken(original_request.Messages[0].Content)
 	secret := h.token.GetSecret()
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
@@ -182,7 +188,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, chatgpt.GetConfig())
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -204,7 +210,6 @@ func (h *Handler) nightmare(c *gin.Context) {
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
-
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": "request conversion error",
@@ -236,8 +241,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		if turnStile.Arkose {
 			chatgptrequestconverter.RenewTokenForRequest(&translated_request, secret.PUID, proxyUrl)
 		}
-		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
-
+		response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error": "request conversion error",
@@ -358,7 +362,7 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, chatgpt.GetConfig())
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
