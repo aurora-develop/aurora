@@ -23,13 +23,18 @@ type chatgpt_author struct {
 
 type ChatGPTRequest struct {
 	Action                     string            `json:"action"`
-	Messages                   []chatgpt_message `json:"messages,omitempty"`
-	ParentMessageID            string            `json:"parent_message_id,omitempty"`
+	Messages                   []chatgpt_message `json:"messages"`
+	ParentMessageID            string            `json:"parent_message_id"`
 	ConversationID             string            `json:"conversation_id,omitempty"`
 	Model                      string            `json:"model"`
+	TimezoneOffsetMin          int               `json:"timezone_offset_min"`
+	Suggestions                []interface{}     `json:"suggestions"`
 	HistoryAndTrainingDisabled bool              `json:"history_and_training_disabled"`
 	ArkoseToken                string            `json:"arkose_token,omitempty"`
 	PluginIDs                  []string          `json:"plugin_ids,omitempty"`
+	ForceRateLimit             bool              `json:"force_rate_limit"`
+	ResetRateLimits            bool              `json:"reset_rate_limits"`
+	ForceUseSse                bool              `json:"force_use_sse"`
 }
 
 func NewChatGPTRequest() ChatGPTRequest {
@@ -39,6 +44,8 @@ func NewChatGPTRequest() ChatGPTRequest {
 		ParentMessageID:            uuid.NewString(),
 		Model:                      "text-davinci-002-render-sha",
 		HistoryAndTrainingDisabled: disable_history,
+		ForceUseSse:                true,
+		TimezoneOffsetMin:          -480,
 	}
 }
 
