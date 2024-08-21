@@ -20,12 +20,12 @@ func init() {
 	_ = godotenv.Load(".env")
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
-		BaseURL = "https://chatgpt.com/backend-anon"
+		BaseURL = "https://chatgpt.com/backend-api"
 	}
 }
 func TestTlsClient_Request(t *testing.T) {
 	client := NewStdClient()
-	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 	proxy := "http://127.0.0.1:7990"
 	client.SetProxy(proxy)
 
@@ -57,8 +57,8 @@ func TestTlsClient_Request(t *testing.T) {
 
 func TestChatGPTModel(t *testing.T) {
 	client := NewStdClient()
-	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-	apiUrl := "https://chatgpt.com/backend-anon/models"
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+	apiUrl := "https://chatgpt.com/backend-api/models"
 
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
