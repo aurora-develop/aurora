@@ -43,7 +43,7 @@ func init() {
 	_ = godotenv.Load(".env")
 	BaseURL = os.Getenv("BASE_URL")
 	if BaseURL == "" {
-		BaseURL = "https://chatgpt.com/backend-anon"
+		BaseURL = "https://chatgpt.com/backend-api"
 	}
 	cores := []int{8, 12, 16, 24}
 	screens := []int{3000, 4000, 6000}
@@ -66,7 +66,7 @@ var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
-	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 	timeLocation, _     = time.LoadLocation("Asia/Shanghai")
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
@@ -77,7 +77,7 @@ var (
 )
 
 func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
-	requestURL := strings.Replace(BaseURL, "/backend-anon", "", 1) + "/?oai-dm=1"
+	requestURL := strings.Replace(BaseURL, "/backend-api", "", 1)
 
 	if len(cachedScripts) > 0 {
 		return
