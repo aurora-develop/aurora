@@ -34,6 +34,9 @@ Go in and change the image name to aurora plus any letter or number.
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
 
+### Deployment on Alibaba Cloud ComputeNest
+[![Deploy on AlibabaCloud ComputeNest](https://service-info-public.oss-cn-hangzhou.aliyuncs.com/computenest-en.svg)](https://computenest.console.aliyun.com/service/instance/create/default?type=user&ServiceName=Aurora%20%E7%A4%BE%E5%8C%BA%E7%89%88)
+
 ### Compilation Deployment
 
 ```bash
