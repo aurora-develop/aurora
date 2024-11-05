@@ -67,7 +67,6 @@ var (
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
 	connPool            = map[string][]*connInfo{}
 	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-	timeLocation, _     = time.LoadLocation("Asia/Shanghai")
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
 	cachedHardware      = 0
@@ -277,8 +276,7 @@ type ProofWork struct {
 
 func getParseTime() string {
 	now := time.Now()
-	now = now.In(timeLocation)
-	return now.Format(timeLayout) + " GMT+0800 (中国标准时间)"
+	return now.Format(timeLayout) + " GMT" + now.Format("-0700 MST (MST)")
 }
 func GetConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
