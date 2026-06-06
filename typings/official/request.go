@@ -7,10 +7,9 @@ import (
 )
 
 type APIRequest struct {
-	Messages  []APIMessage `json:"messages"`
-	Stream    bool         `json:"stream"`
-	Model     string       `json:"model"`
-	PluginIDs []string     `json:"plugin_ids"`
+	Messages []APIMessage `json:"messages"`
+	Stream   bool         `json:"stream"`
+	Model    string       `json:"model"`
 }
 
 type APIMessage struct {
@@ -303,8 +302,8 @@ type ImageGenerationRequest struct {
 
 func (r ImageGenerationRequest) ToAPIRequest() APIRequest {
 	model := r.Model
-	if model == "" || strings.HasPrefix(model, "gpt-image") || strings.HasPrefix(model, "dall-e") {
-		model = "gpt-4-dalle"
+	if model == "" || strings.HasPrefix(model, "dall-e") {
+		model = "gpt-image-2"
 	}
 	prompt := "Generate an image for this request. Return only the generated image, not a text description.\n\n" + r.Prompt
 	return APIRequest{

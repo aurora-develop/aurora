@@ -99,7 +99,6 @@ func TestChatGPTModel(t *testing.T) {
 			SubscriptionLevel    string `json:"subscription_level"`
 			DefaultModel         string `json:"default_model"`
 			CodeInterpreterModel string `json:"code_interpreter_model,omitempty"`
-			PluginsModel         string `json:"plugins_model"`
 		} `json:"categories"`
 	}
 

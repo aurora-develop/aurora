@@ -382,7 +382,6 @@ type EnginesData struct {
 		SubscriptionLevel    string `json:"subscription_level"`
 		DefaultModel         string `json:"default_model"`
 		CodeInterpreterModel string `json:"code_interpreter_model,omitempty"`
-		PluginsModel         string `json:"plugins_model"`
 	} `json:"categories"`
 }
 
@@ -809,11 +808,11 @@ func PollImageResults(client httpclient.AuroraHttpClient, secret *tokens.Secret,
 }
 
 func imageModelSlug(model string) string {
+	if model == "" || strings.HasPrefix(model, "dall-e") {
+		model = "gpt-image-2"
+	}
 	if model == "gpt-image-2" || strings.HasPrefix(model, "gpt-image") {
 		return "gpt-5-3"
-	}
-	if model == "" || strings.HasPrefix(model, "dall-e") || model == "gpt-4-dalle" {
-		return "auto"
 	}
 	return model
 }
