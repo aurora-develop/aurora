@@ -6,9 +6,23 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 )
+
+func parseAccessTokenLine(line string) *tokens.Secret {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return nil
+	}
+	parts := strings.SplitN(line, ":", 2)
+	token := strings.TrimSpace(parts[0])
+	if token == "" {
+		return nil
+	}
+	return tokens.NewSecret(token)
+}
 
 func readAccessToken() *tokens.AccessToken {
 	var Secrets []*tokens.Secret
@@ -19,13 +33,9 @@ func readAccessToken() *tokens.AccessToken {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			// Split by :
-			token := scanner.Text()
-			if len(token) == 0 {
-				continue
+			if secret := parseAccessTokenLine(scanner.Text()); secret != nil {
+				Secrets = append(Secrets, secret)
 			}
-			// Append to accounts
-			Secrets = append(Secrets, tokens.NewSecret(token))
 		}
 	}
 

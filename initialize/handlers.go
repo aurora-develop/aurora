@@ -10,7 +10,9 @@ import (
 	officialtypes "aurora/typings/official"
 	"aurora/util"
 	"encoding/base64"
+	"errors"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -182,7 +184,16 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	proxyUrl := h.proxy.GetProxyIP()
 	input_tokens := countMessagesTokens(original_request.Messages)
-	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), original_requestHasFiles(original_request), false)
+	secret, status, err := h.secretFromAuthorization(c, original_requestHasFiles(original_request), false, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
+	}
 	if secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
 		c.Abort()
@@ -293,7 +304,16 @@ func (h *Handler) responses(c *gin.Context) {
 	for _, message := range original_request.Messages {
 		input_tokens += util.CountToken(message.Text())
 	}
-	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), original_requestHasFiles(original_request), false)
+	secret, status, err := h.secretFromAuthorization(c, original_requestHasFiles(original_request), false, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
+	}
 	if secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
 		c.Abort()
@@ -406,13 +426,15 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	}
 
 	proxyUrl := h.proxy.GetProxyIP()
-	secret := h.token.GetPaidSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
+	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
 	}
 	if secret == nil || secret.Token == "" {
 		c.JSON(400, gin.H{"error": "Images API requires a logged-in ChatGPT access token."})
@@ -457,7 +479,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 				if imageResult.B64JSON != "" {
 					item.B64JSON = imageResult.B64JSON
 				} else if imageResult.URL != "" {
-					imageBytes, err := chatgpt.DownloadImageBytes(client, imageResult.URL, secret.Token, secret.PUID)
+					imageBytes, err := chatgpt.DownloadImageBytes(client, imageResult.URL, secret)
 					if err != nil {
 						c.JSON(500, gin.H{"error": gin.H{
 							"message": err.Error(),
@@ -506,7 +528,16 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 }
 
 func (h *Handler) files(c *gin.Context) {
-	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), true, true)
+	secret, status, err := h.secretFromAuthorization(c, true, true, h.proxy.GetProxyIP())
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
+	}
 	if secret == nil || secret.Token == "" || secret.IsFree {
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "Files API requires a logged-in ChatGPT access token.",
@@ -606,21 +637,86 @@ func (h *Handler) engines(c *gin.Context) {
 	})
 }
 
-func (h *Handler) secretFromAuthorization(authHeader string, needsPaid bool, allowFallbackPaid bool) *tokens.Secret {
+func (h *Handler) secretFromAuthorization(c *gin.Context, needsPaid bool, allowFallbackPaid bool, proxy string) (*tokens.Secret, int, error) {
 	secret := h.token.GetSecret()
 	if needsPaid || allowFallbackPaid {
 		secret = h.token.GetPaidSecret()
 	}
-	if authHeader != "" {
-		customAccessToken := strings.TrimSpace(strings.Replace(authHeader, "Bearer ", "", 1))
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
+
+	authToken, teamAccountID, hasAuthorizationTeamID := authorizationTokenAndTeam(c)
+	if authToken != "" && os.Getenv("Authorization") != "" && authToken == os.Getenv("Authorization") {
+		authToken = ""
+	}
+	if authToken != "" {
+		if strings.HasPrefix(authToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = h.token.GenerateTempToken(authToken)
+		} else if isUUID(authToken) {
+			secret = h.token.GenerateDeviceId(authToken)
+		} else if hasAuthorizationTeamID || teamAccountID != "" {
+			accessToken, status, err := h.accessTokenFromRefreshToken(authToken, proxy)
+			if err != nil {
+				return nil, status, err
+			}
+			secret = h.token.GenerateTempToken(accessToken)
 		}
 	}
 	if needsPaid && (secret == nil || secret.Token == "" || secret.IsFree) && !allowFallbackPaid {
-		return nil
+		return nil, 0, nil
 	}
-	return secret
+	return secret.WithTeamUserID(teamAccountID), 0, nil
+}
+
+func (h *Handler) accessTokenFromRefreshToken(refreshToken string, proxy string) (string, int, error) {
+	client := bogdanfinn.NewStdClient()
+	result, status, err := chatgpt.GETTokenForRefreshToken(client, refreshToken, proxy)
+	if status == 0 {
+		status = http.StatusBadRequest
+	}
+	if err != nil {
+		return "", status, err
+	}
+	if data, ok := result.(map[string]interface{}); ok {
+		if accessToken, ok := data["access_token"].(string); ok && accessToken != "" {
+			return accessToken, status, nil
+		}
+	}
+	return "", status, errors.New("refresh token response did not include access_token")
+}
+
+func isUUID(str string) bool {
+	_, err := uuid.Parse(str)
+	return err == nil
+}
+
+func teamAccountIDFromRequest(c *gin.Context) string {
+	for _, header := range []string{"ChatGPT-Account-ID", "Chatgpt-Account-Id", "Team-Account-ID", "X-ChatGPT-Account-ID"} {
+		if value := strings.TrimSpace(c.GetHeader(header)); value != "" {
+			return value
+		}
+	}
+	_, teamAccountID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
+	return teamAccountID
+}
+
+func authorizationTokenAndTeam(c *gin.Context) (string, string, bool) {
+	token, authorizationTeamID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
+	if teamID := teamAccountIDFromRequest(c); teamID != "" {
+		return token, teamID, authorizationTeamID != ""
+	}
+	return token, authorizationTeamID, authorizationTeamID != ""
+}
+
+func splitAuthorizationTokenAndTeam(authHeader string) (string, string) {
+	payload := strings.TrimSpace(authHeader)
+	if len(payload) >= len("Bearer ") && strings.EqualFold(payload[:len("Bearer ")], "Bearer ") {
+		payload = strings.TrimSpace(payload[len("Bearer "):])
+	}
+	parts := strings.SplitN(payload, ",", 2)
+	token := strings.TrimSpace(parts[0])
+	if len(parts) == 1 {
+		return token, ""
+	}
+	return token, strings.TrimSpace(parts[1])
 }
 
 func countMessagesTokens(messages []officialtypes.APIMessage) int {
@@ -690,13 +786,15 @@ func (h *Handler) tts(c *gin.Context) {
 	}
 
 	proxyUrl := h.proxy.GetProxyIP()
-	secret := h.token.GetPaidSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
+	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
 	}
 	if secret == nil || secret.Token == "" {
 		c.JSON(400, gin.H{"error": "TTS requires a logged-in ChatGPT access token."})
@@ -780,26 +878,15 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 
 	proxyUrl := h.proxy.GetProxyIP()
 
-	var secret *tokens.Secret
-
-	isUUID := func(str string) bool {
-		_, err := uuid.Parse(str)
-		return err == nil
-	}
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
-		if isUUID(customAccessToken) {
-			secret = h.token.GenerateDeviceId(customAccessToken)
-		}
-	}
-
-	if secret == nil {
-		secret = h.token.GetSecret()
+	secret, status, err := h.secretFromAuthorization(c, false, false, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
 	}
 
 	client := bogdanfinn.NewStdClient()

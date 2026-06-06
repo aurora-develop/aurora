@@ -125,6 +125,7 @@ func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, fil
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodPost, BaseURL+"/files", header, nil, bytes.NewReader(body))
 	if err != nil {
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
@@ -176,6 +177,7 @@ func confirmUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, fi
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodPost, BaseURL+"/files/"+fileID+"/uploaded", header, nil, strings.NewReader("{}"))
 	if err != nil {
 		return http.StatusInternalServerError, err

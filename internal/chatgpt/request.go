@@ -249,17 +249,24 @@ type urlAttr struct {
 	Attribution string `json:"attribution"`
 }
 
-func getURLAttribution(client httpclient.AuroraHttpClient, access_token string, puid string, url string) string {
+func setTeamAccountHeader(header httpclient.AuroraHeaders, secret *tokens.Secret) {
+	if secret != nil && strings.TrimSpace(secret.TeamUserID) != "" {
+		header.Set("Chatgpt-Account-Id", strings.TrimSpace(secret.TeamUserID))
+	}
+}
+
+func getURLAttribution(client httpclient.AuroraHttpClient, secret *tokens.Secret, url string) string {
 	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
 	header := createBaseHeader()
-	if puid != "" {
-		header.Set("Cookie", "_puid="+puid+";")
+	if secret != nil && secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
 	header.Set("Content-Type", "application/json")
-	if access_token != "" {
-		header.Set("Authorization", "Bearer "+access_token)
+	if secret != nil && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodPost, requestURL, header, nil, payload)
 	if err != nil {
 		return ""
@@ -462,18 +469,19 @@ type ImageGenerationResult struct {
 	B64JSON string
 }
 
-func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
+func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url string, prompt string, secret *tokens.Secret, idx int, imgSource []string) {
 	defer wg.Done()
 	header := make(httpclient.AuroraHeaders)
 	// Clear cookies
-	if puid != "" {
-		header.Set("Cookie", "_puid="+puid+";")
+	if secret != nil && secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
-	if token != "" {
-		header.Set("Authorization", "Bearer "+token)
+	if secret != nil && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
 		return
@@ -487,16 +495,17 @@ func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url 
 	imgSource[idx] = "[![image](" + file_info.DownloadURL + " \"" + prompt + "\")](" + file_info.DownloadURL + ")"
 }
 
-func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, token string, puid string) (string, error) {
+func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, secret *tokens.Secret) (string, error) {
 	header := make(httpclient.AuroraHeaders)
-	if puid != "" {
-		header.Set("Cookie", "_puid="+puid+";")
+	if secret != nil && secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
-	if token != "" {
-		header.Set("Authorization", "Bearer "+token)
+	if secret != nil && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
 		return "", err
@@ -518,16 +527,17 @@ func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, token s
 	return info.DownloadURL, nil
 }
 
-func DownloadImageBytes(client httpclient.AuroraHttpClient, url string, token string, puid string) ([]byte, error) {
+func DownloadImageBytes(client httpclient.AuroraHttpClient, url string, secret *tokens.Secret) ([]byte, error) {
 	header := make(httpclient.AuroraHeaders)
-	if puid != "" {
-		header.Set("Cookie", "_puid="+puid+";")
+	if secret != nil && secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-	if token != "" {
-		header.Set("Authorization", "Bearer "+token)
+	if secret != nil && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
 		return nil, err
@@ -582,7 +592,7 @@ func appendAssetPointerResult(client httpclient.AuroraHttpClient, secret *tokens
 	if len(assetParts) != 2 || assetParts[1] == "" {
 		return
 	}
-	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+assetParts[1]+"/download", secret.Token, secret.PUID)
+	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+assetParts[1]+"/download", secret)
 	if err != nil {
 		return
 	}
@@ -593,7 +603,7 @@ func appendFileIDResult(client httpclient.AuroraHttpClient, secret *tokens.Secre
 	if fileID == "" {
 		return
 	}
-	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+fileID+"/download", secret.Token, secret.PUID)
+	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+fileID+"/download", secret)
 	if err != nil {
 		return
 	}
@@ -712,6 +722,7 @@ func conversationFetchHeaders(secret *tokens.Secret) httpclient.AuroraHeaders {
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	return header
 }
 
@@ -840,6 +851,7 @@ func imageConversationHeaders(secret *tokens.Secret, turnStile *TurnStile, condu
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	return header
 }
 
@@ -1050,7 +1062,7 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 					if attr == "" {
 						u, _ := url.Parse(citation.Metadata.URL)
 						BaseURL := u.Scheme + "://" + u.Host + "/"
-						attr = getURLAttribution(client, secret.Token, secret.PUID, BaseURL)
+						attr = getURLAttribution(client, secret, BaseURL)
 						if attr != "" {
 							urlAttrMap[citation.Metadata.URL] = attr
 						}
@@ -1082,7 +1094,7 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 					}
 					url := apiUrl + strings.Split(dalle_content.AssetPointer, "//")[1] + "/download"
 					wg.Add(1)
-					go GetImageSource(client, &wg, url, dalle_content.Metadata.Dalle.Prompt, secret.Token, secret.PUID, index, imgSource)
+					go GetImageSource(client, &wg, url, dalle_content.Metadata.Dalle.Prompt, secret, index, imgSource)
 				}
 				wg.Wait()
 				translated_response := official_types.NewChatCompletionChunk(strings.Join(imgSource, ""), model)
@@ -1341,6 +1353,7 @@ func getTTSBlobFromURL(client httpclient.AuroraHttpClient, secret *tokens.Secret
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	response, err := client.Request(http.MethodGet, reqURL, header, nil, nil)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
@@ -1421,6 +1434,7 @@ func RemoveConversation(client httpclient.AuroraHttpClient, secret *tokens.Secre
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
+	setTeamAccountHeader(header, secret)
 	payload := bytes.NewBuffer([]byte(`{"is_visible":false}`))
 	response, err := client.Request(http.MethodPatch, url, header, nil, payload)
 	if err != nil {
