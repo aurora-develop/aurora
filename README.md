@@ -82,7 +82,6 @@ PROXY_URL=your_proxy_url
 
 ## 注意事项
 
-- 插件模型和 `gpt-4-plugins` 已移除，不再支持 ChatGPT Plugins。
 - 图片、TTS、文件能力依赖登录态 access token，免费 UUID 账号不可用。
 - `STREAM_MODE=false` 时会强制关闭 Chat Completions 流式返回。
 - 本项目是 ChatGPT Web 能力转换服务，接口形状尽量兼容 OpenAI API，但并非 OpenAI 官方服务。
