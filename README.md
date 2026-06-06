@@ -57,6 +57,7 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
      "stream": true
    }'
 ```
+### 支持codex的api
 
 ### TTS 语音合成
 
