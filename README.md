@@ -2,7 +2,6 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-（带UI）免费的GPT3.5，支持使用3.5的access 调用
 
 # Web端 
 
@@ -59,6 +58,19 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
    }'
 ```
 
+### TTS 语音合成
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/audio/speech' \
+--header 'Content-Type: application/json' \
+--data '{
+     "model": "tts-1",
+     "input": "Hello, this is a test!",
+     "voice": "alloy",
+     "response_format": "mp3"
+   }' \
+--output speech.mp3
+```
 ## 高级设置
 
 默认情况不需要设置，除非你有需求

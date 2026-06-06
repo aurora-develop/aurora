@@ -11,8 +11,6 @@ import (
 	"aurora/util"
 	"bufio"
 	"bytes"
-	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,14 +23,12 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 )
 
@@ -53,18 +49,9 @@ func init() {
 	cachedHardware = core + screen
 }
 
-type connInfo struct {
-	conn   *websocket.Conn
-	uuid   string
-	expire time.Time
-	ticker *time.Ticker
-	lock   bool
-}
-
 var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
-	connPool            = map[string][]*connInfo{}
 	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
@@ -121,151 +108,10 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 	}
 }
 
-func getWSURL(client httpclient.AuroraHttpClient, token string, retry int) (string, error) {
-	requestURL := BaseURL + "/register-websocket"
-	header := make(httpclient.AuroraHeaders)
-	header.Set("User-Agent", userAgent)
-	header.Set("Accept", "*/*")
-	header.Set("Oai-Language", "en-US")
-	if token != "" {
-		header.Set("Authorization", "Bearer "+token)
-	}
-	response, err := client.Request(http.MethodPost, requestURL, header, nil, nil)
-	if err != nil {
-		if retry > 3 {
-			return "", err
-		}
-		time.Sleep(time.Second) // wait 1s to get ws url
-		return getWSURL(client, token, retry+1)
-	}
-	defer response.Body.Close()
-	var WSSResp chatgpt_types.ChatGPTWSSResponse
-	err = json.NewDecoder(response.Body).Decode(&WSSResp)
-	if err != nil {
-		return "", err
-	}
-	return WSSResp.WssUrl, nil
-}
-
-func createWSConn(client httpclient.AuroraHttpClient, url string, connInfo *connInfo, retry int) error {
-	dialer := websocket.DefaultDialer
-	dialer.EnableCompression = true
-	dialer.Subprotocols = []string{"json.reliable.webpubsub.azure.v1"}
-	conn, _, err := dialer.Dial(url, nil)
-	if err != nil {
-		if retry > 3 {
-			return err
-		}
-		time.Sleep(time.Second) // wait 1s to recreate ws
-		return createWSConn(client, url, connInfo, retry+1)
-	}
-	connInfo.conn = conn
-	connInfo.expire = time.Now().Add(time.Minute * 30)
-	ticker := time.NewTicker(time.Second * 8)
-	connInfo.ticker = ticker
-	go func(ticker *time.Ticker) {
-		defer ticker.Stop()
-		for {
-			<-ticker.C
-			if err := connInfo.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				connInfo.conn.Close()
-				connInfo.conn = nil
-				break
-			}
-		}
-	}(ticker)
-	return nil
-}
-
-func findAvailConn(token string, uuid string) *connInfo {
-	for _, value := range connPool[token] {
-		if !value.lock {
-			value.lock = true
-			value.uuid = uuid
-			return value
-		}
-	}
-	newConnInfo := connInfo{uuid: uuid, lock: true}
-	connPool[token] = append(connPool[token], &newConnInfo)
-	return &newConnInfo
-}
-func findSpecConn(token string, uuid string) *connInfo {
-	for _, value := range connPool[token] {
-		if value.uuid == uuid {
-			return value
-		}
-	}
-	return &connInfo{}
-}
-func UnlockSpecConn(token string, uuid string) {
-	for _, value := range connPool[token] {
-		if value.uuid == uuid {
-			value.lock = false
-		}
-	}
-}
-
-func InitWSConn(client httpclient.AuroraHttpClient, token string, uuid string, proxy string) error {
-	connInfo := findAvailConn(token, uuid)
-	conn := connInfo.conn
-	isExpired := connInfo.expire.IsZero() || time.Now().After(connInfo.expire)
-	if conn == nil || isExpired {
-		if proxy != "" {
-			client.SetProxy(proxy)
-		}
-		if conn != nil {
-			connInfo.ticker.Stop()
-			conn.Close()
-			connInfo.conn = nil
-		}
-		wssURL, err := getWSURL(client, token, 0)
-		if err != nil {
-			return err
-		}
-		err = createWSConn(client, wssURL, connInfo, 0)
-		if err != nil {
-			return err
-		}
-		return nil
-	} else {
-		ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*100)
-		go func() {
-			defer cancelFunc()
-			for {
-				_, _, err := conn.NextReader()
-				if err != nil {
-					break
-				}
-				if ctx.Err() != nil {
-					break
-				}
-			}
-		}()
-		<-ctx.Done()
-		err := ctx.Err()
-		if err != nil {
-			switch err {
-			case context.Canceled:
-				connInfo.ticker.Stop()
-				conn.Close()
-				connInfo.conn = nil
-				connInfo.lock = false
-				return InitWSConn(client, token, uuid, proxy)
-			case context.DeadlineExceeded:
-				return nil
-			default:
-				return nil
-			}
-		}
-		return nil
-	}
-}
-
 type TurnStile struct {
 	TurnStileToken   string
 	ProofOfWorkToken string
 	TurnstileToken   string
-	Arkose           bool
 }
 
 type ProofWork struct {
@@ -292,12 +138,12 @@ func CalcProofToken(require *ChatRequire) string {
 }
 
 type ChatRequire struct {
-	Token  string    `json:"token"`
-	Proof  ProofWork `json:"proofofwork,omitempty"`
-	Arkose struct {
+	Token     string    `json:"token"`
+	Proof     ProofWork `json:"proofofwork,omitempty"`
+	Turnstile struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
-	} `json:"arkose"`
+	} `json:"turnstile"`
 	ForceLogin bool `json:"force_login"`
 }
 
@@ -310,26 +156,23 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if ProofOfWorkToken == "" {
 		return nil, http.StatusForbidden, errors.New("calculation proof token failure. Please retry the operation")
 	}
-	// Generate turnstile token using Solve if turnstile is required
 	var turnstileToken string
-	if result.Arkose.DX != "" {
+	if result.Turnstile.DX != "" {
 		sourceP := ""
 		if secret.IsFree {
 			sourceP = cachedRequireProof
 		}
-		turnstileToken = prooftoken.Solve(result.Arkose.DX, sourceP)
+		turnstileToken = prooftoken.Solve(result.Turnstile.DX, sourceP)
 		if turnstileToken == "" {
-			// Fallback
 			fallbackP := cachedRequireProof
 			if sourceP == cachedRequireProof {
 				fallbackP = ""
 			}
-			turnstileToken = prooftoken.Solve(result.Arkose.DX, fallbackP)
+			turnstileToken = prooftoken.Solve(result.Turnstile.DX, fallbackP)
 		}
 	}
 	return &TurnStile{
 		TurnStileToken:   result.Token,
-		Arkose:           result.Arkose.Required,
 		ProofOfWorkToken: ProofOfWorkToken,
 		TurnstileToken:   turnstileToken,
 	}, 0, nil
@@ -341,7 +184,12 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if cachedRequireProof == "" {
 		cachedRequireProof = prooftoken.LegacyRequirementsToken(userAgent)
 	}
-	apiUrl := BaseURL + "/sentinel/chat-requirements"
+	var apiUrl string
+	if secret.IsFree {
+		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/sentinel/chat-requirements"
+	} else {
+		apiUrl = BaseURL + "/sentinel/chat-requirements"
+	}
 	payload := bytes.NewBuffer([]byte(`{"p":"` + cachedRequireProof + `"}`))
 
 	header := createBaseHeader()
@@ -372,9 +220,12 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return nil, response.StatusCode, err
 	}
-	if secret.IsFree && result.ForceLogin {
+	if result.ForceLogin {
+		if !secret.IsFree {
+			return nil, http.StatusUnauthorized, fmt.Errorf("force login required: ChatGPT access token is expired or not accepted")
+		}
 		if retry > 1 {
-			return nil, http.StatusForbidden, fmt.Errorf("this request does not support noauth")
+			return nil, http.StatusForbidden, fmt.Errorf("force login required")
 		}
 		time.Sleep(time.Second * 1)
 		secret.Token = uuid.NewString()
@@ -465,12 +316,15 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	apiUrl := BaseURL + "/conversation"
+	var apiUrl string
+	if secret.IsFree {
+		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/conversation"
+	} else {
+		apiUrl = BaseURL + "/conversation"
+	}
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
-	arkoseToken := message.ArkoseToken
-	message.ArkoseToken = ""
 
 	// JSONify the body and add it to the request
 	body_json, err := json.Marshal(message)
@@ -483,9 +337,6 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	// Clear cookies
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
-	}
-	if chat_token.Arkose {
-		header.Set("openai-sentinel-arkose-token", arkoseToken)
 	}
 	if chat_token.TurnStileToken != "" {
 		header.Set("openai-sentinel-chat-requirements-token", chat_token.TurnStileToken)
@@ -604,6 +455,7 @@ type ContinueInfo struct {
 type fileInfo struct {
 	DownloadURL string `json:"download_url"`
 	Status      string `json:"status"`
+	URL         string `json:"url"`
 }
 
 func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
@@ -652,90 +504,14 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 	var waitSource = false
 	var isEnd = false
 	var imgSource []string
-	var isWSS = false
 	var convId string
-	var respId string
-	var wssUrl string
-	var connInfo *connInfo
-	var wsSeq int
-	var isWSInterrupt bool = false
-	var interruptTimer *time.Timer
-
-	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
-		isWSS = true
-		connInfo = findSpecConn(secret.Token, uuid)
-		if connInfo.conn == nil {
-			c.JSON(500, gin.H{"error": "No websocket connection"})
-			return "", nil
-		}
-		var wssResponse chatgpt_types.ChatGPTWSSResponse
-		json.NewDecoder(response.Body).Decode(&wssResponse)
-		wssUrl = wssResponse.WssUrl
-		respId = wssResponse.ResponseId
-		convId = wssResponse.ConversationId
-	}
 	for {
-		var line string
-		var err error
-		if isWSS {
-			var messageType int
-			var message []byte
-			if isWSInterrupt {
-				if interruptTimer == nil {
-					interruptTimer = time.NewTimer(10 * time.Second)
-				}
-				select {
-				case <-interruptTimer.C:
-					c.JSON(500, gin.H{"error": "WS interrupt & new WS timeout"})
-					return "", nil
-				default:
-					goto reader
-				}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
-		reader:
-			messageType, message, err = connInfo.conn.ReadMessage()
-			if err != nil {
-				connInfo.ticker.Stop()
-				connInfo.conn.Close()
-				connInfo.conn = nil
-				err := createWSConn(client, wssUrl, connInfo, 0)
-				if err != nil {
-					c.JSON(500, gin.H{"error": err.Error()})
-					return "", nil
-				}
-				isWSInterrupt = true
-				connInfo.conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"sequenceAck\",\"sequenceId\":"+strconv.Itoa(wsSeq)+"}"))
-				continue
-			}
-			if messageType == websocket.TextMessage {
-				var wssMsgResponse chatgpt_types.WSSMsgResponse
-				json.Unmarshal(message, &wssMsgResponse)
-				if wssMsgResponse.Data.ResponseId != respId {
-					continue
-				}
-				wsSeq = wssMsgResponse.SequenceId
-				if wsSeq%50 == 0 {
-					connInfo.conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"sequenceAck\",\"sequenceId\":"+strconv.Itoa(wsSeq)+"}"))
-				}
-				base64Body := wssMsgResponse.Data.Body
-				bodyByte, err := base64.StdEncoding.DecodeString(base64Body)
-				if err != nil {
-					continue
-				}
-				if isWSInterrupt {
-					isWSInterrupt = false
-					interruptTimer.Stop()
-				}
-				line = string(bodyByte)
-			}
-		} else {
-			line, err = reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return "", nil
-			}
+			return "", nil
 		}
 		if len(line) < 6 {
 			continue
@@ -1000,4 +776,172 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	header.Set("oai-client-version", "prod-a9e268687461965b9507d0c5eeb8d58ad00b12dd")
 	header.Set("oai-client-build-number", "7215851")
 	return header
+}
+
+func HandlerTTS(response *http.Response, input string) (string, string) {
+	reader := bufio.NewReader(response.Body)
+
+	var original_response chatgpt_types.ChatGPTResponse
+	var convId string
+	var fallbackMsgID string
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", ""
+		}
+		if len(line) < 6 {
+			continue
+		}
+		line = line[6:]
+		if !strings.HasPrefix(line, "[DONE]") {
+			original_response.Message.ID = ""
+			err = json.Unmarshal([]byte(line), &original_response)
+			if err != nil {
+				continue
+			}
+			if original_response.Error != nil {
+				return "", ""
+			}
+			if original_response.Message.ID == "" {
+				continue
+			}
+			if original_response.ConversationID != convId {
+				if convId == "" {
+					convId = original_response.ConversationID
+				} else {
+					continue
+				}
+			}
+			if original_response.Message.Author.Role != "assistant" {
+				continue
+			}
+
+			// Newer upstream responses are not always an exact single-part echo of the
+			// requested TTS input. Prefer an exact match, then fall back to the first
+			// assistant message in the same conversation so synthesize still works.
+			if fallbackMsgID == "" {
+				fallbackMsgID = original_response.Message.ID
+			}
+			if len(original_response.Message.Content.Parts) == 0 {
+				continue
+			}
+			for _, rawPart := range original_response.Message.Content.Parts {
+				part, ok := rawPart.(string)
+				if !ok {
+					continue
+				}
+				if part == input || strings.Contains(part, input) || strings.Contains(input, part) {
+					return original_response.Message.ID, convId
+				}
+			}
+		}
+	}
+	if fallbackMsgID != "" && convId != "" {
+		return fallbackMsgID, convId
+	}
+	return "", ""
+}
+
+func getTTSBlobFromURL(client httpclient.AuroraHttpClient, secret *tokens.Secret, reqURL string) ([]byte, int, error) {
+	header := createBaseHeader()
+	header.Set("Accept", "audio/*,*/*")
+	if !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	if secret.IsFree {
+		header.Set("oai-device-id", secret.Token)
+	}
+	if secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
+	}
+	response, err := client.Request(http.MethodGet, reqURL, header, nil, nil)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	defer response.Body.Close()
+	blob, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, response.StatusCode, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, response.StatusCode, fmt.Errorf("tts download failed: %s", string(blob))
+	}
+	return blob, response.StatusCode, nil
+}
+
+func parseTTSDownloadURL(blob []byte) string {
+	var info fileInfo
+	if err := json.Unmarshal(blob, &info); err != nil {
+		return ""
+	}
+	if info.DownloadURL != "" {
+		return info.DownloadURL
+	}
+	return info.URL
+}
+
+func GetTTS(client httpclient.AuroraHttpClient, secret *tokens.Secret, msgId, convId, voice, format, proxy string) ([]byte, int, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	params := url.Values{}
+	params.Set("message_id", msgId)
+	params.Set("conversation_id", convId)
+	params.Set("voice", voice)
+	params.Set("format", format)
+	var reqUrl string
+	if secret.IsFree {
+		reqUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/synthesize?" + params.Encode()
+	} else {
+		reqUrl = BaseURL + "/synthesize?" + params.Encode()
+	}
+
+	blob, status, err := getTTSBlobFromURL(client, secret, reqUrl)
+	if err == nil {
+		if downloadURL := parseTTSDownloadURL(blob); downloadURL != "" {
+			return getTTSBlobFromURL(client, secret, downloadURL)
+		}
+		return blob, status, nil
+	}
+
+	// Some upstream variants now return a signed file URL payload or fail on the
+	// first synthesize URL shape. If the error body still contains a download URL,
+	// honor it before surfacing the failure.
+	if downloadURL := parseTTSDownloadURL(blob); downloadURL != "" {
+		return getTTSBlobFromURL(client, secret, downloadURL)
+	}
+	return nil, status, err
+}
+
+func RemoveConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, id string, proxy string) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	var url string
+	if secret.IsFree {
+		url = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/conversation/" + id
+	} else {
+		url = BaseURL + "/conversation/" + id
+	}
+	header := createBaseHeader()
+	header.Set("Content-Type", "application/json")
+	if !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	if secret.IsFree {
+		header.Set("oai-device-id", secret.Token)
+	}
+	if secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
+	}
+	payload := bytes.NewBuffer([]byte(`{"is_visible":false}`))
+	response, err := client.Request(http.MethodPatch, url, header, nil, payload)
+	if err != nil {
+		return
+	}
+	response.Body.Close()
 }

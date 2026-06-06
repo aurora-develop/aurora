@@ -200,7 +200,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 
 	// Convert the chat request to a ChatGPT request
-	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
+	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl)
 
 	// Use the model from the original request, default to "auto"
 	reqModel := original_request.Model
@@ -237,9 +237,6 @@ func (h *Handler) nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		if turnStile.Arkose {
-			chatgptrequestconverter.RenewTokenForRequest(&translated_request, secret.PUID, proxyUrl)
-		}
 		response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 		if err != nil {
 			c.JSON(500, gin.H{
@@ -261,33 +258,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}
-	chatgpt.UnlockSpecConn(secret.Token, uid)
 }
 
 func (h *Handler) engines(c *gin.Context) {
-	proxyUrl := h.proxy.GetProxyIP()
-	secret := h.token.GetSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		// Check if customAccessToken starts with sk-
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
-	}
-	if secret == nil || secret.Token == "" {
-		c.JSON(400, gin.H{"error": "Not Account Found."})
-		return
-	}
-	client := bogdanfinn.NewStdClient()
-	resp, status, err := chatgpt.GETengines(client, secret, proxyUrl)
-	if err != nil {
-		c.JSON(500, gin.H{
-			"error": "error sending request",
-		})
-		return
-	}
-
 	type ResData struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
@@ -300,24 +273,143 @@ func (h *Handler) engines(c *gin.Context) {
 		Data   []ResData `json:"data"`
 	}
 
-	modelS := JSONData{
-		Object: "list",
-	}
+	models := []string{"auto", "gpt-5", "gpt-5-1", "gpt-5-2", "gpt-5-3", "gpt-5-3-mini"}
 	var resModelList []ResData
-	for _, model := range resp.Models {
-		res_data := ResData{
-			ID:      model.Slug,
+	for _, model := range models {
+		resModelList = append(resModelList, ResData{
+			ID:      model,
 			Object:  "model",
 			Created: 1685474247,
 			OwnedBy: "openai",
-		}
-		if model.Slug == "text-davinci-002-render-sha" {
-			res_data.ID = "gpt-3.5-turbo"
-		}
-		resModelList = append(resModelList, res_data)
+		})
 	}
-	modelS.Data = resModelList
-	c.JSON(status, modelS)
+
+	c.JSON(200, JSONData{
+		Object: "list",
+		Data:   resModelList,
+	})
+}
+
+var ttsFmtMap = map[string]string{
+	"mp3":  "mp3",
+	"opus": "opus",
+	"aac":  "aac",
+	"flac": "aac",
+	"wav":  "aac",
+	"pcm":  "aac",
+}
+
+var ttsTypeMap = map[string]string{
+	"mp3":  "audio/mpeg",
+	"opus": "audio/ogg",
+	"aac":  "audio/aac",
+}
+
+var ttsVoiceMap = map[string]string{
+	"alloy":   "cove",
+	"ash":     "fathom",
+	"coral":   "vale",
+	"echo":    "ember",
+	"fable":   "breeze",
+	"onyx":    "orbit",
+	"nova":    "maple",
+	"sage":    "glimmer",
+	"shimmer": "juniper",
+}
+
+func (h *Handler) tts(c *gin.Context) {
+	var original_request officialtypes.TTSAPIRequest
+	err := c.BindJSON(&original_request)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	if original_request.Input == "" {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Missing required parameter: input",
+			"type":    "invalid_request_error",
+			"param":   "input",
+			"code":    "missing_required_parameter",
+		}})
+		return
+	}
+
+	proxyUrl := h.proxy.GetProxyIP()
+	secret := h.token.GetPaidSecret()
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = h.token.GenerateTempToken(customAccessToken)
+		}
+	}
+	if secret == nil || secret.Token == "" {
+		c.JSON(400, gin.H{"error": "TTS requires a logged-in ChatGPT access token."})
+		return
+	}
+	if secret.IsFree {
+		c.JSON(403, gin.H{"error": "TTS does not support free/noauth accounts. Use a ChatGPT access token."})
+		return
+	}
+
+	client := bogdanfinn.NewStdClient()
+	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{
+			"message": err.Error(),
+			"type":    "InitTurnStile_request_error",
+			"param":   err,
+			"code":    status,
+		})
+		return
+	}
+
+	// Convert the chat request to a ChatGPT request
+	translated_request := chatgptrequestconverter.ConvertTTSAPIRequest(original_request.Input)
+
+	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": "error sending request",
+		})
+		return
+	}
+	defer response.Body.Close()
+	if chatgpt.Handle_request_error(c, response) {
+		return
+	}
+	msgId, convId := chatgpt.HandlerTTS(response, original_request.Input)
+	if msgId == "" || convId == "" {
+		c.JSON(500, gin.H{"error": "failed to get TTS message id"})
+		return
+	}
+	defer chatgpt.RemoveConversation(client, secret, convId, proxyUrl)
+
+	format := ttsFmtMap[original_request.Format]
+	if format == "" {
+		format = "aac"
+	}
+	voice := ttsVoiceMap[original_request.Voice]
+	if voice == "" {
+		voice = "cove"
+	}
+	data, status, err := chatgpt.GetTTS(client, secret, msgId, convId, voice, format, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "synthesize_request_error",
+			"param":   nil,
+			"code":    status,
+		}})
+		return
+	}
+	c.Data(200, ttsTypeMap[format], data)
 }
 
 func (h *Handler) chatgptConversation(c *gin.Context) {

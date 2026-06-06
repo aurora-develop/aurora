@@ -19,3 +19,9 @@ type OpenAISessionToken struct {
 type OpenAIRefreshToken struct {
 	RefreshToken string `json:"refresh_token"`
 }
+
+type TTSAPIRequest struct {
+	Input  string `json:"input"`
+	Voice  string `json:"voice"`
+	Format string `json:"response_format"`
+}

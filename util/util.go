@@ -1,10 +1,11 @@
 package util
 
 import (
-	"github.com/pkoukk/tiktoken-go"
 	"log/slog"
 	"math/rand"
 	"time"
+
+	"github.com/pkoukk/tiktoken-go"
 )
 
 func RandomLanguage() string {

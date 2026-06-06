@@ -30,7 +30,6 @@ type ChatGPTRequest struct {
 	TimezoneOffsetMin          int               `json:"timezone_offset_min"`
 	Suggestions                []interface{}     `json:"suggestions"`
 	HistoryAndTrainingDisabled bool              `json:"history_and_training_disabled"`
-	ArkoseToken                string            `json:"arkose_token,omitempty"`
 	PluginIDs                  []string          `json:"plugin_ids,omitempty"`
 	ForceRateLimit             bool              `json:"force_rate_limit"`
 	ResetRateLimits            bool              `json:"reset_rate_limits"`
@@ -55,4 +54,13 @@ func (c *ChatGPTRequest) AddMessage(role string, content string) {
 		Author:  chatgpt_author{Role: role},
 		Content: chatgpt_content{ContentType: "text", Parts: []string{content}},
 	})
+}
+
+func (c *ChatGPTRequest) AddAssistantMessage(input string) {
+	var msg = chatgpt_message{
+		ID:      uuid.New(),
+		Author:  chatgpt_author{Role: "assistant"},
+		Content: chatgpt_content{ContentType: "text", Parts: []string{input}},
+	}
+	c.Messages = append(c.Messages, msg)
 }
