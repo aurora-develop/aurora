@@ -1,13 +1,15 @@
 package tokens
 
 import (
+	"strings"
 	"sync"
 )
 
 type Secret struct {
-	Token  string `json:"token"`
-	PUID   string `json:"puid"`
-	IsFree bool   `json:"isFree"`
+	Token      string `json:"token"`
+	PUID       string `json:"puid"`
+	TeamUserID string `json:"team_uid,omitempty"`
+	IsFree     bool   `json:"isFree"`
 }
 type AccessToken struct {
 	tokens []*Secret
@@ -18,8 +20,22 @@ func NewSecret(token string) *Secret {
 	return &Secret{Token: token, PUID: "", IsFree: false}
 }
 
+func NewSecretWithTeam(token string, teamUserID string) *Secret {
+	return &Secret{Token: token, PUID: "", TeamUserID: strings.TrimSpace(teamUserID), IsFree: false}
+}
+
 func NewSecretWithFree(token string) *Secret {
 	return &Secret{Token: token, PUID: "", IsFree: true}
+}
+
+func (s *Secret) WithTeamUserID(teamUserID string) *Secret {
+	if s == nil {
+		return nil
+	}
+	teamUserID = strings.TrimSpace(teamUserID)
+	cloned := *s
+	cloned.TeamUserID = teamUserID
+	return &cloned
 }
 
 func NewAccessToken(tokens []*Secret) AccessToken {

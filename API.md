@@ -7,7 +7,7 @@
 受保护的 `/v1/*` 和 `/backend-api/conversation` 接口需要请求头：
 
 ```text
-Authorization: Bearer <你的鉴权值>
+Authorization: Bearer <AccessToken 或 RefreshToken>
 ```
 
 鉴权值可以是：
@@ -19,6 +19,11 @@ Authorization: Bearer <你的鉴权值>
 文件上传、文件问答、图片生成和 TTS 需要真实 ChatGPT `access_token`。你可以把多个 access token 一行一个放在项目根目录 `access_tokens.txt`，服务会轮询使用；也可以在请求头中直接传入临时 access token。
 
 ## Token 接口
+如果有team账号，可以传入 ChatGPT-Account-ID，使用 Team 工作区：
+
+Authorization 传入 ChatGPT-Account-ID值
+
+Authorization: Bearer <AccessToken 或 RefreshToken>,<ChatGPT-Account-ID> 如果没有传入ChatGPT-Account-ID就不使用team
 
 ### refresh_token 换 access_token
 
