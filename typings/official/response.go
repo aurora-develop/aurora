@@ -231,3 +231,21 @@ func NewOpenAISessionToken(session_token string, access_token string) *OpenAIAcc
 		AccessToken:  access_token,
 	}
 }
+
+type ImageGenerationResponse struct {
+	Created int64                 `json:"created"`
+	Data    []ImageGenerationData `json:"data"`
+}
+
+type ImageGenerationData struct {
+	URL           string `json:"url,omitempty"`
+	B64JSON       string `json:"b64_json,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+func NewImageGenerationResponse(data []ImageGenerationData) ImageGenerationResponse {
+	return ImageGenerationResponse{
+		Created: 0,
+		Data:    data,
+	}
+}

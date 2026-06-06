@@ -74,6 +74,24 @@ curl --location 'http://你的服务器ip:8080/v1/audio/speech' \
    }' \
 --output speech.mp3
 ```
+
+### 图片生成
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/images/generations' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
+--data '{
+     "model": "gpt-image-2",
+     "prompt": "A cute orange cat wearing sunglasses, digital art",
+     "n": 1,
+     "size": "1024x1024",
+     "response_format": "url"
+   }'
+```
+
+如需返回 base64，将 `response_format` 改为 `b64_json`。
+
 ## 高级设置
 
 默认情况不需要设置，除非你有需求

@@ -132,3 +132,42 @@ type TTSAPIRequest struct {
 	Voice  string `json:"voice"`
 	Format string `json:"response_format"`
 }
+
+type ImageGenerationRequest struct {
+	Prompt         string `json:"prompt"`
+	Model          string `json:"model"`
+	N              int    `json:"n"`
+	Size           string `json:"size"`
+	Quality        string `json:"quality"`
+	ResponseFormat string `json:"response_format"`
+}
+
+func (r ImageGenerationRequest) ToAPIRequest() APIRequest {
+	model := r.Model
+	if model == "" || strings.HasPrefix(model, "gpt-image") || strings.HasPrefix(model, "dall-e") {
+		model = "gpt-4-dalle"
+	}
+	prompt := "Generate an image for this request. Return only the generated image, not a text description.\n\n" + r.Prompt
+	return APIRequest{
+		Model: model,
+		Messages: []api_message{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+	}
+}
+
+type ImageEditRequest struct {
+	Prompt         string            `json:"prompt"`
+	Model          string            `json:"model"`
+	N              int               `json:"n"`
+	Size           string            `json:"size"`
+	ResponseFormat string            `json:"response_format"`
+	Images         []ImageEditSource `json:"images,omitempty"`
+}
+
+type ImageEditSource struct {
+	ImageURL string `json:"image_url"`
+}

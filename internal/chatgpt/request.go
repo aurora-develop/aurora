@@ -458,6 +458,11 @@ type fileInfo struct {
 	URL         string `json:"url"`
 }
 
+type ImageGenerationResult struct {
+	URL     string
+	B64JSON string
+}
+
 func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url string, prompt string, token string, puid string, idx int, imgSource []string) {
 	defer wg.Done()
 	header := make(httpclient.AuroraHeaders)
@@ -481,6 +486,485 @@ func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url 
 		return
 	}
 	imgSource[idx] = "[![image](" + file_info.DownloadURL + " \"" + prompt + "\")](" + file_info.DownloadURL + ")"
+}
+
+func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, token string, puid string) (string, error) {
+	header := make(httpclient.AuroraHeaders)
+	if puid != "" {
+		header.Set("Cookie", "_puid="+puid+";")
+	}
+	header.Set("User-Agent", userAgent)
+	header.Set("Accept", "*/*")
+	if token != "" {
+		header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := client.Request(http.MethodGet, url, header, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	var info fileInfo
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		return "", err
+	}
+	if info.Status != "" && info.Status != "success" {
+		return "", fmt.Errorf("image download url is not ready")
+	}
+	if info.DownloadURL == "" {
+		info.DownloadURL = info.URL
+	}
+	if info.DownloadURL == "" {
+		return "", fmt.Errorf("image download url is missing")
+	}
+	return info.DownloadURL, nil
+}
+
+func DownloadImageBytes(client httpclient.AuroraHttpClient, url string, token string, puid string) ([]byte, error) {
+	header := make(httpclient.AuroraHeaders)
+	if puid != "" {
+		header.Set("Cookie", "_puid="+puid+";")
+	}
+	header.Set("User-Agent", userAgent)
+	header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	if token != "" {
+		header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := client.Request(http.MethodGet, url, header, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image download failed: %s", string(body))
+	}
+	return body, nil
+}
+
+func addImageResult(results *[]ImageGenerationResult, seen map[string]bool, result ImageGenerationResult) {
+	key := result.URL
+	if key == "" {
+		key = result.B64JSON
+	}
+	if key == "" || seen[key] {
+		return
+	}
+	seen[key] = true
+	*results = append(*results, result)
+}
+
+func stripDataImagePrefix(value string) (string, bool) {
+	if !strings.HasPrefix(value, "data:image/") {
+		return value, false
+	}
+	parts := strings.SplitN(value, ",", 2)
+	if len(parts) != 2 {
+		return value, false
+	}
+	return parts[1], true
+}
+
+func fileDownloadBaseURL() string {
+	apiURL := BaseURL + "/files/"
+	if FILES_REVERSE_PROXY != "" {
+		apiURL = FILES_REVERSE_PROXY
+	}
+	return strings.TrimRight(apiURL, "/") + "/"
+}
+
+func appendAssetPointerResult(client httpclient.AuroraHttpClient, secret *tokens.Secret, results *[]ImageGenerationResult, seen map[string]bool, assetPointer string) {
+	if assetPointer == "" {
+		return
+	}
+	assetParts := strings.Split(assetPointer, "//")
+	if len(assetParts) != 2 || assetParts[1] == "" {
+		return
+	}
+	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+assetParts[1]+"/download", secret.Token, secret.PUID)
+	if err != nil {
+		return
+	}
+	addImageResult(results, seen, ImageGenerationResult{URL: downloadURL})
+}
+
+func appendFileIDResult(client httpclient.AuroraHttpClient, secret *tokens.Secret, results *[]ImageGenerationResult, seen map[string]bool, fileID string) {
+	if fileID == "" {
+		return
+	}
+	downloadURL, err := GetImageDownloadURL(client, fileDownloadBaseURL()+fileID+"/download", secret.Token, secret.PUID)
+	if err != nil {
+		return
+	}
+	addImageResult(results, seen, ImageGenerationResult{URL: downloadURL})
+}
+
+func collectImageResultsFromValue(client httpclient.AuroraHttpClient, secret *tokens.Secret, value interface{}, results *[]ImageGenerationResult, seen map[string]bool) {
+	switch item := value.(type) {
+	case map[string]interface{}:
+		if result, ok := item["result"].(string); ok && result != "" {
+			if b64, isDataImage := stripDataImagePrefix(result); isDataImage {
+				addImageResult(results, seen, ImageGenerationResult{B64JSON: b64})
+			}
+		}
+		for _, key := range []string{"asset_pointer", "assetPointer"} {
+			if assetPointer, ok := item[key].(string); ok {
+				appendAssetPointerResult(client, secret, results, seen, assetPointer)
+			}
+		}
+		for _, key := range []string{"file_id", "fileId", "id"} {
+			if fileID, ok := item[key].(string); ok && strings.HasPrefix(fileID, "file-") {
+				appendFileIDResult(client, secret, results, seen, fileID)
+			}
+		}
+		for _, key := range []string{"download_url", "downloadUrl", "url"} {
+			if rawURL, ok := item[key].(string); ok && strings.HasPrefix(rawURL, "http") {
+				addImageResult(results, seen, ImageGenerationResult{URL: rawURL})
+			}
+		}
+		for _, nested := range item {
+			collectImageResultsFromValue(client, secret, nested, results, seen)
+		}
+	case []interface{}:
+		for _, nested := range item {
+			collectImageResultsFromValue(client, secret, nested, results, seen)
+		}
+	case string:
+		if b64, isDataImage := stripDataImagePrefix(item); isDataImage {
+			addImageResult(results, seen, ImageGenerationResult{B64JSON: b64})
+		}
+	}
+}
+
+func CollectImageResults(response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret) ([]ImageGenerationResult, string, string, error) {
+	reader := bufio.NewReader(response.Body)
+	var originalResponse chatgpt_types.ChatGPTResponse
+	var convID string
+	var results []ImageGenerationResult
+	seen := make(map[string]bool)
+	var textParts []string
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return results, convID, strings.Join(textParts, ""), err
+		}
+		if len(line) < 6 {
+			continue
+		}
+		line = line[6:]
+		if strings.HasPrefix(line, "[DONE]") {
+			break
+		}
+		originalResponse.Message.ID = ""
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &raw); err == nil {
+			collectImageResultsFromValue(client, secret, raw, &results, seen)
+		}
+		if err := json.Unmarshal([]byte(line), &originalResponse); err != nil {
+			continue
+		}
+		if originalResponse.Error != nil {
+			return results, convID, strings.Join(textParts, ""), fmt.Errorf("image generation error: %v", originalResponse.Error)
+		}
+		if originalResponse.ConversationID != convID {
+			if convID == "" {
+				convID = originalResponse.ConversationID
+			} else {
+				continue
+			}
+		}
+		if originalResponse.Message.Recipient != "all" {
+			continue
+		}
+		if originalResponse.Message.Content.ContentType == "text" && len(originalResponse.Message.Content.Parts) > 0 {
+			if text, ok := originalResponse.Message.Content.Parts[0].(string); ok && text != "" {
+				textParts = append(textParts, text)
+			}
+			continue
+		}
+		if originalResponse.Message.Content.ContentType != "multimodal_text" {
+			continue
+		}
+		for _, part := range originalResponse.Message.Content.Parts {
+			jsonItem, _ := json.Marshal(part)
+			var dalleContent chatgpt_types.DalleContent
+			if err := json.Unmarshal(jsonItem, &dalleContent); err != nil || dalleContent.AssetPointer == "" {
+				continue
+			}
+			appendAssetPointerResult(client, secret, &results, seen, dalleContent.AssetPointer)
+		}
+	}
+	return results, convID, strings.Join(textParts, ""), nil
+}
+
+func conversationFetchHeaders(secret *tokens.Secret) httpclient.AuroraHeaders {
+	header := createBaseHeader()
+	header.Set("Accept", "application/json")
+	header.Set("Content-Type", "application/json")
+	if secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	if secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
+	}
+	return header
+}
+
+func getConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string) (map[string]interface{}, error) {
+	if conversationID == "" {
+		return nil, fmt.Errorf("missing conversation id")
+	}
+	reqURL := BaseURL + "/conversation/" + conversationID
+	response, err := client.Request(http.MethodGet, reqURL, conversationFetchHeaders(secret), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get conversation failed: %s", string(body))
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func collectImageResultsFromConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversation map[string]interface{}) []ImageGenerationResult {
+	var results []ImageGenerationResult
+	seen := make(map[string]bool)
+	collectImageResultsFromValue(client, secret, conversation, &results, seen)
+	return results
+}
+
+func findImageGenerationError(value interface{}) string {
+	switch item := value.(type) {
+	case map[string]interface{}:
+		if itemType, ok := item["type"].(string); ok {
+			switch itemType {
+			case "content_policy_violation", "content_policy_error":
+				if message, ok := item["message"].(string); ok && message != "" {
+					return message
+				}
+				return "Image generation was rejected by the upstream content policy."
+			}
+		}
+		if code, ok := item["code"].(string); ok && strings.Contains(strings.ToLower(code), "content_policy") {
+			if message, ok := item["message"].(string); ok && message != "" {
+				return message
+			}
+			return "Image generation was rejected by the upstream content policy."
+		}
+		for _, nested := range item {
+			if message := findImageGenerationError(nested); message != "" {
+				return message
+			}
+		}
+	case []interface{}:
+		for _, nested := range item {
+			if message := findImageGenerationError(nested); message != "" {
+				return message
+			}
+		}
+	}
+	return ""
+}
+
+func PollImageResults(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string, initial []ImageGenerationResult) ([]ImageGenerationResult, error) {
+	if len(initial) > 0 || conversationID == "" {
+		return initial, nil
+	}
+	var lastErr error
+	for i := 0; i < 45; i++ {
+		if i > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		conversation, err := getConversation(client, secret, conversationID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if message := findImageGenerationError(conversation); message != "" {
+			return nil, errors.New(message)
+		}
+		results := collectImageResultsFromConversation(client, secret, conversation)
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, nil
+}
+
+func imageModelSlug(model string) string {
+	if model == "gpt-image-2" || strings.HasPrefix(model, "gpt-image") {
+		return "gpt-5-3"
+	}
+	if model == "" || strings.HasPrefix(model, "dall-e") || model == "gpt-4-dalle" {
+		return "auto"
+	}
+	return model
+}
+
+func imageConversationHeaders(secret *tokens.Secret, turnStile *TurnStile, conduitToken, accept string) httpclient.AuroraHeaders {
+	header := createBaseHeader()
+	header.Set("Content-Type", "application/json")
+	header.Set("Accept", accept)
+	header.Set("OpenAI-Sentinel-Chat-Requirements-Token", turnStile.TurnStileToken)
+	if turnStile.ProofOfWorkToken != "" {
+		header.Set("OpenAI-Sentinel-Proof-Token", turnStile.ProofOfWorkToken)
+	}
+	if turnStile.TurnstileToken != "" {
+		header.Set("OpenAI-Sentinel-Turnstile-Token", turnStile.TurnstileToken)
+	}
+	if conduitToken != "" {
+		header.Set("X-Conduit-Token", conduitToken)
+	}
+	if accept == "text/event-stream" {
+		header.Set("X-Oai-Turn-Trace-Id", uuid.NewString())
+	}
+	if secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	if secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
+	}
+	return header
+}
+
+func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model string) (string, error) {
+	payload := map[string]interface{}{
+		"action":                "next",
+		"fork_from_shared_post": false,
+		"parent_message_id":     uuid.NewString(),
+		"model":                 imageModelSlug(model),
+		"client_prepare_state":  "success",
+		"timezone_offset_min":   -480,
+		"timezone":              "Asia/Shanghai",
+		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
+		"system_hints":          []string{"picture_v2"},
+		"partial_query": map[string]interface{}{
+			"id":      uuid.NewString(),
+			"author":  map[string]string{"role": "user"},
+			"content": map[string]interface{}{"content_type": "text", "parts": []string{prompt}},
+		},
+		"supports_buffering":  true,
+		"supported_encodings": []string{"v1"},
+		"client_contextual_info": map[string]string{
+			"app_name": "chatgpt.com",
+		},
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation/prepare", imageConversationHeaders(secret, turnStile, "", "*/*"), nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("prepare image conversation failed: %s", string(body))
+	}
+	var result struct {
+		ConduitToken string `json:"conduit_token"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.ConduitToken == "" {
+		return "", fmt.Errorf("missing conduit_token: %s", string(body))
+	}
+	return result.ConduitToken, nil
+}
+
+func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model, proxy string) ([]ImageGenerationResult, string, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	conduitToken, err := prepareImageConversation(client, secret, turnStile, prompt, model)
+	if err != nil {
+		return nil, "", err
+	}
+	payload := map[string]interface{}{
+		"action": "next",
+		"messages": []map[string]interface{}{
+			{
+				"id":          uuid.NewString(),
+				"author":      map[string]string{"role": "user"},
+				"create_time": time.Now().Unix(),
+				"content":     map[string]interface{}{"content_type": "text", "parts": []string{prompt}},
+				"metadata": map[string]interface{}{
+					"developer_mode_connector_ids": []interface{}{},
+					"selected_github_repos":        []interface{}{},
+					"selected_all_github_repos":    false,
+					"system_hints":                 []string{"picture_v2"},
+					"serialization_metadata":       map[string]interface{}{"custom_symbol_offsets": []interface{}{}},
+				},
+			},
+		},
+		"parent_message_id":        uuid.NewString(),
+		"model":                    imageModelSlug(model),
+		"client_prepare_state":     "sent",
+		"timezone_offset_min":      -480,
+		"timezone":                 "Asia/Shanghai",
+		"conversation_mode":        map[string]string{"kind": "primary_assistant"},
+		"enable_message_followups": true,
+		"system_hints":             []string{"picture_v2"},
+		"supports_buffering":       true,
+		"supported_encodings":      []string{"v1"},
+		"client_contextual_info": map[string]interface{}{
+			"is_dark_mode":      false,
+			"time_since_loaded": 1200,
+			"page_height":       1072,
+			"page_width":        1724,
+			"pixel_ratio":       1.2,
+			"screen_height":     1440,
+			"screen_width":      2560,
+			"app_name":          "chatgpt.com",
+		},
+		"paragen_cot_summary_display_override": "allow",
+		"force_parallel_switch":                "auto",
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+
+	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation", imageConversationHeaders(secret, turnStile, conduitToken, "text/event-stream"), nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		return nil, "", fmt.Errorf("image conversation failed: %s", string(body))
+	}
+	results, conversationID, upstreamText, err := CollectImageResults(response, client, secret)
+	if err != nil {
+		return results, upstreamText, err
+	}
+	results, err = PollImageResults(client, secret, conversationID, results)
+	if err != nil {
+		return results, upstreamText, err
+	}
+	return results, upstreamText, nil
 }
 
 func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string) (string, *ContinueInfo) {
@@ -678,10 +1162,10 @@ func GETTokenForRefreshToken(client httpclient.AuroraHttpClient, refresh_token s
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	rawUrl := "https://auth0.openai.com/oauth/token"
+	rawUrl := "https://auth.openai.com/oauth/token"
 
 	data := map[string]interface{}{
-		"redirect_uri":  "com.openai.chat://auth0.openai.com/ios/com.openai.chat/callback",
+		"redirect_uri":  "com.openai.chat://auth.openai.com/ios/com.openai.chat/callback",
 		"grant_type":    "refresh_token",
 		"client_id":     "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh",
 		"refresh_token": refresh_token,
@@ -694,7 +1178,7 @@ func GETTokenForRefreshToken(client httpclient.AuroraHttpClient, refresh_token s
 
 	header := make(httpclient.AuroraHeaders)
 	//req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
-	header.Set("authority", "auth0.openai.com")
+	header.Set("authority", "auth.openai.com")
 	header.Set("Accept-Language", "en-US,en;q=0.9")
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36")

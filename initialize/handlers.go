@@ -9,6 +9,7 @@ import (
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
+	"encoding/base64"
 	"io"
 	"os"
 	"strings"
@@ -375,6 +376,137 @@ func (h *Handler) responses(c *gin.Context) {
 	c.String(200, "event: response.output_text.delta\ndata: "+officialtypes.ResponsesTextDelta(full_response)+"\n\n")
 	c.String(200, "event: response.completed\ndata: "+officialtypes.ResponsesCompleted(responsesResponse)+"\n\n")
 	c.String(200, "data: [DONE]\n\n")
+}
+
+func (h *Handler) imageGenerations(c *gin.Context) {
+	var imageRequest officialtypes.ImageGenerationRequest
+	err := c.BindJSON(&imageRequest)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be proper JSON",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    err.Error(),
+		}})
+		return
+	}
+	if imageRequest.Prompt == "" {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Missing required parameter: prompt",
+			"type":    "invalid_request_error",
+			"param":   "prompt",
+			"code":    "missing_required_parameter",
+		}})
+		return
+	}
+	if imageRequest.N <= 0 {
+		imageRequest.N = 1
+	}
+	if imageRequest.N > 10 {
+		imageRequest.N = 10
+	}
+	if imageRequest.ResponseFormat == "" {
+		imageRequest.ResponseFormat = "b64_json"
+	}
+
+	proxyUrl := h.proxy.GetProxyIP()
+	secret := h.token.GetPaidSecret()
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = h.token.GenerateTempToken(customAccessToken)
+		}
+	}
+	if secret == nil || secret.Token == "" {
+		c.JSON(400, gin.H{"error": "Images API requires a logged-in ChatGPT access token."})
+		c.Abort()
+		return
+	}
+	if secret.IsFree {
+		c.JSON(403, gin.H{"error": "Images API does not support free/noauth accounts. Use a ChatGPT access token."})
+		return
+	}
+
+	client := bogdanfinn.NewStdClient()
+	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{
+			"message": err.Error(),
+			"type":    "InitTurnStile_request_error",
+			"param":   err,
+			"code":    status,
+		})
+		return
+	}
+
+	var data []officialtypes.ImageGenerationData
+	for i := 0; i < imageRequest.N; i++ {
+		imageResults, upstreamText, err := chatgpt.GeneratePictureConversationImages(client, secret, turnStile, imageRequest.Prompt, imageRequest.Model, proxyUrl)
+		if err != nil {
+			c.JSON(500, gin.H{"error": gin.H{
+				"message": err.Error(),
+				"type":    "image_generation_error",
+				"param":   nil,
+				"code":    "image_generation_error",
+			}})
+			return
+		}
+		for _, imageResult := range imageResults {
+			item := officialtypes.ImageGenerationData{
+				RevisedPrompt: imageRequest.Prompt,
+			}
+			if imageRequest.ResponseFormat == "b64_json" {
+				if imageResult.B64JSON != "" {
+					item.B64JSON = imageResult.B64JSON
+				} else if imageResult.URL != "" {
+					imageBytes, err := chatgpt.DownloadImageBytes(client, imageResult.URL, secret.Token, secret.PUID)
+					if err != nil {
+						c.JSON(500, gin.H{"error": gin.H{
+							"message": err.Error(),
+							"type":    "image_download_error",
+							"param":   nil,
+							"code":    "image_download_error",
+						}})
+						return
+					}
+					item.B64JSON = base64.StdEncoding.EncodeToString(imageBytes)
+				}
+			} else {
+				item.URL = imageResult.URL
+				if item.URL == "" && imageResult.B64JSON != "" {
+					item.B64JSON = imageResult.B64JSON
+				}
+			}
+			data = append(data, item)
+			if len(data) >= imageRequest.N {
+				break
+			}
+		}
+		if len(imageResults) == 0 && upstreamText != "" {
+			c.JSON(500, gin.H{"error": gin.H{
+				"message": "No image result found in response: " + upstreamText,
+				"type":    "image_generation_error",
+				"param":   nil,
+				"code":    "image_generation_error",
+			}})
+			return
+		}
+		if len(data) >= imageRequest.N {
+			break
+		}
+	}
+	if len(data) == 0 {
+		c.JSON(500, gin.H{"error": gin.H{
+			"message": "No image result found in response",
+			"type":    "image_generation_error",
+			"param":   nil,
+			"code":    "image_generation_error",
+		}})
+		return
+	}
+	c.JSON(200, officialtypes.NewImageGenerationResponse(data))
 }
 
 func (h *Handler) engines(c *gin.Context) {
