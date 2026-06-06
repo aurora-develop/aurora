@@ -31,7 +31,7 @@ func CountToken(input string) int {
 	encoding := "gpt-3.5-turbo"
 	tkm, err := tiktoken.EncodingForModel(encoding)
 	if err != nil {
-		slog.Warn("tiktoken.EncodingForModel error:", err)
+		slog.Warn("tiktoken.EncodingForModel error", "error", err)
 		return 0
 	}
 	token := tkm.Encode(input, nil, nil)

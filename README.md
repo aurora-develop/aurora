@@ -89,3 +89,6 @@ https://github.com/aurorax-neo/chat2api
 ## License
 
 MIT License
+
+## 友链
+https://linux.do/
