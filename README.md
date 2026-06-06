@@ -84,6 +84,7 @@ PROXY_URL=your_proxy_url 添加代理池来。
 
 
 https://github.com/xqdoo00o/ChatGPT-to-API
+https://github.com/aurorax-neo/chat2api
 
 ## License
 

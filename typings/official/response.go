@@ -26,12 +26,15 @@ type Delta struct {
 	Role    string `json:"role,omitempty"`
 }
 
-func NewChatCompletionChunk(text string) ChatCompletionChunk {
+func NewChatCompletionChunk(text string, model string) ChatCompletionChunk {
+	if model == "" {
+		model = "auto"
+	}
 	return ChatCompletionChunk{
 		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 		Object:  "chat.completion.chunk",
 		Created: 0,
-		Model:   "gpt-3.5-turbo-0301",
+		Model:   model,
 		Choices: []Choices{
 			{
 				Index: 0,
@@ -44,12 +47,15 @@ func NewChatCompletionChunk(text string) ChatCompletionChunk {
 	}
 }
 
-func StopChunk(reason string) ChatCompletionChunk {
+func StopChunk(reason string, model string) ChatCompletionChunk {
+	if model == "" {
+		model = "auto"
+	}
 	return ChatCompletionChunk{
 		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 		Object:  "chat.completion.chunk",
 		Created: 0,
-		Model:   "gpt-3.5-turbo-0125",
+		Model:   model,
 		Choices: []Choices{
 			{
 				Index:        0,
@@ -82,12 +88,15 @@ type usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-func NewChatCompletion(full_test string, input_tokens, output_tokens int) ChatCompletion {
+func NewChatCompletion(full_test string, input_tokens, output_tokens int, model string) ChatCompletion {
+	if model == "" {
+		model = "auto"
+	}
 	return ChatCompletion{
 		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 		Object:  "chat.completion",
 		Created: int64(0),
-		Model:   "gpt-3.5-turbo-0125",
+		Model:   model,
 		Usage: usage{
 			PromptTokens:     input_tokens,
 			CompletionTokens: output_tokens,

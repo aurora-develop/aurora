@@ -188,7 +188,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, chatgpt.GetConfig())
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -198,16 +198,15 @@ func (h *Handler) nightmare(c *gin.Context) {
 		})
 		return
 	}
-	if !secret.IsFree {
-		err = chatgpt.InitWSConn(client, secret.Token, uid, proxyUrl)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "unable to create ws tunnel"})
-			return
-		}
-	}
 
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, turnStile.Arkose, proxyUrl)
+
+	// Use the model from the original request, default to "auto"
+	reqModel := original_request.Model
+	if reqModel == "" {
+		reqModel = "auto"
+	}
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 	if err != nil {
@@ -228,7 +227,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string
-		response_part, continue_info = chatgpt.Handler(c, response, client, secret, uid, translated_request, original_request.Stream)
+		response_part, continue_info = chatgpt.Handler(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel)
 		full_response += response_part
 		if continue_info == nil {
 			break
@@ -258,7 +257,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	if !original_request.Stream {
 		output_tokens := util.CountToken(full_response)
-		c.JSON(200, officialtypes.NewChatCompletion(full_response, input_tokens, output_tokens))
+		c.JSON(200, officialtypes.NewChatCompletion(full_response, input_tokens, output_tokens, reqModel))
 	} else {
 		c.String(200, "data: [DONE]\n\n")
 	}
@@ -362,7 +361,7 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl, chatgpt.GetConfig())
+	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
