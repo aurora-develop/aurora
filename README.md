@@ -51,6 +51,7 @@ docker-compose up -d
 ```bash
 curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 --header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
 --data '{
      "model": "auto",
      "messages": [{"role": "user", "content": "Say this is a test!"}],
@@ -64,6 +65,7 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 ```bash
 curl --location 'http://你的服务器ip:8080/v1/audio/speech' \
 --header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
 --data '{
      "model": "tts-1",
      "input": "Hello, this is a test!",
