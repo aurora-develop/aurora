@@ -1,5 +1,5 @@
-# 使用 Go 1.21 官方镜像作为构建环境
-FROM golang:1.21 AS builder
+# 使用 Go 1.25 官方镜像作为构建环境
+FROM golang:1.25 AS builder
 
 # 禁用 CGO
 ENV CGO_ENABLED=0
