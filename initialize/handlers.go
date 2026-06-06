@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -170,16 +171,18 @@ func (h *Handler) nightmare(c *gin.Context) {
 		}})
 		return
 	}
-	proxyUrl := h.proxy.GetProxyIP()
-	input_tokens := util.CountToken(original_request.Messages[0].Content)
-	secret := h.token.GetSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
+	if len(original_request.Messages) == 0 {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Missing required parameter: messages",
+			"type":    "invalid_request_error",
+			"param":   "messages",
+			"code":    "missing_required_parameter",
+		}})
+		return
 	}
+	proxyUrl := h.proxy.GetProxyIP()
+	input_tokens := countMessagesTokens(original_request.Messages)
+	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), original_requestHasFiles(original_request), false)
 	if secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
 		c.Abort()
@@ -288,16 +291,9 @@ func (h *Handler) responses(c *gin.Context) {
 	proxyUrl := h.proxy.GetProxyIP()
 	input_tokens := 0
 	for _, message := range original_request.Messages {
-		input_tokens += util.CountToken(message.Content)
+		input_tokens += util.CountToken(message.Text())
 	}
-	secret := h.token.GetSecret()
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
-		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(customAccessToken)
-		}
-	}
+	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), original_requestHasFiles(original_request), false)
 	if secret == nil {
 		c.JSON(400, gin.H{"error": "Not Account Found."})
 		c.Abort()
@@ -509,6 +505,77 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	c.JSON(200, officialtypes.NewImageGenerationResponse(data))
 }
 
+func (h *Handler) files(c *gin.Context) {
+	secret := h.secretFromAuthorization(c.GetHeader("Authorization"), true, true)
+	if secret == nil || secret.Token == "" || secret.IsFree {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Files API requires a logged-in ChatGPT access token.",
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    "missing_access_token",
+		}})
+		return
+	}
+
+	formFile, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Missing required multipart field: file",
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "missing_required_parameter",
+		}})
+		return
+	}
+	file, err := formFile.Open()
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "file_open_error",
+		}})
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "file_read_error",
+		}})
+		return
+	}
+	if len(data) == 0 {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Uploaded file is empty",
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "empty_file",
+		}})
+		return
+	}
+
+	contentType := formFile.Header.Get("Content-Type")
+	client := bogdanfinn.NewStdClient()
+	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+	uploaded, status, err := chatgpt.UploadFile(client, secret, h.proxy.GetProxyIP(), formFile.Filename, contentType, c.PostForm("purpose"), data)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "file_upload_error",
+			"param":   "file",
+			"code":    "file_upload_error",
+		}})
+		return
+	}
+	uploaded.CreatedAt = time.Now().Unix()
+	chatgpt.RegisterUploadedFile(uploaded)
+	c.JSON(200, uploaded)
+}
+
 func (h *Handler) engines(c *gin.Context) {
 	type ResData struct {
 		ID      string `json:"id"`
@@ -537,6 +604,40 @@ func (h *Handler) engines(c *gin.Context) {
 		Object: "list",
 		Data:   resModelList,
 	})
+}
+
+func (h *Handler) secretFromAuthorization(authHeader string, needsPaid bool, allowFallbackPaid bool) *tokens.Secret {
+	secret := h.token.GetSecret()
+	if needsPaid || allowFallbackPaid {
+		secret = h.token.GetPaidSecret()
+	}
+	if authHeader != "" {
+		customAccessToken := strings.TrimSpace(strings.Replace(authHeader, "Bearer ", "", 1))
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			secret = h.token.GenerateTempToken(customAccessToken)
+		}
+	}
+	if needsPaid && (secret == nil || secret.Token == "" || secret.IsFree) && !allowFallbackPaid {
+		return nil
+	}
+	return secret
+}
+
+func countMessagesTokens(messages []officialtypes.APIMessage) int {
+	total := 0
+	for _, message := range messages {
+		total += util.CountToken(message.Text())
+	}
+	return total
+}
+
+func original_requestHasFiles(request officialtypes.APIRequest) bool {
+	for _, message := range request.Messages {
+		if len(message.Files()) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 var ttsFmtMap = map[string]string{
