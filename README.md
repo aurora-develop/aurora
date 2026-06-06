@@ -52,7 +52,7 @@ docker-compose up -d
 curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 --header 'Content-Type: application/json' \
 --data '{
-     "model": "gpt-3.5-turbo",
+     "model": "auto",
      "messages": [{"role": "user", "content": "Say this is a test!"}],
      "stream": true
    }'
