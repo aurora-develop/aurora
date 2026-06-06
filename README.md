@@ -2,14 +2,6 @@
 
 [README_EN](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-
-# Web端 
-
-访问http://你的服务器ip:8080/web
-
-
-### 注：仅ip属地支持免登录使用ChatGpt可以使用
-
 ## Deploy
 
 
