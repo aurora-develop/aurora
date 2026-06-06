@@ -41,7 +41,7 @@ func NewChatGPTRequest() ChatGPTRequest {
 	return ChatGPTRequest{
 		Action:                     "next",
 		ParentMessageID:            uuid.NewString(),
-		Model:                      "text-davinci-002-render-sha",
+		Model:                      "auto",
 		HistoryAndTrainingDisabled: disable_history,
 		ForceUseSse:                true,
 		TimezoneOffsetMin:          -480,
