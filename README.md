@@ -8,10 +8,8 @@
 
 访问http://你的服务器ip:8080/web
 
-![web使用](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202024-04-07%20111706.png)
 
-
-### 注：仅ip属地支持免登录使用ChatGpt可以使用(也可以自定义Baseurl来绕过限制)
+### 注：仅ip属地支持免登录使用ChatGpt可以使用
 
 ## Deploy
 
@@ -82,13 +80,15 @@ PROXY_URL=your_proxy_url 添加代理池来。
 
 ## 参考项目
 
-
-https://github.com/xqdoo00o/ChatGPT-to-API
-https://github.com/aurorax-neo/chat2api
+- [ChatGPT-to-API](https://github.com/xqdoo00o/ChatGPT-to-API)
+- [chat2api](https://github.com/aurorax-neo/chat2api)
 
 ## License
 
 MIT License
 
 ## 友链
-https://linux.do/
+
+- [linux.do](https://linux.do/)
+- [xiaozhou26](https://github.com/xiaozhou26)
+- [aurorax-neo](https://github.com/aurorax-neo)
