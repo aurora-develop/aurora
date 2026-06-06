@@ -57,20 +57,22 @@ func buildMessageParts(message official_types.APIMessage) ([]interface{}, map[st
 		if fileID == "" {
 			continue
 		}
-		part := map[string]interface{}{
-			"content_type":  filePartType(file),
-			"asset_pointer": "file-service://" + fileID,
+		if isImageFile(file) {
+			part := map[string]interface{}{
+				"content_type":  "image_asset_pointer",
+				"asset_pointer": "file-service://" + fileID,
+			}
+			if file.Size > 0 {
+				part["size_bytes"] = file.Size
+			}
+			if file.Width > 0 {
+				part["width"] = file.Width
+			}
+			if file.Height > 0 {
+				part["height"] = file.Height
+			}
+			parts = append(parts, part)
 		}
-		if file.Size > 0 {
-			part["size_bytes"] = file.Size
-		}
-		if file.Width > 0 {
-			part["width"] = file.Width
-		}
-		if file.Height > 0 {
-			part["height"] = file.Height
-		}
-		parts = append(parts, part)
 
 		attachment := map[string]interface{}{
 			"id":           fileID,
@@ -168,9 +170,10 @@ func fileMime(file official_types.FileAttachment) string {
 	return strings.TrimSpace(file.MIMEType)
 }
 
-func filePartType(file official_types.FileAttachment) string {
+func isImageFile(file official_types.FileAttachment) bool {
 	if strings.HasPrefix(strings.ToLower(fileMime(file)), "image/") {
-		return "image_asset_pointer"
+		return true
 	}
-	return "file_asset_pointer"
+	name := strings.ToLower(fileName(file))
+	return strings.HasSuffix(name, ".png") || strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") || strings.HasSuffix(name, ".webp") || strings.HasSuffix(name, ".gif")
 }

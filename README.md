@@ -50,8 +50,31 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
      "stream": true
    }'
 ```
+
 ### 支持codex的api
 
+### 携带文件问答
+
+```bash
+curl -X POST http://localhost:8080/v1/files \
+  -H "Authorization: Bearer <你的key或access token>" \
+  -F "purpose=assistants" \
+  -F "file=@./test.pdf"
+然后带 file_id 问答：
+```
+
+```bash
+{
+  "model": "auto",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "input_file", "file_id": "file-xxx"},
+      {"type": "text", "text": "总结这个文件"}
+    ]
+  }]
+}
+```
 ### TTS 语音合成
 
 ```bash
