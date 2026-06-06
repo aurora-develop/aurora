@@ -42,6 +42,25 @@ func (a *AccessToken) GetSecret() *Secret {
 	return secret
 }
 
+func (a *AccessToken) GetPaidSecret() *Secret {
+	if a == nil {
+		return &Secret{}
+	}
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	for i, secret := range a.tokens {
+		if secret == nil || secret.IsFree || secret.Token == "" {
+			continue
+		}
+		a.tokens = append(a.tokens[:i], a.tokens[i+1:]...)
+		a.tokens = append(a.tokens, secret)
+		return secret
+	}
+	return &Secret{}
+}
+
 // UpdateSecret 更新tokens
 func (a *AccessToken) UpdateSecret(tokens []*Secret) {
 	a.lock.Lock()

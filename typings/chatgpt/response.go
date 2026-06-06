@@ -5,28 +5,6 @@ type ChatGPTResponse struct {
 	ConversationID string      `json:"conversation_id"`
 	Error          interface{} `json:"error"`
 }
-type ChatGPTWSSResponse struct {
-	WssUrl         string `json:"wss_url"`
-	ConversationId string `json:"conversation_id,omitempty"`
-	ResponseId     string `json:"response_id,omitempty"`
-}
-
-type WSSMsgResponse struct {
-	SequenceId int                `json:"sequenceId"`
-	Type       string             `json:"type"`
-	From       string             `json:"from"`
-	DataType   string             `json:"dataType"`
-	Data       WSSMsgResponseData `json:"data"`
-}
-
-type WSSMsgResponseData struct {
-	Type           string `json:"type"`
-	Body           string `json:"body"`
-	MoreBody       bool   `json:"more_body"`
-	ResponseId     string `json:"response_id"`
-	ConversationId string `json:"conversation_id"`
-}
-
 type Message struct {
 	ID         string      `json:"id"`
 	Author     Author      `json:"author"`
@@ -86,10 +64,6 @@ type ProofWork struct {
 }
 
 type RequirementsResponse struct {
-	Arkose struct {
-		Required bool        `json:"required"`
-		Dx       interface{} `json:"dx"`
-	} `json:"arkose"`
 	Proof     ProofWork `json:"proofofwork,omitempty"`
 	Turnstile struct {
 		Required bool `json:"required"`
