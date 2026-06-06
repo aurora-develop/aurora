@@ -1,15 +1,9 @@
 # AURORA
 
-(Free GPT-3.5 with UI) Supports the use of GPT-3.5 through access calls.
+Supports the use of GPT-3.5 through access calls.
 
 # Communication Group
 https://t.me/aurora_develop
-
-# Web Interface
-Access http://your-server-ip:8080/web and fill in the server's http://your-server-ip:8080 on the web settings page.
-![web usage](https://jsd.cdn.zzko.cn/gh/xiaozhou26/tuph@main/images/2024-04-07%20112100.png)
-
-### Note: Only users in IP regions that support login-free use of ChatGpt can use this (it's also possible to bypass restrictions by customizing Baseurl).
 
 ## Deployment
 
