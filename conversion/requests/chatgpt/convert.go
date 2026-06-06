@@ -18,10 +18,6 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 	}
 	chatgpt_request.Model = model
 
-	if api_request.PluginIDs != nil {
-		chatgpt_request.PluginIDs = api_request.PluginIDs
-		chatgpt_request.Model = "gpt-4-plugins"
-	}
 	for _, apiMessage := range api_request.Messages {
 		if apiMessage.Role == "system" {
 			apiMessage.Role = "critic"

@@ -31,7 +31,6 @@ type ChatGPTRequest struct {
 	TimezoneOffsetMin          int               `json:"timezone_offset_min"`
 	Suggestions                []interface{}     `json:"suggestions"`
 	HistoryAndTrainingDisabled bool              `json:"history_and_training_disabled"`
-	PluginIDs                  []string          `json:"plugin_ids,omitempty"`
 	ForceRateLimit             bool              `json:"force_rate_limit"`
 	ResetRateLimits            bool              `json:"reset_rate_limits"`
 	ForceUseSse                bool              `json:"force_use_sse"`
