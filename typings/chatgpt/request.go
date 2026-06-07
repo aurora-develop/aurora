@@ -2,15 +2,17 @@ package chatgpt
 
 import (
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type chatgpt_message struct {
-	ID       uuid.UUID              `json:"id"`
-	Author   chatgpt_author         `json:"author"`
-	Content  chatgpt_content        `json:"content"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	ID         uuid.UUID              `json:"id"`
+	Author     chatgpt_author         `json:"author"`
+	CreateTime float64                `json:"create_time,omitempty"`
+	Content    chatgpt_content        `json:"content"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type chatgpt_content struct {
@@ -23,17 +25,28 @@ type chatgpt_author struct {
 }
 
 type ChatGPTRequest struct {
-	Action                     string            `json:"action"`
-	Messages                   []chatgpt_message `json:"messages"`
-	ParentMessageID            string            `json:"parent_message_id"`
-	ConversationID             string            `json:"conversation_id,omitempty"`
-	Model                      string            `json:"model"`
-	TimezoneOffsetMin          int               `json:"timezone_offset_min"`
-	Suggestions                []interface{}     `json:"suggestions"`
-	HistoryAndTrainingDisabled bool              `json:"history_and_training_disabled"`
-	ForceRateLimit             bool              `json:"force_rate_limit"`
-	ResetRateLimits            bool              `json:"reset_rate_limits"`
-	ForceUseSse                bool              `json:"force_use_sse"`
+	Action                           string                 `json:"action"`
+	Messages                         []chatgpt_message      `json:"messages"`
+	ParentMessageID                  string                 `json:"parent_message_id"`
+	ConversationID                   string                 `json:"conversation_id,omitempty"`
+	Model                            string                 `json:"model"`
+	ClientPrepareState               string                 `json:"client_prepare_state,omitempty"`
+	TimezoneOffsetMin                int                    `json:"timezone_offset_min"`
+	Timezone                         string                 `json:"timezone"`
+	ConversationMode                 map[string]string      `json:"conversation_mode"`
+	EnableMessageFollowups           bool                   `json:"enable_message_followups"`
+	SystemHints                      []string               `json:"system_hints"`
+	SupportsBuffering                bool                   `json:"supports_buffering"`
+	SupportedEncodings               []string               `json:"supported_encodings"`
+	ClientContextualInfo             map[string]interface{} `json:"client_contextual_info"`
+	Suggestions                      []interface{}          `json:"suggestions"`
+	HistoryAndTrainingDisabled       bool                   `json:"history_and_training_disabled"`
+	ParagenCotSummaryDisplayOverride string                 `json:"paragen_cot_summary_display_override"`
+	ForceParallelSwitch              string                 `json:"force_parallel_switch"`
+	ThinkingEffort                   string                 `json:"thinking_effort"`
+	ForceRateLimit                   bool                   `json:"force_rate_limit"`
+	ResetRateLimits                  bool                   `json:"reset_rate_limits"`
+	ForceUseSse                      bool                   `json:"force_use_sse"`
 }
 
 func NewChatGPTRequest() ChatGPTRequest {
@@ -42,17 +55,39 @@ func NewChatGPTRequest() ChatGPTRequest {
 		Action:                     "next",
 		ParentMessageID:            uuid.NewString(),
 		Model:                      "auto",
+		ClientPrepareState:         "success",
 		HistoryAndTrainingDisabled: disable_history,
 		ForceUseSse:                true,
 		TimezoneOffsetMin:          -480,
+		Timezone:                   "Asia/Shanghai",
+		ConversationMode:           map[string]string{"kind": "primary_assistant"},
+		EnableMessageFollowups:     true,
+		SystemHints:                []string{},
+		SupportsBuffering:          true,
+		SupportedEncodings:         []string{"v1"},
+		ClientContextualInfo: map[string]interface{}{
+			"is_dark_mode":      false,
+			"time_since_loaded": 0,
+			"page_height":       1014,
+			"page_width":        1055,
+			"pixel_ratio":       1,
+			"screen_height":     1080,
+			"screen_width":      1920,
+			"app_name":          "chatgpt.com",
+		},
+		ParagenCotSummaryDisplayOverride: "allow",
+		ForceParallelSwitch:              "auto",
+		ThinkingEffort:                   "standard",
 	}
 }
 
 func (c *ChatGPTRequest) AddMessage(role string, content string) {
 	c.Messages = append(c.Messages, chatgpt_message{
-		ID:      uuid.New(),
-		Author:  chatgpt_author{Role: role},
-		Content: chatgpt_content{ContentType: "text", Parts: []interface{}{content}},
+		ID:         uuid.New(),
+		Author:     chatgpt_author{Role: role},
+		CreateTime: messageCreateTime(),
+		Content:    chatgpt_content{ContentType: "text", Parts: []interface{}{content}},
+		Metadata:   defaultMessageMetadata(),
 	})
 }
 
@@ -62,18 +97,21 @@ func (c *ChatGPTRequest) AddMultimodalMessage(role string, parts []interface{}, 
 		contentType = "multimodal_text"
 	}
 	c.Messages = append(c.Messages, chatgpt_message{
-		ID:       uuid.New(),
-		Author:   chatgpt_author{Role: role},
-		Content:  chatgpt_content{ContentType: contentType, Parts: parts},
-		Metadata: metadata,
+		ID:         uuid.New(),
+		Author:     chatgpt_author{Role: role},
+		CreateTime: messageCreateTime(),
+		Content:    chatgpt_content{ContentType: contentType, Parts: parts},
+		Metadata:   mergeMessageMetadata(metadata),
 	})
 }
 
 func (c *ChatGPTRequest) AddAssistantMessage(input string) {
 	var msg = chatgpt_message{
-		ID:      uuid.New(),
-		Author:  chatgpt_author{Role: "assistant"},
-		Content: chatgpt_content{ContentType: "text", Parts: []interface{}{input}},
+		ID:         uuid.New(),
+		Author:     chatgpt_author{Role: "assistant"},
+		CreateTime: messageCreateTime(),
+		Content:    chatgpt_content{ContentType: "text", Parts: []interface{}{input}},
+		Metadata:   defaultMessageMetadata(),
 	}
 	c.Messages = append(c.Messages, msg)
 }
@@ -81,4 +119,26 @@ func (c *ChatGPTRequest) AddAssistantMessage(input string) {
 func isStringPart(part interface{}) bool {
 	_, ok := part.(string)
 	return ok
+}
+
+func messageCreateTime() float64 {
+	return float64(time.Now().UnixMilli()) / 1000.0
+}
+
+func defaultMessageMetadata() map[string]interface{} {
+	return map[string]interface{}{
+		"developer_mode_connector_ids": []interface{}{},
+		"selected_sources":             []interface{}{},
+		"selected_github_repos":        []interface{}{},
+		"selected_all_github_repos":    false,
+		"serialization_metadata":       map[string]interface{}{"custom_symbol_offsets": []interface{}{}},
+	}
+}
+
+func mergeMessageMetadata(metadata map[string]interface{}) map[string]interface{} {
+	merged := defaultMessageMetadata()
+	for key, value := range metadata {
+		merged[key] = value
+	}
+	return merged
 }
