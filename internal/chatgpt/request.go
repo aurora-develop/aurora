@@ -450,18 +450,138 @@ func GetCf(proxy string) (string, error) {
 	return "", errors.New("ailed to get cf clearance")
 }
 
+func conversationURL(secret *tokens.Secret, path string) (string, string) {
+	if secret != nil && secret.IsFree {
+		return strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + path, "/backend-anon" + path
+	}
+	return BaseURL + path, "/backend-api" + path
+}
+
+func conversationHeaders(secret *tokens.Secret, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string) httpclient.AuroraHeaders {
+	header := createBaseHeader()
+	header.Set("Accept", accept)
+	header.Set("Content-Type", "application/json")
+	header.Set("x-openai-target-path", targetPath)
+	header.Set("x-openai-target-route", targetPath)
+	if turnTraceID != "" {
+		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
+	}
+	if conduitToken != "" {
+		header.Set("X-Conduit-Token", conduitToken)
+	}
+	if chatToken != nil {
+		if chatToken.TurnStileToken != "" {
+			header.Set("openai-sentinel-chat-requirements-token", chatToken.TurnStileToken)
+		}
+		if chatToken.ProofOfWorkToken != "" {
+			header.Set("openai-sentinel-proof-token", chatToken.ProofOfWorkToken)
+		}
+		if chatToken.TurnstileToken != "" {
+			header.Set("openai-sentinel-turnstile-token", chatToken.TurnstileToken)
+		}
+	}
+	if secret != nil && secret.PUID != "" {
+		header.Set("Cookie", "_puid="+secret.PUID+";")
+	}
+	if secret != nil && secret.IsFree && secret.Token != "" {
+		header.Set("oai-device-id", secret.Token)
+	}
+	if secret != nil && !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	setTeamAccountHeader(header, secret)
+	return header
+}
+
+func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string) (string, error) {
+	apiUrl, targetPath := conversationURL(secret, "/f/conversation/prepare")
+	payload := map[string]interface{}{
+		"action":                "next",
+		"fork_from_shared_post": false,
+		"parent_message_id":     "client-created-root",
+		"model":                 conversationPrepareModel(message.Model),
+		"timezone_offset_min":   message.TimezoneOffsetMin,
+		"timezone":              "Asia/Shanghai",
+		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
+		"system_hints":          []string{},
+		"partial_query": map[string]interface{}{
+			"id":      uuid.NewString(),
+			"author":  map[string]string{"role": "user"},
+			"content": map[string]interface{}{"content_type": "text", "parts": []string{conversationPartialText(message)}},
+		},
+		"supports_buffering":  true,
+		"supported_encodings": []string{"v1"},
+		"client_contextual_info": map[string]string{
+			"app_name": "chatgpt.com",
+		},
+		"thinking_effort": "standard",
+	}
+	if message.ConversationID != "" {
+		payload["conversation_id"] = message.ConversationID
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	header := conversationHeaders(secret, chatToken, "*/*", targetPath, "no-token", turnTraceID)
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("conversation prepare failed: %s", string(body))
+	}
+	var result struct {
+		ConduitToken string `json:"conduit_token"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.ConduitToken == "" {
+		return "", fmt.Errorf("missing conduit_token: %s", string(body))
+	}
+	return result.ConduitToken, nil
+}
+
+func conversationPrepareModel(model string) string {
+	if model == "" {
+		return "auto"
+	}
+	return model
+}
+
+func conversationPartialText(message chatgpt_types.ChatGPTRequest) string {
+	for i := len(message.Messages) - 1; i >= 0; i-- {
+		msg := message.Messages[i]
+		if msg.Author.Role != "user" {
+			continue
+		}
+		for _, part := range msg.Content.Parts {
+			if text, ok := part.(string); ok && strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+	}
+	return "h"
+}
+
 func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	var apiUrl string
-	if secret.IsFree {
-		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/f/conversation"
-	} else {
-		apiUrl = BaseURL + "/conversation"
-	}
+	apiUrl, targetPath := conversationURL(secret, "/f/conversation")
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
+	}
+	turnTraceID := uuid.NewString()
+	conduitToken, err := getConduitToken(client, message, secret, chat_token, turnTraceID)
+	if err != nil {
+		return nil, err
 	}
 
 	// JSONify the body and add it to the request
@@ -469,29 +589,8 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	if err != nil {
 		return &http.Response{}, err
 	}
-	header := createBaseHeader()
-	header.Set("content-type", "application/json")
-
-	// Clear cookies
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
-	}
-	if chat_token.TurnStileToken != "" {
-		header.Set("openai-sentinel-chat-requirements-token", chat_token.TurnStileToken)
-	}
-	if chat_token.ProofOfWorkToken != "" {
-		header.Set("openai-sentinel-proof-token", chat_token.ProofOfWorkToken)
-	}
-	if chat_token.TurnstileToken != "" {
-		header.Set("openai-sentinel-turnstile-token", chat_token.TurnstileToken)
-	}
-	if !secret.IsFree && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
+	header := conversationHeaders(secret, chat_token, "text/event-stream", targetPath, conduitToken, turnTraceID)
 	if secret.IsFree {
-		header.Set("oai-device-id", secret.Token)
-		header.Set("x-openai-target-path", "/backend-anon/f/conversation")
-		header.Set("x-openai-target-route", "/backend-anon/f/conversation")
 		client.SetCookies("https://chatgpt.com", []*http.Cookie{
 			{Name: "oai-device-id", Value: secret.Token, Path: "/", Domain: "chatgpt.com"},
 		})
