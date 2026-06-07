@@ -620,7 +620,18 @@ func (h *Handler) engines(c *gin.Context) {
 		Data   []ResData `json:"data"`
 	}
 
-	models := []string{"auto", "gpt-5", "gpt-5-1", "gpt-5-2", "gpt-5-3", "gpt-5-3-mini", "gpt-image-2"}
+	models := []string{
+		"auto",
+		"gpt-5.5-instant",
+		"gpt-5-5-thinking",
+		"gpt-5.5-pro",
+		"gpt-5",
+		"gpt-4o",
+		"gpt-4o-mini",
+		"o3",
+		"o4-mini",
+		"o4-mini-high",
+	}
 	var resModelList []ResData
 	for _, model := range models {
 		resModelList = append(resModelList, ResData{

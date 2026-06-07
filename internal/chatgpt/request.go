@@ -1055,7 +1055,7 @@ func imageModelSlug(model string) string {
 		model = "gpt-image-2"
 	}
 	if model == "gpt-image-2" || strings.HasPrefix(model, "gpt-image") {
-		return "gpt-5-3"
+		return "auto"
 	}
 	return model
 }

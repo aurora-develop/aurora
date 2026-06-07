@@ -83,18 +83,6 @@ curl --location 'http://你的服务器ip:8080/v1/models' \
 --header 'Authorization: Bearer access_token'
 ```
 
-当前内置模型列表：
-
-```text
-auto
-gpt-5
-gpt-5-1
-gpt-5-2
-gpt-5-3
-gpt-5-3-mini
-gpt-image-2
-```
-
 ## 文件上传和文件问答
 
 上传文件：
