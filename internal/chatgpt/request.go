@@ -138,45 +138,176 @@ func CalcProofToken(require *ChatRequire) string {
 }
 
 type ChatRequire struct {
-	Token     string    `json:"token"`
-	Proof     ProofWork `json:"proofofwork,omitempty"`
-	Turnstile struct {
+	Persona      string    `json:"persona,omitempty"`
+	Token        string    `json:"token"`
+	PrepareToken string    `json:"prepare_token,omitempty"`
+	Proof        ProofWork `json:"proofofwork,omitempty"`
+	Turnstile    struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
 	} `json:"turnstile"`
 	ForceLogin bool `json:"force_login"`
 }
 
+type sentinelFinalizeResponse struct {
+	Persona     string `json:"persona,omitempty"`
+	Token       string `json:"token"`
+	ExpireAfter int    `json:"expire_after,omitempty"`
+}
+
 func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
-	result, status, err := POSTTurnStile(client, secret, proxy, 0)
+	return InitSentinel(client, secret, proxy, 0)
+}
+
+func InitSentinel(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*TurnStile, int, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	requirementsToken := prooftoken.LegacyRequirementsToken(userAgent)
+	prepare, status, err := POSTSentinelPrepare(client, secret, requirementsToken)
 	if err != nil {
+		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
+			time.Sleep(time.Second * 2)
+			secret.Token = uuid.NewString()
+			return InitSentinel(client, secret, proxy, retry+1)
+		}
 		return nil, status, err
 	}
-	ProofOfWorkToken := CalcProofToken(result)
-	if ProofOfWorkToken == "" {
-		return nil, http.StatusForbidden, errors.New("calculation proof token failure. Please retry the operation")
+	if prepare.ForceLogin {
+		if !secret.IsFree {
+			return nil, http.StatusUnauthorized, fmt.Errorf("force login required: ChatGPT access token is expired or not accepted")
+		}
+		if retry > 1 {
+			return nil, http.StatusForbidden, fmt.Errorf("force login required")
+		}
+		time.Sleep(time.Second)
+		secret.Token = uuid.NewString()
+		return InitSentinel(client, secret, proxy, retry+1)
+	}
+	if prepare.PrepareToken == "" {
+		return nil, status, fmt.Errorf("sentinel prepare token is missing")
+	}
+
+	var proofToken string
+	if prepare.Proof.Required {
+		proofToken = CalcProofToken(prepare)
+		if proofToken == "" {
+			return nil, http.StatusForbidden, errors.New("calculation proof token failure. Please retry the operation")
+		}
 	}
 	var turnstileToken string
-	if result.Turnstile.DX != "" {
-		sourceP := ""
-		if secret.IsFree {
-			sourceP = cachedRequireProof
-		}
-		turnstileToken = prooftoken.Solve(result.Turnstile.DX, sourceP)
+	if prepare.Turnstile.DX != "" {
+		turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, requirementsToken)
 		if turnstileToken == "" {
-			fallbackP := cachedRequireProof
-			if sourceP == cachedRequireProof {
-				fallbackP = ""
-			}
-			turnstileToken = prooftoken.Solve(result.Turnstile.DX, fallbackP)
+			turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, "")
 		}
 	}
+
+	finalize, status, err := POSTSentinelFinalize(client, secret, prepare.PrepareToken, proofToken, turnstileToken)
+	if err != nil {
+		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
+			time.Sleep(time.Second * 2)
+			secret.Token = uuid.NewString()
+			return InitSentinel(client, secret, proxy, retry+1)
+		}
+		return nil, status, err
+	}
+	if finalize.Token == "" {
+		return nil, status, fmt.Errorf("sentinel finalize token is missing")
+	}
+
 	return &TurnStile{
-		TurnStileToken:   result.Token,
-		ProofOfWorkToken: ProofOfWorkToken,
+		TurnStileToken:   finalize.Token,
+		ProofOfWorkToken: proofToken,
 		TurnstileToken:   turnstileToken,
-	}, 0, nil
+	}, status, nil
 }
+
+func POSTSentinelPrepare(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken string) (*ChatRequire, int, error) {
+	apiUrl, targetPath := sentinelURL(secret, "/sentinel/chat-requirements/prepare")
+	bodyJSON, err := json.Marshal(map[string]string{"p": requirementsToken})
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	header := sentinelHeader(secret, targetPath)
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, response.StatusCode, fmt.Errorf("sentinel prepare failed: %s", readResponseSnippet(response.Body, 500))
+	}
+	var result ChatRequire
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, response.StatusCode, err
+	}
+	return &result, response.StatusCode, nil
+}
+
+func POSTSentinelFinalize(client httpclient.AuroraHttpClient, secret *tokens.Secret, prepareToken, proofToken, turnstileToken string) (*sentinelFinalizeResponse, int, error) {
+	apiUrl, targetPath := sentinelURL(secret, "/sentinel/chat-requirements/finalize")
+	payload := map[string]string{"prepare_token": prepareToken}
+	if proofToken != "" {
+		payload["proofofwork"] = proofToken
+	}
+	if turnstileToken != "" {
+		payload["turnstile"] = turnstileToken
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	header := sentinelHeader(secret, targetPath)
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, response.StatusCode, fmt.Errorf("sentinel finalize failed: %s", readResponseSnippet(response.Body, 500))
+	}
+	var result sentinelFinalizeResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, response.StatusCode, err
+	}
+	return &result, response.StatusCode, nil
+}
+
+func sentinelURL(secret *tokens.Secret, path string) (string, string) {
+	if secret != nil && secret.IsFree {
+		return strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + path, "/backend-anon" + path
+	}
+	return BaseURL + path, "/backend-api" + path
+}
+
+func sentinelHeader(secret *tokens.Secret, targetPath string) httpclient.AuroraHeaders {
+	header := createBaseHeader()
+	header.Set("Accept", "*/*")
+	header.Set("Content-Type", "application/json")
+	header.Set("x-openai-target-path", targetPath)
+	header.Set("x-openai-target-route", targetPath)
+	if secret != nil && secret.IsFree && secret.Token != "" {
+		header.Set("oai-device-id", secret.Token)
+	}
+	if secret != nil && !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	setTeamAccountHeader(header, secret)
+	return header
+}
+
+func readResponseSnippet(body io.Reader, limit int64) string {
+	if limit <= 0 {
+		limit = 500
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit))
+	if err != nil {
+		return err.Error()
+	}
+	return string(data)
+}
+
 func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*ChatRequire, int, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
@@ -325,7 +456,7 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	}
 	var apiUrl string
 	if secret.IsFree {
-		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/conversation"
+		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/f/conversation"
 	} else {
 		apiUrl = BaseURL + "/conversation"
 	}
@@ -359,6 +490,8 @@ func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.
 	}
 	if secret.IsFree {
 		header.Set("oai-device-id", secret.Token)
+		header.Set("x-openai-target-path", "/backend-anon/f/conversation")
+		header.Set("x-openai-target-route", "/backend-anon/f/conversation")
 		client.SetCookies("https://chatgpt.com", []*http.Cookie{
 			{Name: "oai-device-id", Value: secret.Token, Path: "/", Domain: "chatgpt.com"},
 		})
