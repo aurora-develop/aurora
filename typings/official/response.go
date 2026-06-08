@@ -3,11 +3,13 @@ package official
 import "encoding/json"
 
 type ChatCompletionChunk struct {
-	ID      string    `json:"id"`
-	Object  string    `json:"object"`
-	Created int64     `json:"created"`
-	Model   string    `json:"model"`
-	Choices []Choices `json:"choices"`
+	ID             string                 `json:"id"`
+	Object         string                 `json:"object"`
+	Created        int64                  `json:"created"`
+	Model          string                 `json:"model"`
+	Choices        []Choices              `json:"choices"`
+	ConversationID string                 `json:"conversation_id,omitempty"`
+	Sentinel       map[string]interface{} `json:"sentinel,omitempty"`
 }
 
 func (chunk *ChatCompletionChunk) String() string {
@@ -65,13 +67,21 @@ func StopChunk(reason string, model string) ChatCompletionChunk {
 	}
 }
 
+func StopChunkWithConversation(reason string, model string, conversationID string) ChatCompletionChunk {
+	chunk := StopChunk(reason, model)
+	chunk.ConversationID = conversationID
+	return chunk
+}
+
 type ChatCompletion struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Usage   usage    `json:"usage"`
-	Choices []Choice `json:"choices"`
+	ID             string                   `json:"id"`
+	Object         string                   `json:"object"`
+	Created        int64                    `json:"created"`
+	Model          string                   `json:"model"`
+	Usage          usage                    `json:"usage"`
+	Choices        []Choice                 `json:"choices"`
+	ConversationID string                   `json:"conversation_id,omitempty"`
+	Sentinel       []map[string]interface{} `json:"sentinel,omitempty"`
 }
 type Msg struct {
 	Role    string `json:"role"`
@@ -89,14 +99,20 @@ type usage struct {
 }
 
 func NewChatCompletion(full_test string, input_tokens, output_tokens int, model string) ChatCompletion {
+	return NewChatCompletionWithMetadata(full_test, input_tokens, output_tokens, model, "", nil)
+}
+
+func NewChatCompletionWithMetadata(full_test string, input_tokens, output_tokens int, model string, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
 	if model == "" {
 		model = "auto"
 	}
 	return ChatCompletion{
-		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-		Object:  "chat.completion",
-		Created: int64(0),
-		Model:   model,
+		ID:             "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:         "chat.completion",
+		Created:        int64(0),
+		Model:          model,
+		ConversationID: conversationID,
+		Sentinel:       sentinel,
 		Usage: usage{
 			PromptTokens:     input_tokens,
 			CompletionTokens: output_tokens,

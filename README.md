@@ -70,7 +70,7 @@ PROXY_URL=your_proxy_url
 
 - `SERVER_HOST` / `SERVER_PORT`：服务监听地址和端口。
 - `Authorization`：服务访问 key。配置后，请求头需携带 `Authorization: Bearer your_authorization`。
-- `FREE_ACCOUNTS`：是否自动生成免费 UUID 账号，默认开启。
+- `FREE_ACCOUNTS`：是否自动生成免费 UUID 账号，默认关闭。
 - `FREE_ACCOUNTS_NUM`：自动生成免费 UUID 账号数量，默认 1024。
 - `TLS_CERT` / `TLS_KEY`：同时配置时启用 HTTPS。
 - `PROXY_URL`：代理池地址。

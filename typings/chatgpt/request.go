@@ -39,25 +39,23 @@ type ChatGPTRequest struct {
 	SupportsBuffering                bool                   `json:"supports_buffering"`
 	SupportedEncodings               []string               `json:"supported_encodings"`
 	ClientContextualInfo             map[string]interface{} `json:"client_contextual_info"`
-	Suggestions                      []interface{}          `json:"suggestions"`
+	Suggestions                      []interface{}          `json:"suggestions,omitempty"`
 	HistoryAndTrainingDisabled       bool                   `json:"history_and_training_disabled"`
 	ParagenCotSummaryDisplayOverride string                 `json:"paragen_cot_summary_display_override"`
 	ForceParallelSwitch              string                 `json:"force_parallel_switch"`
 	ThinkingEffort                   string                 `json:"thinking_effort"`
-	ForceRateLimit                   bool                   `json:"force_rate_limit"`
-	ResetRateLimits                  bool                   `json:"reset_rate_limits"`
-	ForceUseSse                      bool                   `json:"force_use_sse"`
+	ForceRateLimit                   bool                   `json:"force_rate_limit,omitempty"`
+	ResetRateLimits                  bool                   `json:"reset_rate_limits,omitempty"`
+	ForceUseSse                      bool                   `json:"force_use_sse,omitempty"`
 }
 
 func NewChatGPTRequest() ChatGPTRequest {
 	disable_history := os.Getenv("ENABLE_HISTORY") != "true"
 	return ChatGPTRequest{
 		Action:                     "next",
-		ParentMessageID:            uuid.NewString(),
+		ParentMessageID:            "client-created-root",
 		Model:                      "auto",
-		ClientPrepareState:         "success",
 		HistoryAndTrainingDisabled: disable_history,
-		ForceUseSse:                true,
 		TimezoneOffsetMin:          -480,
 		Timezone:                   "Asia/Shanghai",
 		ConversationMode:           map[string]string{"kind": "primary_assistant"},

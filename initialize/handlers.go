@@ -26,8 +26,42 @@ type Handler struct {
 	token *tokens.AccessToken
 }
 
+func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, conversationID string) {
+	if !stopSent {
+		finalLine := officialtypes.StopChunkWithConversation("stop", model, conversationID)
+		c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
+		c.Writer.Flush()
+	}
+	c.Writer.WriteString("data: [DONE]\n\n")
+	c.Writer.Flush()
+}
+
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
 	return &Handler{proxy: proxy, token: token}
+}
+
+// initTurnStileWithRetry 初始化 turnstile，当 paid token 返回 401 时自动禁用并轮询下一个
+func (h *Handler) initTurnStileWithRetry(client **bogdanfinn.TlsClient, secret **tokens.Secret, proxyUrl string) (*chatgpt.TurnStile, int, error) {
+	for {
+		(*client).SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+		turnStile, status, err := chatgpt.InitTurnStile(*client, *secret, proxyUrl)
+		if err == nil {
+			return turnStile, status, nil
+		}
+		if status == http.StatusUnauthorized && *secret != nil && !(*secret).IsFree && (*secret).Token != "" {
+			if !h.token.DisableSecret((*secret).Token) {
+				return nil, status, err
+			}
+			newSecret := h.token.GetPaidSecret()
+			if newSecret == nil || newSecret.Token == "" {
+				return nil, status, err
+			}
+			*secret = newSecret
+			*client = bogdanfinn.NewStdClient()
+			continue
+		}
+		return nil, status, err
+	}
 }
 
 func (h *Handler) refresh(c *gin.Context) {
@@ -202,8 +236,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -225,9 +258,12 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"error": "request conversion error",
-		})
+		c.JSON(500, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "request_conversion_error",
+			"param":   "model",
+			"code":    "request_conversion_error",
+		}})
 		return
 	}
 	defer response.Body.Close()
@@ -235,15 +271,31 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	var full_response string
+	var conversationID string
+	var sentinel []map[string]interface{}
+	var stopSent bool
 
 	if os.Getenv("STREAM_MODE") == "false" {
 		original_request.Stream = false
 	}
+	if original_request.Stream {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+	}
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
-		var response_part string
-		response_part, continue_info = chatgpt.Handler(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel)
-		full_response += response_part
+		result := chatgpt.HandlerDetailed(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel)
+		continue_info = result.Continue
+		full_response += result.Text
+		if result.ConversationID != "" {
+			conversationID = result.ConversationID
+		}
+		sentinel = append(sentinel, result.Sentinel...)
+		if result.StopSent {
+			stopSent = true
+		}
 		if continue_info == nil {
 			break
 		}
@@ -254,9 +306,12 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 		response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 		if err != nil {
-			c.JSON(500, gin.H{
-				"error": "request conversion error",
-			})
+			c.JSON(500, gin.H{"error": gin.H{
+				"message": err.Error(),
+				"type":    "request_conversion_error",
+				"param":   "model",
+				"code":    "request_conversion_error",
+			}})
 			return
 		}
 		defer response.Body.Close()
@@ -269,9 +324,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	if !original_request.Stream {
 		output_tokens := util.CountToken(full_response)
-		c.JSON(200, officialtypes.NewChatCompletion(full_response, input_tokens, output_tokens, reqModel))
+		c.JSON(200, officialtypes.NewChatCompletionWithMetadata(full_response, input_tokens, output_tokens, reqModel, conversationID, sentinel))
 	} else {
-		c.String(200, "data: [DONE]\n\n")
+		writeChatCompletionStreamDone(c, stopSent, reqModel, conversationID)
 	}
 }
 
@@ -322,8 +377,7 @@ func (h *Handler) responses(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -342,7 +396,12 @@ func (h *Handler) responses(c *gin.Context) {
 
 	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "request conversion error"})
+		c.JSON(500, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "request_conversion_error",
+			"param":   "model",
+			"code":    "request_conversion_error",
+		}})
 		return
 	}
 	defer response.Body.Close()
@@ -366,7 +425,12 @@ func (h *Handler) responses(c *gin.Context) {
 
 		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "request conversion error"})
+			c.JSON(500, gin.H{"error": gin.H{
+				"message": err.Error(),
+				"type":    "request_conversion_error",
+				"param":   "model",
+				"code":    "request_conversion_error",
+			}})
 			return
 		}
 		defer response.Body.Close()
@@ -447,8 +511,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -622,9 +685,9 @@ func (h *Handler) engines(c *gin.Context) {
 
 	models := []string{
 		"auto",
-		"gpt-5.5-instant",
+		"gpt-5-5-instant",
 		"gpt-5-5-thinking",
-		"gpt-5.5-pro",
+		"gpt-5-5-pro",
 		"gpt-5",
 		"gpt-4o",
 		"gpt-4o-mini",
@@ -817,8 +880,7 @@ func (h *Handler) tts(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
@@ -901,7 +963,7 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := chatgpt.InitTurnStile(client, secret, proxyUrl)
+	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
 		c.JSON(status, gin.H{
 			"message": err.Error(),
