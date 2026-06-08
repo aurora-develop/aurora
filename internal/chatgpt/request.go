@@ -2070,6 +2070,9 @@ func HandlerDetailedWithWebsocket(c *gin.Context, response *http.Response, clien
 }
 
 func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string, options HandlerDetailedOptions) HandlerResult {
+	if model == "" {
+		model = translated_request.Model
+	}
 	wsConn := options.Websocket
 	if options.ClientState != nil {
 		options.ClientState.ApplyToRequest(&translated_request)

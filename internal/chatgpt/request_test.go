@@ -96,8 +96,9 @@ func TestHandlerStreamsOpenAIChunksAndSentinel(t *testing.T) {
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	full, continueInfo := Handler(c, response, nil, nil, "request-id", chatGPTRequestForTest(), true, "gpt-4o")
+	full, continueInfo := Handler(c, response, nil, nil, "request-id", request, true, request.Model)
 
 	if continueInfo != nil {
 		t.Fatalf("continueInfo = %#v, want nil", continueInfo)
@@ -277,8 +278,9 @@ func TestHandlerDetailedCollectsOpenAIChunkMetadataWithoutStreaming(t *testing.T
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	result := HandlerDetailed(c, response, nil, nil, "request-id", chatGPTRequestForTest(), false, "gpt-4o")
+	result := HandlerDetailed(c, response, nil, nil, "request-id", request, false, request.Model)
 
 	if result.Text != "你好" {
 		t.Fatalf("text = %q, want %q", result.Text, "你好")
