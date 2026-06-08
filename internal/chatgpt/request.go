@@ -2624,42 +2624,55 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 func HandlerTTS(response *http.Response, input string) (string, string) {
 	reader := bufio.NewReader(response.Body)
 
-	var original_response chatgpt_types.ChatGPTResponse
 	var convId string
 	var fallbackMsgID string
+	var patchState conversationPatchState
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF && line == "" {
 				break
 			}
-			return "", ""
-		}
-		if len(line) < 6 {
-			continue
-		}
-		line = line[6:]
-		if !strings.HasPrefix(line, "[DONE]") {
-			original_response.Message.ID = ""
-			err = json.Unmarshal([]byte(line), &original_response)
-			if err != nil {
-				continue
-			}
-			if original_response.Error != nil {
+			if err != io.EOF {
 				return "", ""
 			}
-			if original_response.Message.ID == "" {
+		}
+		for _, payload := range sseDataPayloads(line) {
+			if strings.HasPrefix(payload, "[DONE]") {
+				break
+			}
+			streamEvent, ok := parseConversationEvent(payload, &patchState, "auto")
+			if !ok {
+				var raw map[string]interface{}
+				if json.Unmarshal([]byte(payload), &raw) == nil {
+					if cid := firstConversationID(raw); cid != "" && convId == "" {
+						convId = cid
+					}
+					if msgID := lastAssistantMessageID(raw); msgID != "" && fallbackMsgID == "" {
+						fallbackMsgID = msgID
+					}
+				}
 				continue
 			}
-			if original_response.ConversationID != convId {
+			if streamEvent.response.Error != nil {
+				return "", ""
+			}
+			originalResponse := streamEvent.response
+			if streamEvent.conversationID != "" && convId == "" {
+				convId = streamEvent.conversationID
+			}
+			if originalResponse.ConversationID != convId {
 				if convId == "" {
-					convId = original_response.ConversationID
+					convId = originalResponse.ConversationID
 				} else {
 					continue
 				}
 			}
-			if original_response.Message.Author.Role != "assistant" {
+			if originalResponse.Message.ID == "" {
+				continue
+			}
+			if originalResponse.Message.Author.Role != "assistant" {
 				continue
 			}
 
@@ -2667,20 +2680,23 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 			// requested TTS input. Prefer an exact match, then fall back to the first
 			// assistant message in the same conversation so synthesize still works.
 			if fallbackMsgID == "" {
-				fallbackMsgID = original_response.Message.ID
+				fallbackMsgID = originalResponse.Message.ID
 			}
-			if len(original_response.Message.Content.Parts) == 0 {
+			if len(originalResponse.Message.Content.Parts) == 0 {
 				continue
 			}
-			for _, rawPart := range original_response.Message.Content.Parts {
+			for _, rawPart := range originalResponse.Message.Content.Parts {
 				part, ok := rawPart.(string)
 				if !ok {
 					continue
 				}
 				if part == input || strings.Contains(part, input) || strings.Contains(input, part) {
-					return original_response.Message.ID, convId
+					return originalResponse.Message.ID, convId
 				}
 			}
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	if fallbackMsgID != "" && convId != "" {

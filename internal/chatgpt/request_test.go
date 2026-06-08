@@ -589,6 +589,39 @@ func TestHandlerSeparatesAnalysisAndFinalChannels(t *testing.T) {
 	}
 }
 
+func TestHandlerTTSParsesPatchStream(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-tts"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-tts"}`,
+		`data: {"p":"/message/author/role","o":"replace","v":"assistant"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"hello tts"}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "hello tts")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want msg-tts conv-tts", msgID, convID)
+	}
+}
+
+func TestHandlerTTSFallsBackToAssistantMessageID(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"conversation_id":"conv-tts","message":{"id":"msg-tts","author":{"role":"assistant"},"content":{"content_type":"text","parts":["different text"]},"metadata":{"message_type":"next"},"recipient":"all"}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "requested text")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want fallback assistant message", msgID, convID)
+	}
+}
+
 func chatGPTRequestForTest() chatgpt.ChatGPTRequest {
 	return chatgpt.NewChatGPTRequest()
 }
