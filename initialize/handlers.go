@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
 type Handler struct {
@@ -42,9 +43,13 @@ func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
 
 // initTurnStileWithRetry 初始化 turnstile，当 paid token 返回 401 时自动禁用并轮询下一个
 func (h *Handler) initTurnStileWithRetry(client **bogdanfinn.TlsClient, secret **tokens.Secret, proxyUrl string) (*chatgpt.TurnStile, int, error) {
+	return h.initTurnStileWithRetryState(client, secret, proxyUrl, nil)
+}
+
+func (h *Handler) initTurnStileWithRetryState(client **bogdanfinn.TlsClient, secret **tokens.Secret, proxyUrl string, state *chatgpt.ChatClientState) (*chatgpt.TurnStile, int, error) {
 	for {
 		(*client).SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-		turnStile, status, err := chatgpt.InitTurnStile(*client, *secret, proxyUrl)
+		turnStile, status, err := chatgpt.InitTurnStileWithState(*client, *secret, proxyUrl, state)
 		if err == nil {
 			return turnStile, status, nil
 		}
@@ -62,6 +67,49 @@ func (h *Handler) initTurnStileWithRetry(client **bogdanfinn.TlsClient, secret *
 		}
 		return nil, status, err
 	}
+}
+
+func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, secret **tokens.Secret, translatedRequest chatgpt_types.ChatGPTRequest, proxyUrl string, stream bool, state *chatgpt.ChatClientState) (*http.Response, *websocket.Conn, int, error) {
+	if state != nil {
+		state.ApplyToRequest(&translatedRequest)
+	}
+	turnTraceID := uuid.NewString()
+	secretTokenBefore := ""
+	if *secret != nil {
+		secretTokenBefore = (*secret).Token
+	}
+	conduitToken, err := chatgpt.PrepareConversationConduitWithState(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
+	if err != nil {
+		return nil, nil, http.StatusInternalServerError, err
+	}
+
+	turnStile, status, err := h.initTurnStileWithRetryState(client, secret, proxyUrl, state)
+	if err != nil {
+		return nil, nil, status, err
+	}
+	if *secret != nil && (*secret).Token != secretTokenBefore {
+		conduitToken, err = chatgpt.PrepareConversationConduitWithState(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
+		if err != nil {
+			return nil, nil, http.StatusInternalServerError, err
+		}
+	}
+
+	var wsConn *websocket.Conn
+	if stream {
+		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, *secret, state, proxyUrl)
+		if err != nil {
+			return nil, nil, http.StatusInternalServerError, err
+		}
+	}
+
+	response, err := chatgpt.POSTconversationPreparedWithState(*client, translatedRequest, *secret, turnStile, proxyUrl, conduitToken, turnTraceID, state)
+	if err != nil {
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		return nil, nil, http.StatusInternalServerError, err
+	}
+	return response, wsConn, http.StatusOK, nil
 }
 
 func (h *Handler) refresh(c *gin.Context) {
@@ -236,19 +284,12 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
-	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
-		return
-	}
 
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl)
+	clientState := chatgpt.NewChatClientState()
+	clientState.ConversationID = translated_request.ConversationID
+	clientState.ParentMessageID = translated_request.ParentMessageID
 
 	// Use the model from the original request, default to "auto"
 	reqModel := original_request.Model
@@ -256,9 +297,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 		reqModel = "auto"
 	}
 
-	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
 	if err != nil {
-		c.JSON(500, gin.H{"error": gin.H{
+		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "request_conversion_error",
 			"param":   "model",
@@ -268,6 +309,10 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	defer response.Body.Close()
 	if chatgpt.Handle_request_error(c, response) {
+		if wsConn != nil {
+			wsConn.Close()
+			wsConn = nil
+		}
 		return
 	}
 	var full_response string
@@ -286,7 +331,13 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
-		result := chatgpt.HandlerDetailed(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel)
+		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel, chatgpt.HandlerDetailedOptions{
+			Websocket:        wsConn,
+			ClientState:      clientState,
+			ArtifactDelivery: original_request.ArtifactDelivery,
+			ProxyURL:         proxyUrl,
+		})
+		wsConn = nil
 		continue_info = result.Continue
 		full_response += result.Text
 		if result.ConversationID != "" {
@@ -296,6 +347,11 @@ func (h *Handler) nightmare(c *gin.Context) {
 		if result.StopSent {
 			stopSent = true
 		}
+		parentMessageID := result.ParentMessageID
+		if continue_info != nil {
+			parentMessageID = continue_info.ParentID
+		}
+		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
 		if continue_info == nil {
 			break
 		}
@@ -304,9 +360,9 @@ func (h *Handler) nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+		response, wsConn, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
 		if err != nil {
-			c.JSON(500, gin.H{"error": gin.H{
+			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),
 				"type":    "request_conversion_error",
 				"param":   "model",
@@ -316,6 +372,10 @@ func (h *Handler) nightmare(c *gin.Context) {
 		}
 		defer response.Body.Close()
 		if chatgpt.Handle_request_error(c, response) {
+			if wsConn != nil {
+				wsConn.Close()
+				wsConn = nil
+			}
 			return
 		}
 	}
@@ -377,26 +437,19 @@ func (h *Handler) responses(c *gin.Context) {
 
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
-	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
-		return
-	}
 
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl)
+	clientState := chatgpt.NewChatClientState()
+	clientState.ConversationID = translated_request.ConversationID
+	clientState.ParentMessageID = translated_request.ParentMessageID
 	reqModel := original_request.Model
 	if reqModel == "" {
 		reqModel = "auto"
 	}
 
-	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 	if err != nil {
-		c.JSON(500, gin.H{"error": gin.H{
+		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "request_conversion_error",
 			"param":   "model",
@@ -406,6 +459,10 @@ func (h *Handler) responses(c *gin.Context) {
 	}
 	defer response.Body.Close()
 	if chatgpt.Handle_request_error(c, response) {
+		if wsConn != nil {
+			wsConn.Close()
+			wsConn = nil
+		}
 		return
 	}
 
@@ -413,8 +470,18 @@ func (h *Handler) responses(c *gin.Context) {
 	for i := 3; i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string
-		response_part, continue_info = chatgpt.Handler(c, response, client, secret, uid, translated_request, false, reqModel)
+		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, false, reqModel, chatgpt.HandlerDetailedOptions{
+			Websocket:   wsConn,
+			ClientState: clientState,
+		})
+		wsConn = nil
+		response_part, continue_info = result.Text, result.Continue
 		full_response += response_part
+		parentMessageID := result.ParentMessageID
+		if continue_info != nil {
+			parentMessageID = continue_info.ParentID
+		}
+		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
 		if continue_info == nil {
 			break
 		}
@@ -423,9 +490,9 @@ func (h *Handler) responses(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		response, err = chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+		response, wsConn, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 		if err != nil {
-			c.JSON(500, gin.H{"error": gin.H{
+			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),
 				"type":    "request_conversion_error",
 				"param":   "model",
@@ -435,6 +502,10 @@ func (h *Handler) responses(c *gin.Context) {
 		}
 		defer response.Body.Close()
 		if chatgpt.Handle_request_error(c, response) {
+			if wsConn != nil {
+				wsConn.Close()
+				wsConn = nil
+			}
 			return
 		}
 	}
