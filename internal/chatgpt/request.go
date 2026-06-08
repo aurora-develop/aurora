@@ -57,6 +57,7 @@ var (
 	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
 	oaiDeviceID         = uuid.NewString()
 	oaiSessionID        = uuid.NewString()
+	oaiStartTime        = time.Now()
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
 	cachedHardware      = 0
@@ -130,8 +131,7 @@ func GetConfig() []interface{} {
 func GetInitConfig() []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
-	startTime := time.Now()
-	timeNum := (float64(time.Since(startTime).Nanoseconds()) + rand.Float64()) / 1e6
+	timeNum := float64(time.Since(oaiStartTime).Milliseconds())
 	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
 	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
 	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
@@ -163,17 +163,25 @@ func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 	return InitSentinel(client, secret, proxy, 0)
 }
 
+func InitTurnStileWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, state *ChatClientState) (*TurnStile, int, error) {
+	return InitSentinelWithState(client, secret, proxy, 0, state)
+}
+
 func InitSentinel(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*TurnStile, int, error) {
+	return InitSentinelWithState(client, secret, proxy, retry, nil)
+}
+
+func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int, state *ChatClientState) (*TurnStile, int, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
 	requirementsToken := prooftoken.LegacyRequirementsToken(userAgent)
-	prepare, status, err := POSTSentinelPrepare(client, secret, requirementsToken)
+	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
 			time.Sleep(time.Second * 2)
 			secret.Token = uuid.NewString()
-			return InitSentinel(client, secret, proxy, retry+1)
+			return InitSentinelWithState(client, secret, proxy, retry+1, state)
 		}
 		return nil, status, err
 	}
@@ -186,7 +194,7 @@ func InitSentinel(client httpclient.AuroraHttpClient, secret *tokens.Secret, pro
 		}
 		time.Sleep(time.Second)
 		secret.Token = uuid.NewString()
-		return InitSentinel(client, secret, proxy, retry+1)
+		return InitSentinelWithState(client, secret, proxy, retry+1, state)
 	}
 	if prepare.PrepareToken == "" {
 		return nil, status, fmt.Errorf("sentinel prepare token is missing")
@@ -207,12 +215,12 @@ func InitSentinel(client httpclient.AuroraHttpClient, secret *tokens.Secret, pro
 		}
 	}
 
-	finalize, status, err := POSTSentinelFinalize(client, secret, prepare.PrepareToken, proofToken, turnstileToken)
+	finalize, status, err := POSTSentinelFinalizeWithState(client, secret, prepare.PrepareToken, proofToken, turnstileToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
 			time.Sleep(time.Second * 2)
 			secret.Token = uuid.NewString()
-			return InitSentinel(client, secret, proxy, retry+1)
+			return InitSentinelWithState(client, secret, proxy, retry+1, state)
 		}
 		return nil, status, err
 	}
@@ -228,12 +236,16 @@ func InitSentinel(client httpclient.AuroraHttpClient, secret *tokens.Secret, pro
 }
 
 func POSTSentinelPrepare(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken string) (*ChatRequire, int, error) {
+	return POSTSentinelPrepareWithState(client, secret, requirementsToken, nil)
+}
+
+func POSTSentinelPrepareWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken string, state *ChatClientState) (*ChatRequire, int, error) {
 	apiUrl, targetPath := sentinelURL(secret, "/sentinel/chat-requirements/prepare")
 	bodyJSON, err := json.Marshal(map[string]string{"p": requirementsToken})
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
-	header := sentinelHeader(secret, targetPath)
+	header := sentinelHeaderWithState(secret, targetPath, state)
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
@@ -250,6 +262,10 @@ func POSTSentinelPrepare(client httpclient.AuroraHttpClient, secret *tokens.Secr
 }
 
 func POSTSentinelFinalize(client httpclient.AuroraHttpClient, secret *tokens.Secret, prepareToken, proofToken, turnstileToken string) (*sentinelFinalizeResponse, int, error) {
+	return POSTSentinelFinalizeWithState(client, secret, prepareToken, proofToken, turnstileToken, nil)
+}
+
+func POSTSentinelFinalizeWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, prepareToken, proofToken, turnstileToken string, state *ChatClientState) (*sentinelFinalizeResponse, int, error) {
 	apiUrl, targetPath := sentinelURL(secret, "/sentinel/chat-requirements/finalize")
 	payload := map[string]string{"prepare_token": prepareToken}
 	if proofToken != "" {
@@ -262,7 +278,7 @@ func POSTSentinelFinalize(client httpclient.AuroraHttpClient, secret *tokens.Sec
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
-	header := sentinelHeader(secret, targetPath)
+	header := sentinelHeaderWithState(secret, targetPath, state)
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
@@ -286,7 +302,11 @@ func sentinelURL(secret *tokens.Secret, path string) (string, string) {
 }
 
 func sentinelHeader(secret *tokens.Secret, targetPath string) httpclient.AuroraHeaders {
-	header := createBaseHeader()
+	return sentinelHeaderWithState(secret, targetPath, nil)
+}
+
+func sentinelHeaderWithState(secret *tokens.Secret, targetPath string, state *ChatClientState) httpclient.AuroraHeaders {
+	header := createBaseHeaderForState(state)
 	header.Set("Accept", "*/*")
 	header.Set("Content-Type", "application/json")
 	header.Set("x-openai-target-path", targetPath)
@@ -462,7 +482,11 @@ func conversationURL(secret *tokens.Secret, path string) (string, string) {
 }
 
 func conversationHeaders(secret *tokens.Secret, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string) httpclient.AuroraHeaders {
-	header := createBaseHeader()
+	return conversationHeadersWithState(secret, chatToken, accept, targetPath, conduitToken, turnTraceID, nil)
+}
+
+func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string, state *ChatClientState) httpclient.AuroraHeaders {
+	header := createBaseHeaderForState(state)
 	header.Set("Accept", accept)
 	header.Set("Content-Type", "application/json")
 	header.Set("x-openai-target-path", targetPath)
@@ -508,8 +532,12 @@ func nextChatWebsocketID() int64 {
 }
 
 func getChatWebsocketURL(client httpclient.AuroraHttpClient, secret *tokens.Secret) (string, error) {
+	return getChatWebsocketURLWithState(client, secret, nil)
+}
+
+func getChatWebsocketURLWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState) (string, error) {
 	apiURL, targetPath := conversationURL(secret, "/celsius/ws/user")
-	header := conversationHeaders(secret, nil, "*/*", targetPath, "", "")
+	header := conversationHeadersWithState(secret, nil, "*/*", targetPath, "", "", state)
 	response, err := client.Request(http.MethodGet, apiURL, header, nil, nil)
 	if err != nil {
 		return "", err
@@ -532,12 +560,28 @@ func getChatWebsocketURL(client httpclient.AuroraHttpClient, secret *tokens.Secr
 	return result.WebsocketURL, nil
 }
 
-func dialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret) (*websocket.Conn, error) {
-	wsURL, err := getChatWebsocketURL(client, secret)
+func DialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret) (*websocket.Conn, error) {
+	return DialChatWebsocketWithState(client, secret, nil)
+}
+
+func DialChatWebsocketWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState) (*websocket.Conn, error) {
+	return DialChatWebsocketWithStateAndProxy(client, secret, state, "")
+}
+
+func DialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState, proxy string) (*websocket.Conn, error) {
+	wsURL, err := getChatWebsocketURLWithState(client, secret, state)
 	if err != nil {
 		return nil, err
 	}
-	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+		Proxy:            http.ProxyFromEnvironment,
+	}
+	if proxyFunc, err := websocketProxyFunc(proxy); err != nil {
+		return nil, err
+	} else if proxyFunc != nil {
+		dialer.Proxy = proxyFunc
+	}
 	header := http.Header{}
 	header.Set("User-Agent", userAgent)
 	header.Set("Origin", "https://chatgpt.com")
@@ -559,6 +603,29 @@ func dialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret
 		return nil, err
 	}
 	return conn, nil
+}
+
+func websocketProxyFunc(proxy string) (func(*http.Request) (*url.URL, error), error) {
+	if proxy == "" {
+		return http.ProxyFromEnvironment, nil
+	}
+	proxyURL, err := url.Parse(proxy)
+	if err != nil {
+		return nil, err
+	}
+	return http.ProxyURL(proxyURL), nil
+}
+
+func dialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret) (*websocket.Conn, error) {
+	return DialChatWebsocket(client, secret)
+}
+
+func dialChatWebsocketWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState) (*websocket.Conn, error) {
+	return DialChatWebsocketWithState(client, secret, state)
+}
+
+func dialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState, proxy string) (*websocket.Conn, error) {
+	return DialChatWebsocketWithStateAndProxy(client, secret, state, proxy)
 }
 
 func parseChatWebsocketFrames(raw []byte) []map[string]interface{} {
@@ -596,6 +663,47 @@ func chatWebsocketEncodedItem(frame map[string]interface{}, topicID string) stri
 	}
 	encoded, _ := nested["encoded_item"].(string)
 	return encoded
+}
+
+func chatWebsocketSSEItems(frame map[string]interface{}, topicID string) []string {
+	if encoded := chatWebsocketEncodedItem(frame, topicID); encoded != "" {
+		return []string{encoded}
+	}
+	if update := chatWebsocketConversationUpdateItem(frame, topicID); update != "" {
+		return []string{update}
+	}
+	return nil
+}
+
+func chatWebsocketConversationUpdateItem(frame map[string]interface{}, topicID string) string {
+	if frame == nil {
+		return ""
+	}
+	frameTopicID, _ := frame["topic_id"].(string)
+	if frameTopicID != "" && frameTopicID != topicID && frameTopicID != "conversations" {
+		return ""
+	}
+	payload, ok := frame["payload"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	payloadType, _ := payload["type"].(string)
+	if payloadType != "conversation-update" {
+		if nested, ok := payload["payload"].(map[string]interface{}); ok {
+			if nestedType, _ := nested["type"].(string); nestedType == "conversation-update" {
+				payload = nested
+				payloadType = nestedType
+			}
+		}
+	}
+	if payloadType != "conversation-update" {
+		return ""
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return "data: " + string(body) + "\n"
 }
 
 func chatWebsocketWriteEncodedItem(writer *io.PipeWriter, encoded string) bool {
@@ -649,9 +757,11 @@ func chatWebsocketStreamReader(conn *websocket.Conn, topicID string) (io.ReadClo
 						catchups, _ := reply["catchups"].([]interface{})
 						for _, catchup := range catchups {
 							catchupFrame, _ := catchup.(map[string]interface{})
-							if chatWebsocketWriteEncodedItem(writer, chatWebsocketEncodedItem(catchupFrame, topicID)) {
-								done <- nil
-								return
+							for _, item := range chatWebsocketSSEItems(catchupFrame, topicID) {
+								if chatWebsocketWriteEncodedItem(writer, item) {
+									done <- nil
+									return
+								}
 							}
 						}
 						continue
@@ -659,9 +769,11 @@ func chatWebsocketStreamReader(conn *websocket.Conn, topicID string) (io.ReadClo
 					if frameType != "message" {
 						continue
 					}
-					if chatWebsocketWriteEncodedItem(writer, chatWebsocketEncodedItem(frame, topicID)) {
-						done <- nil
-						return
+					for _, item := range chatWebsocketSSEItems(frame, topicID) {
+						if chatWebsocketWriteEncodedItem(writer, item) {
+							done <- nil
+							return
+						}
 					}
 				}
 			}
@@ -689,11 +801,20 @@ func shouldUseWebsocketHandoff(readingWebsocket bool, handoffTopicID string, wsC
 }
 
 func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string) (string, error) {
+	return getConduitTokenWithState(client, message, secret, chatToken, turnTraceID, nil)
+}
+
+func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string, state *ChatClientState) (string, error) {
+	message = requestWithClientState(message, state)
 	apiUrl, targetPath := conversationURL(secret, "/f/conversation/prepare")
+	parentMessageID := message.ParentMessageID
+	if parentMessageID == "" {
+		parentMessageID = "client-created-root"
+	}
 	payload := map[string]interface{}{
 		"action":                "next",
 		"fork_from_shared_post": false,
-		"parent_message_id":     "client-created-root",
+		"parent_message_id":     parentMessageID,
 		"model":                 conversationPrepareModel(message.Model),
 		"timezone_offset_min":   message.TimezoneOffsetMin,
 		"timezone":              "Asia/Shanghai",
@@ -704,12 +825,10 @@ func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.C
 			"author":  map[string]string{"role": "user"},
 			"content": map[string]interface{}{"content_type": "text", "parts": []string{conversationPartialText(message)}},
 		},
-		"supports_buffering":  true,
-		"supported_encodings": []string{"v1"},
-		"client_contextual_info": map[string]string{
-			"app_name": "chatgpt.com",
-		},
-		"thinking_effort": "standard",
+		"supports_buffering":     true,
+		"supported_encodings":    []string{"v1"},
+		"client_contextual_info": conversationPrepareClientContext(message),
+		"thinking_effort":        "standard",
 	}
 	if message.ConversationID != "" {
 		payload["conversation_id"] = message.ConversationID
@@ -718,7 +837,7 @@ func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.C
 	if err != nil {
 		return "", err
 	}
-	header := conversationHeaders(secret, chatToken, "*/*", targetPath, "no-token", turnTraceID)
+	header := conversationHeadersWithState(secret, chatToken, "*/*", targetPath, "no-token", turnTraceID, state)
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
@@ -738,6 +857,17 @@ func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.C
 		return "", err
 	}
 	return result.ConduitToken, nil
+}
+
+func PrepareConversationConduit(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, proxy string, turnTraceID string) (string, error) {
+	return PrepareConversationConduitWithState(client, message, secret, proxy, turnTraceID, nil)
+}
+
+func PrepareConversationConduitWithState(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, proxy string, turnTraceID string, state *ChatClientState) (string, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	return getConduitTokenWithState(client, message, secret, nil, turnTraceID, state)
 }
 
 func conversationPrepareModel(model string) string {
@@ -762,26 +892,46 @@ func conversationPartialText(message chatgpt_types.ChatGPTRequest) string {
 	return "h"
 }
 
+func conversationPrepareClientContext(message chatgpt_types.ChatGPTRequest) map[string]interface{} {
+	info := map[string]interface{}{"app_name": "chatgpt.com"}
+	for key, value := range message.ClientContextualInfo {
+		info[key] = value
+	}
+	info["app_name"] = "chatgpt.com"
+	return info
+}
+
 func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string) (*http.Response, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
+	turnTraceID := uuid.NewString()
+	conduitToken, err := getConduitToken(client, message, secret, nil, turnTraceID)
+	if err != nil {
+		return nil, err
+	}
+	return POSTconversationPrepared(client, message, secret, chat_token, proxy, conduitToken, turnTraceID)
+}
+
+func POSTconversationPrepared(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string, conduitToken string, turnTraceID string) (*http.Response, error) {
+	return POSTconversationPreparedWithState(client, message, secret, chat_token, proxy, conduitToken, turnTraceID, nil)
+}
+
+func POSTconversationPreparedWithState(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chat_token *TurnStile, proxy string, conduitToken string, turnTraceID string, state *ChatClientState) (*http.Response, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	message = requestWithClientState(message, state)
 	apiUrl, targetPath := conversationURL(secret, "/f/conversation")
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY
 	}
-	turnTraceID := uuid.NewString()
-	conduitToken, err := getConduitToken(client, message, secret, chat_token, turnTraceID)
-	if err != nil {
-		return nil, err
-	}
-
 	// JSONify the body and add it to the request
 	body_json, err := json.Marshal(message)
 	if err != nil {
 		return &http.Response{}, err
 	}
-	header := conversationHeaders(secret, chat_token, "text/event-stream", targetPath, conduitToken, turnTraceID)
+	header := conversationHeadersWithState(secret, chat_token, "text/event-stream", targetPath, conduitToken, turnTraceID, state)
 	if secret.IsFree {
 		client.SetCookies("https://chatgpt.com", []*http.Cookie{
 			{Name: "oai-device-id", Value: secret.Token, Path: "/", Domain: "chatgpt.com"},
@@ -883,15 +1033,22 @@ type ContinueInfo struct {
 }
 
 type HandlerResult struct {
-	Text           string
-	ConversationID string
-	Sentinel       []map[string]interface{}
-	StopSent       bool
-	Continue       *ContinueInfo
+	Text              string
+	ThinkingText      string
+	ConversationID    string
+	ParentMessageID   string
+	Sentinel          []map[string]interface{}
+	ArtifactSignals   []ArtifactSignal
+	SandboxArtifacts  []SandboxArtifact
+	PDFArtifacts      []PDFArtifact
+	GeneratedImageIDs []string
+	StopSent          bool
+	Continue          *ContinueInfo
 }
 
 type conversationPatchState struct {
 	response chatgpt_types.ChatGPTResponse
+	channel  string
 }
 
 type conversationStreamEvent struct {
@@ -900,6 +1057,8 @@ type conversationStreamEvent struct {
 	text           string
 	role           string
 	conversationID string
+	messageID      string
+	channel        string
 	finishReason   string
 	isStop         bool
 }
@@ -1033,6 +1192,7 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 			text:           firstChunkContent(chunk),
 			role:           firstChunkRole(chunk),
 			conversationID: chunk.ConversationID,
+			channel:        channelFromValue(raw),
 			finishReason:   firstChunkFinishReason(chunk),
 		}
 		event.isStop = event.finishReason != ""
@@ -1041,24 +1201,29 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 
 	var direct chatgpt_types.ChatGPTResponse
 	if err := json.Unmarshal([]byte(line), &direct); err == nil && isUsableConversationResponse(direct) {
-		return conversationStreamEvent{response: direct}, true
+		channel := channelFromValue(raw)
+		state.channel = firstNonEmpty(channel, state.channel)
+		return conversationStreamEvent{response: direct, messageID: direct.Message.ID, channel: state.channel}, true
 	}
 
 	if response, ok := responseFromValue(raw["v"]); ok {
 		state.response = response
-		return conversationStreamEvent{response: state.response}, true
+		if channel := channelFromValue(raw["v"]); channel != "" {
+			state.channel = channel
+		}
+		return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
 	}
 	if text, ok := raw["v"].(string); ok && raw["p"] == nil && raw["o"] == nil {
 		ensureConversationPatchDefaults(state)
 		current, _ := state.response.Message.Content.Parts[0].(string)
 		state.response.Message.Content.Parts[0] = current + text
-		return conversationStreamEvent{response: state.response}, true
+		return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
 	}
 
 	if patchPath, ok := raw["p"].(string); ok {
 		patchOperation, _ := raw["o"].(string)
 		if applyConversationPatch(state, patchPath, patchOperation, raw["v"]) {
-			return conversationStreamEvent{response: state.response}, true
+			return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
 		}
 	}
 
@@ -1108,6 +1273,47 @@ func chatCompletionChunkFromRaw(raw map[string]interface{}, model string) (offic
 	return chunk, true
 }
 
+func channelFromValue(value interface{}) string {
+	switch item := value.(type) {
+	case map[string]interface{}:
+		if channel, _ := item["channel"].(string); channel != "" {
+			return channel
+		}
+		if delta, ok := item["delta"].(map[string]interface{}); ok {
+			if channel, _ := delta["channel"].(string); channel != "" {
+				return channel
+			}
+		}
+		if choices, ok := item["choices"].([]interface{}); ok {
+			for _, choiceValue := range choices {
+				choice, ok := choiceValue.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if channel, _ := choice["channel"].(string); channel != "" {
+					return channel
+				}
+				if delta, ok := choice["delta"].(map[string]interface{}); ok {
+					if channel, _ := delta["channel"].(string); channel != "" {
+						return channel
+					}
+				}
+			}
+		}
+		if message, ok := item["message"].(map[string]interface{}); ok {
+			if channel := channelFromValue(message); channel != "" {
+				return channel
+			}
+		}
+		if nested, ok := item["v"].(map[string]interface{}); ok {
+			if channel := channelFromValue(nested); channel != "" {
+				return channel
+			}
+		}
+	}
+	return ""
+}
+
 func numberToInt64(value interface{}) (int64, bool) {
 	switch item := value.(type) {
 	case float64:
@@ -1146,6 +1352,14 @@ func normalizeOpenAIContentDelta(currentText string, incoming string) string {
 		return incoming[len(currentText):]
 	}
 	return incoming
+}
+
+func firstStringPart(parts []interface{}) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	text, _ := parts[0].(string)
+	return text
 }
 
 func firstChunkFinishReason(chunk official_types.ChatCompletionChunk) string {
@@ -1234,9 +1448,16 @@ func applyConversationPatch(state *conversationPatchState, patchPath string, ope
 			}
 			state.response.Message = response.Message
 		}
+		if channel := channelFromValue(value); channel != "" {
+			state.channel = channel
+		}
 	case patchPath == "/message/id":
 		if text, ok := value.(string); ok {
 			state.response.Message.ID = text
+		}
+	case patchPath == "/message/channel":
+		if text, ok := value.(string); ok {
+			state.channel = text
 		}
 	case patchPath == "/message/author/role":
 		if text, ok := value.(string); ok {
@@ -1680,7 +1901,11 @@ func imageModelSlug(model string) string {
 }
 
 func imageConversationHeaders(secret *tokens.Secret, turnStile *TurnStile, conduitToken, accept string) httpclient.AuroraHeaders {
-	header := createBaseHeader()
+	return imageConversationHeadersWithState(secret, turnStile, conduitToken, accept, nil)
+}
+
+func imageConversationHeadersWithState(secret *tokens.Secret, turnStile *TurnStile, conduitToken, accept string, state *ChatClientState) httpclient.AuroraHeaders {
+	header := createBaseHeaderForState(state)
 	header.Set("Content-Type", "application/json")
 	header.Set("Accept", accept)
 	header.Set("OpenAI-Sentinel-Chat-Requirements-Token", turnStile.TurnStileToken)
@@ -1706,11 +1931,15 @@ func imageConversationHeaders(secret *tokens.Secret, turnStile *TurnStile, condu
 	return header
 }
 
-func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model string) (string, error) {
+func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model string, state *ChatClientState) (string, error) {
+	parentMessageID := "client-created-root"
+	if state != nil && state.ParentMessageID != "" {
+		parentMessageID = state.ParentMessageID
+	}
 	payload := map[string]interface{}{
 		"action":                "next",
 		"fork_from_shared_post": false,
-		"parent_message_id":     uuid.NewString(),
+		"parent_message_id":     parentMessageID,
 		"model":                 imageModelSlug(model),
 		"client_prepare_state":  "success",
 		"timezone_offset_min":   -480,
@@ -1722,17 +1951,15 @@ func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens
 			"author":  map[string]string{"role": "user"},
 			"content": map[string]interface{}{"content_type": "text", "parts": []string{prompt}},
 		},
-		"supports_buffering":  true,
-		"supported_encodings": []string{"v1"},
-		"client_contextual_info": map[string]string{
-			"app_name": "chatgpt.com",
-		},
+		"supports_buffering":     true,
+		"supported_encodings":    []string{"v1"},
+		"client_contextual_info": state.ClientContextualInfo(),
 	}
 	bodyJSON, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation/prepare", imageConversationHeaders(secret, turnStile, "", "*/*"), nil, bytes.NewReader(bodyJSON))
+	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation/prepare", imageConversationHeadersWithState(secret, turnStile, "", "*/*", state), nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
 	}
@@ -1760,7 +1987,8 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	conduitToken, err := prepareImageConversation(client, secret, turnStile, prompt, model)
+	state := NewChatClientState()
+	conduitToken, err := prepareImageConversation(client, secret, turnStile, prompt, model, state)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1781,26 +2009,17 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 				},
 			},
 		},
-		"parent_message_id":        uuid.NewString(),
-		"model":                    imageModelSlug(model),
-		"client_prepare_state":     "sent",
-		"timezone_offset_min":      -480,
-		"timezone":                 "Asia/Shanghai",
-		"conversation_mode":        map[string]string{"kind": "primary_assistant"},
-		"enable_message_followups": true,
-		"system_hints":             []string{"picture_v2"},
-		"supports_buffering":       true,
-		"supported_encodings":      []string{"v1"},
-		"client_contextual_info": map[string]interface{}{
-			"is_dark_mode":      false,
-			"time_since_loaded": 1200,
-			"page_height":       1072,
-			"page_width":        1724,
-			"pixel_ratio":       1.2,
-			"screen_height":     1440,
-			"screen_width":      2560,
-			"app_name":          "chatgpt.com",
-		},
+		"parent_message_id":                    state.ParentMessageID,
+		"model":                                imageModelSlug(model),
+		"client_prepare_state":                 "sent",
+		"timezone_offset_min":                  -480,
+		"timezone":                             "Asia/Shanghai",
+		"conversation_mode":                    map[string]string{"kind": "primary_assistant"},
+		"enable_message_followups":             true,
+		"system_hints":                         []string{"picture_v2"},
+		"supports_buffering":                   true,
+		"supported_encodings":                  []string{"v1"},
+		"client_contextual_info":               state.ClientContextualInfo(),
 		"paragen_cot_summary_display_override": "allow",
 		"force_parallel_switch":                "auto",
 		"thinking_effort":                      "standard",
@@ -1810,7 +2029,7 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 		return nil, "", err
 	}
 
-	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation", imageConversationHeaders(secret, turnStile, conduitToken, "text/event-stream"), nil, bytes.NewReader(bodyJSON))
+	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation", imageConversationHeadersWithState(secret, turnStile, conduitToken, "text/event-stream", state), nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, "", err
 	}
@@ -1836,14 +2055,36 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 }
 
 func HandlerDetailed(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string) HandlerResult {
+	return HandlerDetailedWithWebsocket(c, response, client, secret, uuid, translated_request, stream, model, nil)
+}
+
+type HandlerDetailedOptions struct {
+	Websocket        *websocket.Conn
+	ClientState      *ChatClientState
+	ArtifactDelivery string
+	ProxyURL         string
+}
+
+func HandlerDetailedWithWebsocket(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string, wsConn *websocket.Conn) HandlerResult {
+	return HandlerDetailedWithOptions(c, response, client, secret, uuid, translated_request, stream, model, HandlerDetailedOptions{Websocket: wsConn})
+}
+
+func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string, options HandlerDetailedOptions) HandlerResult {
+	wsConn := options.Websocket
+	if options.ClientState != nil {
+		options.ClientState.ApplyToRequest(&translated_request)
+	}
 	max_tokens := false
 
 	// Create a bufio.Reader from the response body
 	reader := bufio.NewReader(response.Body)
-	var wsConn *websocket.Conn
 	if stream && client != nil && secret != nil {
-		if conn, err := dialChatWebsocket(client, secret); err == nil {
-			wsConn = conn
+		if wsConn == nil {
+			if conn, err := dialChatWebsocketWithStateAndProxy(client, secret, options.ClientState, options.ProxyURL); err == nil {
+				wsConn = conn
+				defer wsConn.Close()
+			}
+		} else {
 			defer wsConn.Close()
 		}
 	}
@@ -1868,11 +2109,65 @@ func HandlerDetailed(c *gin.Context, response *http.Response, client httpclient.
 	var imgSource []string
 	var convId string
 	var sentinel []map[string]interface{}
+	var thinkingText string
+	var activeChannel string
+	var assistantMessageID string
+	artifactState := newArtifactAccumulator()
+	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
 	var patchState conversationPatchState
 	var handoffTopicID string
 	var currentEvent string
 	var readingWebsocket bool
 	var websocketStream io.ReadCloser
+	emitSentinels := func(items []map[string]interface{}) {
+		if len(items) == 0 {
+			return
+		}
+		sentinel = append(sentinel, items...)
+		if !stream {
+			return
+		}
+		for _, item := range items {
+			chunk := official_types.NewChatCompletionChunk("", model)
+			if convId != "" {
+				chunk.ConversationID = convId
+			}
+			chunk.Sentinel = item
+			c.Writer.WriteString("data: " + chunk.String() + "\n\n")
+			c.Writer.Flush()
+		}
+	}
+	observeArtifacts := func(line string) {
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return
+		}
+		if cid := firstConversationID(raw); cid != "" && convId == "" {
+			convId = cid
+		}
+		events := artifactState.ObserveRaw(raw, convId)
+		emitSentinels(materializeArtifactEvents(client, secret, convId, events, artifactConfig))
+		if artifactState.LastAssistantMsgID != "" {
+			assistantMessageID = artifactState.LastAssistantMsgID
+		}
+		if artifactState.ConversationID != "" && convId == "" {
+			convId = artifactState.ConversationID
+		}
+	}
+	emitThinking := func(delta string) {
+		if delta == "" {
+			return
+		}
+		thinkingText += delta
+		emitSentinels([]map[string]interface{}{{
+			"event": "thinking",
+			"kind":  "analysis",
+			"delta": delta,
+		}})
+	}
+	finalizeArtifacts := func() {
+		emitSentinels(materializeArtifactEvents(client, secret, convId, artifactState.Finalize(), artifactConfig))
+	}
 readLoop:
 	for {
 		line, err := reader.ReadString('\n')
@@ -1901,8 +2196,10 @@ readLoop:
 						continue readLoop
 					}
 				}
+				finalizeArtifacts()
 				break readLoop
 			}
+			observeArtifacts(line)
 			if topicID, skip := streamHandoffTopicFromPayload(line, currentEvent); skip {
 				if topicID != "" {
 					handoffTopicID = topicID
@@ -1924,9 +2221,37 @@ readLoop:
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
 				deltaText := normalizeOpenAIContentDelta(previous_text.Text, streamEvent.text)
+				if streamEvent.channel != "" {
+					activeChannel = streamEvent.channel
+				}
 				if streamEvent.finishReason != "" {
 					finish_reason = streamEvent.finishReason
 					isEnd = true
+				}
+				if activeChannel == "analysis" {
+					emitThinking(streamEvent.text)
+					if streamEvent.isStop {
+						if stream {
+							finalLine := official_types.StopChunkWithConversation(finish_reason, model, convId)
+							c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
+							c.Writer.Flush()
+						}
+						finalizeArtifacts()
+						return HandlerResult{
+							Text:              strings.Join(imgSource, "") + previous_text.Text,
+							ThinkingText:      thinkingText,
+							ConversationID:    convId,
+							ParentMessageID:   assistantMessageID,
+							Sentinel:          sentinel,
+							ArtifactSignals:   artifactState.Signals,
+							SandboxArtifacts:  artifactState.SandboxArtifacts,
+							PDFArtifacts:      artifactState.PDFArtifacts,
+							GeneratedImageIDs: artifactState.ImageFileIDs,
+							StopSent:          true,
+						}
+					}
+					currentEvent = ""
+					continue
 				}
 				if stream {
 					outChunk := *streamEvent.chunk
@@ -1955,11 +2280,18 @@ readLoop:
 					previous_text.Text += deltaText
 				}
 				if streamEvent.isStop {
+					finalizeArtifacts()
 					return HandlerResult{
-						Text:           strings.Join(imgSource, "") + previous_text.Text,
-						ConversationID: convId,
-						Sentinel:       sentinel,
-						StopSent:       true,
+						Text:              strings.Join(imgSource, "") + previous_text.Text,
+						ThinkingText:      thinkingText,
+						ConversationID:    convId,
+						ParentMessageID:   assistantMessageID,
+						Sentinel:          sentinel,
+						ArtifactSignals:   artifactState.Signals,
+						SandboxArtifacts:  artifactState.SandboxArtifacts,
+						PDFArtifacts:      artifactState.PDFArtifacts,
+						GeneratedImageIDs: artifactState.ImageFileIDs,
+						StopSent:          true,
 					}
 				}
 				currentEvent = ""
@@ -1978,13 +2310,25 @@ readLoop:
 					continue
 				}
 			}
+			if streamEvent.channel != "" {
+				activeChannel = streamEvent.channel
+			}
+			if original_response.Message.ID != "" && (original_response.Message.Author.Role == "assistant" || original_response.Message.Author.Role == "tool") {
+				assistantMessageID = original_response.Message.ID
+			}
+			if activeChannel == "analysis" {
+				thinkingDelta := normalizeOpenAIContentDelta(thinkingText, firstStringPart(original_response.Message.Content.Parts))
+				emitThinking(thinkingDelta)
+				currentEvent = ""
+				continue
+			}
 			if !(original_response.Message.Author.Role == "assistant" || (original_response.Message.Author.Role == "tool" && original_response.Message.Content.ContentType != "text")) || original_response.Message.Content.Parts == nil {
 				continue
 			}
-			if original_response.Message.Metadata.MessageType == "" {
+			if original_response.Message.Metadata.MessageType == "" && activeChannel != "final" {
 				continue
 			}
-			if original_response.Message.Metadata.MessageType != "next" && original_response.Message.Metadata.MessageType != "continue" || !strings.HasSuffix(original_response.Message.Content.ContentType, "text") {
+			if (original_response.Message.Metadata.MessageType != "next" && original_response.Message.Metadata.MessageType != "continue" && activeChannel != "final") || !strings.HasSuffix(original_response.Message.Content.ContentType, "text") {
 				continue
 			}
 			if original_response.Message.EndTurn != nil {
@@ -2086,11 +2430,18 @@ readLoop:
 					c.Writer.WriteString("data: " + final_line.String() + "\n\n")
 					c.Writer.Flush()
 				}
+				finalizeArtifacts()
 				return HandlerResult{
-					Text:           strings.Join(imgSource, "") + previous_text.Text,
-					ConversationID: convId,
-					Sentinel:       sentinel,
-					StopSent:       stream,
+					Text:              strings.Join(imgSource, "") + previous_text.Text,
+					ThinkingText:      thinkingText,
+					ConversationID:    convId,
+					ParentMessageID:   assistantMessageID,
+					Sentinel:          sentinel,
+					ArtifactSignals:   artifactState.Signals,
+					SandboxArtifacts:  artifactState.SandboxArtifacts,
+					PDFArtifacts:      artifactState.PDFArtifacts,
+					GeneratedImageIDs: artifactState.ImageFileIDs,
+					StopSent:          stream,
 				}
 			}
 			currentEvent = ""
@@ -2100,16 +2451,30 @@ readLoop:
 		}
 	}
 	if !max_tokens {
+		finalizeArtifacts()
 		return HandlerResult{
-			Text:           strings.Join(imgSource, "") + previous_text.Text,
-			ConversationID: convId,
-			Sentinel:       sentinel,
+			Text:              strings.Join(imgSource, "") + previous_text.Text,
+			ThinkingText:      thinkingText,
+			ConversationID:    convId,
+			ParentMessageID:   assistantMessageID,
+			Sentinel:          sentinel,
+			ArtifactSignals:   artifactState.Signals,
+			SandboxArtifacts:  artifactState.SandboxArtifacts,
+			PDFArtifacts:      artifactState.PDFArtifacts,
+			GeneratedImageIDs: artifactState.ImageFileIDs,
 		}
 	}
+	finalizeArtifacts()
 	return HandlerResult{
-		Text:           strings.Join(imgSource, "") + previous_text.Text,
-		ConversationID: convId,
-		Sentinel:       sentinel,
+		Text:              strings.Join(imgSource, "") + previous_text.Text,
+		ThinkingText:      thinkingText,
+		ConversationID:    convId,
+		ParentMessageID:   assistantMessageID,
+		Sentinel:          sentinel,
+		ArtifactSignals:   artifactState.Signals,
+		SandboxArtifacts:  artifactState.SandboxArtifacts,
+		PDFArtifacts:      artifactState.PDFArtifacts,
+		GeneratedImageIDs: artifactState.ImageFileIDs,
 		Continue: &ContinueInfo{
 			ConversationID: original_response.ConversationID,
 			ParentID:       original_response.Message.ID,
@@ -2212,6 +2577,10 @@ func parseCookies(cookies []*http.Cookie) map[string]string {
 }
 
 func createBaseHeader() httpclient.AuroraHeaders {
+	return createBaseHeaderForState(nil)
+}
+
+func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header := make(httpclient.AuroraHeaders)
 	header.Set("accept", "*/*")
 	header.Set("accept-language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6")
@@ -2232,8 +2601,18 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
 	header.Set("user-agent", userAgent)
-	header.Set("oai-device-id", oaiDeviceID)
-	header.Set("oai-session-id", oaiSessionID)
+	deviceID := oaiDeviceID
+	sessionID := oaiSessionID
+	if state != nil {
+		if state.DeviceID != "" {
+			deviceID = state.DeviceID
+		}
+		if state.SessionID != "" {
+			sessionID = state.SessionID
+		}
+	}
+	header.Set("oai-device-id", deviceID)
+	header.Set("oai-session-id", sessionID)
 	header.Set("oai-client-version", "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029")
 	header.Set("oai-client-build-number", "6128297")
 	return header

@@ -12,9 +12,9 @@ import (
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
+	_ = godotenv.Load(".env")
 	router := initialize.RegisterRouter()
 
-	_ = godotenv.Load(".env")
 	host := os.Getenv("SERVER_HOST")
 	port := os.Getenv("SERVER_PORT")
 	tlsCert := os.Getenv("TLS_CERT")

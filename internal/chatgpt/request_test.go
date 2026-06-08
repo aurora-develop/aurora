@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -18,10 +20,15 @@ import (
 type fakeAuroraClient struct {
 	response *http.Response
 	headers  httpclient.AuroraHeaders
+	body     string
 }
 
 func (f *fakeAuroraClient) Request(method httpclient.HttpMethod, url string, headers httpclient.AuroraHeaders, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
 	f.headers = headers
+	if body != nil {
+		data, _ := io.ReadAll(body)
+		f.body = string(data)
+	}
 	return f.response, nil
 }
 
@@ -344,6 +351,29 @@ func TestGetConduitTokenAllowsNullToken(t *testing.T) {
 	}
 }
 
+func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"status":"ok","conduit_token":"abc"}`)),
+		},
+	}
+
+	token, err := PrepareConversationConduit(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id")
+
+	if err != nil {
+		t.Fatalf("PrepareConversationConduit returned error: %v", err)
+	}
+	if token != "abc" {
+		t.Fatalf("token = %q, want abc", token)
+	}
+	for _, key := range []string{"openai-sentinel-chat-requirements-token", "openai-sentinel-proof-token", "openai-sentinel-turnstile-token"} {
+		if _, ok := client.headers[key]; ok {
+			t.Fatalf("prepare conduit unexpectedly includes %s", key)
+		}
+	}
+}
+
 func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) {
 	header := conversationHeaders(&tokens.Secret{}, nil, "text/event-stream", "/backend-api/f/conversation", "", "trace-id")
 
@@ -388,6 +418,172 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	}
 	if first["oai-client-version"] != "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029" {
 		t.Fatalf("oai-client-version = %q", first["oai-client-version"])
+	}
+}
+
+func TestPrepareConversationConduitUsesClientState(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"status":"ok","conduit_token":"abc"}`)),
+		},
+	}
+	state := NewChatClientState()
+	state.DeviceID = "device-state"
+	state.SessionID = "session-state"
+	state.ParentMessageID = "parent-state"
+	state.StartTime = time.Now().Add(-2500 * time.Millisecond)
+
+	token, err := PrepareConversationConduitWithState(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", state)
+
+	if err != nil {
+		t.Fatalf("PrepareConversationConduitWithState returned error: %v", err)
+	}
+	if token != "abc" {
+		t.Fatalf("token = %q, want abc", token)
+	}
+	if client.headers["oai-device-id"] != "device-state" {
+		t.Fatalf("oai-device-id = %q, want state device", client.headers["oai-device-id"])
+	}
+	if client.headers["oai-session-id"] != "session-state" {
+		t.Fatalf("oai-session-id = %q, want state session", client.headers["oai-session-id"])
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("prepare body is invalid json: %v", err)
+	}
+	if payload["parent_message_id"] != "parent-state" {
+		t.Fatalf("parent_message_id = %#v, want parent-state", payload["parent_message_id"])
+	}
+	contextInfo, ok := payload["client_contextual_info"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("client_contextual_info missing: %#v", payload)
+	}
+	loaded, ok := contextInfo["time_since_loaded"].(float64)
+	if !ok || loaded < 2 || loaded > 5 {
+		t.Fatalf("time_since_loaded = %#v, want dynamic seconds around 3", contextInfo["time_since_loaded"])
+	}
+}
+
+func TestChatWebsocketConversationUpdateItem(t *testing.T) {
+	frame := map[string]interface{}{
+		"type":     "message",
+		"topic_id": "conversations",
+		"payload": map[string]interface{}{
+			"type":            "conversation-update",
+			"conversation_id": "conv-img",
+			"payload": map[string]interface{}{
+				"asset_pointer": "sediment://file-img123",
+			},
+		},
+	}
+
+	items := chatWebsocketSSEItems(frame, "conversation-turn-abc")
+
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want one conversation-update SSE item", items)
+	}
+	payloads := sseDataPayloads(items[0])
+	if len(payloads) != 1 || !strings.Contains(payloads[0], "conversation-update") {
+		t.Fatalf("payloads = %#v, want conversation-update data", payloads)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(payloads[0]), &raw); err != nil {
+		t.Fatalf("conversation-update item is invalid json: %v", err)
+	}
+	signals := ExtractSignalsFromJSON(raw)
+	if len(ImageFileIDsFromSignals(signals)) != 1 || ImageFileIDsFromSignals(signals)[0] != "file-img123" {
+		t.Fatalf("signals = %#v, want image file id", signals)
+	}
+}
+
+func TestWebsocketProxyFuncUsesExplicitProxy(t *testing.T) {
+	proxyFunc, err := websocketProxyFunc("http://127.0.0.1:10808")
+	if err != nil {
+		t.Fatalf("websocketProxyFunc returned error: %v", err)
+	}
+	reqURL, _ := url.Parse("wss://example.test/ws")
+	req := &http.Request{URL: reqURL}
+	proxyURL, err := proxyFunc(req)
+	if err != nil {
+		t.Fatalf("proxy func returned error: %v", err)
+	}
+	if proxyURL.String() != "http://127.0.0.1:10808" {
+		t.Fatalf("proxy URL = %q, want explicit proxy", proxyURL.String())
+	}
+}
+
+func TestArtifactAccumulatorGeneratedImageRevision(t *testing.T) {
+	acc := newArtifactAccumulator()
+	raw := map[string]interface{}{
+		"type":            "conversation-update",
+		"conversation_id": "conv-img",
+		"message": map[string]interface{}{
+			"id":     "msg-img",
+			"author": map[string]interface{}{"role": "assistant"},
+			"metadata": map[string]interface{}{
+				"image_gen_task_id": "task-1",
+			},
+			"content": map[string]interface{}{
+				"content_type": "image_asset_pointer",
+				"parts": []interface{}{
+					map[string]interface{}{
+						"asset_pointer": "sediment://file-img123",
+						"metadata": map[string]interface{}{
+							"dalle": map[string]interface{}{
+								"gen_id":     "gen-1",
+								"slot_index": float64(1),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	events := acc.ObserveRaw(raw, "conv-img")
+	finalEvents := acc.Finalize()
+
+	if len(events) < 2 {
+		t.Fatalf("events = %#v, want pending and artifact", events)
+	}
+	if events[0].Event != StreamEventArtifactPending {
+		t.Fatalf("first event = %#v, want artifact_pending", events[0])
+	}
+	last := events[len(events)-1]
+	if last.Event != StreamEventArtifact || last.Kind != "generated_image" || last.FileID != "file-img123" || last.GenID != "gen-1" || last.SlotIndex != 1 || last.Revision != 1 {
+		t.Fatalf("image artifact event = %#v", last)
+	}
+	if len(finalEvents) != 1 || finalEvents[0].Event != StreamEventArtifactSlotFinal {
+		t.Fatalf("finalEvents = %#v, want slot final", finalEvents)
+	}
+}
+
+func TestHandlerSeparatesAnalysisAndFinalChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.Join([]string{
+		`data: {"v":{"conversation_id":"conv-thinking","message":{"id":"msg-thinking","author":{"role":"assistant"},"channel":"analysis","content":{"content_type":"text","parts":["think"]},"metadata":{"message_type":"next"},"recipient":"all"}}}`,
+		`data: {"v":{"conversation_id":"conv-thinking","message":{"id":"msg-final","author":{"role":"assistant"},"channel":"final","content":{"content_type":"text","parts":["answer"]},"metadata":{"message_type":"next"},"recipient":"all","end_turn":true}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	result := HandlerDetailedWithOptions(c, response, nil, nil, "request-id", chatGPTRequestForTest(), false, "auto", HandlerDetailedOptions{})
+
+	if result.Text != "answer" {
+		t.Fatalf("text = %q, want final answer only", result.Text)
+	}
+	if result.ThinkingText != "think" {
+		t.Fatalf("thinking = %q, want analysis text", result.ThinkingText)
+	}
+	if len(result.Sentinel) == 0 || result.Sentinel[0]["event"] != "thinking" {
+		t.Fatalf("sentinel = %#v, want thinking event", result.Sentinel)
+	}
+	if result.ParentMessageID != "msg-final" {
+		t.Fatalf("parent message id = %q, want msg-final", result.ParentMessageID)
 	}
 }
 
