@@ -13,4 +13,5 @@ tools/authenticator/.proxies.txt.swp
 /logs/
 /target/
 /bin/
+.claude
 .gocache

@@ -7,9 +7,10 @@ import (
 )
 
 type APIRequest struct {
-	Messages []APIMessage `json:"messages"`
-	Stream   bool         `json:"stream"`
-	Model    string       `json:"model"`
+	Messages         []APIMessage `json:"messages"`
+	Stream           bool         `json:"stream"`
+	Model            string       `json:"model"`
+	ArtifactDelivery string       `json:"artifact_delivery,omitempty"`
 }
 
 type APIMessage struct {

@@ -25,10 +25,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 )
 
@@ -52,7 +54,9 @@ func init() {
 var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
-	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
+	oaiDeviceID         = uuid.NewString()
+	oaiSessionID        = uuid.NewString()
 	timeLayout          = "Mon Jan 2 2006 15:04:05"
 	BasicCookies        []*http.Cookie
 	cachedHardware      = 0
@@ -466,7 +470,7 @@ func conversationHeaders(secret *tokens.Secret, chatToken *TurnStile, accept, ta
 	if turnTraceID != "" {
 		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
 	}
-	if conduitToken != "" {
+	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") {
 		header.Set("X-Conduit-Token", conduitToken)
 	}
 	if chatToken != nil {
@@ -491,6 +495,197 @@ func conversationHeaders(secret *tokens.Secret, chatToken *TurnStile, accept, ta
 	}
 	setTeamAccountHeader(header, secret)
 	return header
+}
+
+type chatWebsocketURLResponse struct {
+	WebsocketURL string `json:"websocket_url"`
+}
+
+var chatWebsocketIDCounter int64 = 4
+
+func nextChatWebsocketID() int64 {
+	return atomic.AddInt64(&chatWebsocketIDCounter, 1)
+}
+
+func getChatWebsocketURL(client httpclient.AuroraHttpClient, secret *tokens.Secret) (string, error) {
+	apiURL, targetPath := conversationURL(secret, "/celsius/ws/user")
+	header := conversationHeaders(secret, nil, "*/*", targetPath, "", "")
+	response, err := client.Request(http.MethodGet, apiURL, header, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("celsius ws user failed: %s", string(body))
+	}
+	var result chatWebsocketURLResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.WebsocketURL == "" {
+		return "", fmt.Errorf("celsius ws user missing websocket_url: %s", string(body))
+	}
+	return result.WebsocketURL, nil
+}
+
+func dialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret) (*websocket.Conn, error) {
+	wsURL, err := getChatWebsocketURL(client, secret)
+	if err != nil {
+		return nil, err
+	}
+	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
+	header := http.Header{}
+	header.Set("User-Agent", userAgent)
+	header.Set("Origin", "https://chatgpt.com")
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		return nil, err
+	}
+	initMsg := []map[string]interface{}{
+		{"id": 1, "command": map[string]interface{}{
+			"type":     "connect",
+			"presence": map[string]string{"type": "presence", "state": "background"},
+		}},
+		{"id": 2, "command": map[string]interface{}{"type": "subscribe", "topic_id": "calpico-chatgpt"}},
+		{"id": 3, "command": map[string]interface{}{"type": "subscribe", "topic_id": "conversations"}},
+		{"id": 4, "command": map[string]interface{}{"type": "subscribe", "topic_id": "app_notifications"}},
+	}
+	if err := conn.WriteJSON(initMsg); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func parseChatWebsocketFrames(raw []byte) []map[string]interface{} {
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] == '[' {
+		var frames []map[string]interface{}
+		if err := json.Unmarshal(raw, &frames); err != nil {
+			return nil
+		}
+		return frames
+	}
+	var frame map[string]interface{}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		return nil
+	}
+	return []map[string]interface{}{frame}
+}
+
+func chatWebsocketEncodedItem(frame map[string]interface{}, topicID string) string {
+	if frame == nil {
+		return ""
+	}
+	if frameTopicID, _ := frame["topic_id"].(string); frameTopicID != "" && frameTopicID != topicID {
+		return ""
+	}
+	payload, ok := frame["payload"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	nested, ok := payload["payload"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	encoded, _ := nested["encoded_item"].(string)
+	return encoded
+}
+
+func chatWebsocketWriteEncodedItem(writer *io.PipeWriter, encoded string) bool {
+	if encoded == "" {
+		return false
+	}
+	if !strings.HasSuffix(encoded, "\n") {
+		encoded += "\n"
+	}
+	_, _ = writer.Write([]byte(encoded))
+	return strings.Contains(encoded, "data: [DONE]") || strings.Contains(encoded, "data:[DONE]")
+}
+
+func chatWebsocketStreamReader(conn *websocket.Conn, topicID string) (io.ReadCloser, error) {
+	reader, writer := io.Pipe()
+	subMsg := []map[string]interface{}{
+		{"id": nextChatWebsocketID(), "command": map[string]interface{}{
+			"type":     "subscribe",
+			"topic_id": topicID,
+			"offset":   "0",
+		}},
+	}
+	if err := conn.WriteJSON(subMsg); err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+	})
+	go func() {
+		defer writer.Close()
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		done := make(chan error, 1)
+		go func() {
+			for {
+				conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+				_, raw, err := conn.ReadMessage()
+				if err != nil {
+					done <- err
+					return
+				}
+				for _, frame := range parseChatWebsocketFrames(raw) {
+					frameType, _ := frame["type"].(string)
+					if frameType == "reply" {
+						reply, _ := frame["reply"].(map[string]interface{})
+						replyTopicID, _ := reply["topic_id"].(string)
+						if replyTopicID != topicID {
+							continue
+						}
+						catchups, _ := reply["catchups"].([]interface{})
+						for _, catchup := range catchups {
+							catchupFrame, _ := catchup.(map[string]interface{})
+							if chatWebsocketWriteEncodedItem(writer, chatWebsocketEncodedItem(catchupFrame, topicID)) {
+								done <- nil
+								return
+							}
+						}
+						continue
+					}
+					if frameType != "message" {
+						continue
+					}
+					if chatWebsocketWriteEncodedItem(writer, chatWebsocketEncodedItem(frame, topicID)) {
+						done <- nil
+						return
+					}
+				}
+			}
+		}()
+		for {
+			select {
+			case <-ticker.C:
+				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			case err := <-done:
+				if err != nil {
+					_ = writer.CloseWithError(err)
+				}
+				return
+			}
+		}
+	}()
+	return reader, nil
+}
+
+func shouldUseWebsocketHandoff(readingWebsocket bool, handoffTopicID string, wsConn *websocket.Conn, text string, imgSource []string) bool {
+	if readingWebsocket || handoffTopicID == "" || wsConn == nil {
+		return false
+	}
+	return text == "" && strings.Join(imgSource, "") == ""
 }
 
 func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string) (string, error) {
@@ -541,9 +736,6 @@ func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.C
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
-	}
-	if result.ConduitToken == "" {
-		return "", fmt.Errorf("missing conduit_token: %s", string(body))
 	}
 	return result.ConduitToken, nil
 }
@@ -688,6 +880,433 @@ func Handle_request_error(c *gin.Context, response *http.Response) bool {
 type ContinueInfo struct {
 	ConversationID string `json:"conversation_id"`
 	ParentID       string `json:"parent_id"`
+}
+
+type HandlerResult struct {
+	Text           string
+	ConversationID string
+	Sentinel       []map[string]interface{}
+	StopSent       bool
+	Continue       *ContinueInfo
+}
+
+type conversationPatchState struct {
+	response chatgpt_types.ChatGPTResponse
+}
+
+type conversationStreamEvent struct {
+	response       chatgpt_types.ChatGPTResponse
+	chunk          *official_types.ChatCompletionChunk
+	text           string
+	role           string
+	conversationID string
+	finishReason   string
+	isStop         bool
+}
+
+func sseDataPayloads(line string) []string {
+	var payloads []string
+	for _, part := range strings.Split(strings.TrimRight(line, "\r\n"), "\n") {
+		part = strings.TrimSpace(part)
+		if !strings.HasPrefix(part, "data:") {
+			continue
+		}
+		payloads = append(payloads, splitSSEDataPayloads(strings.TrimSpace(strings.TrimPrefix(part, "data:")))...)
+	}
+	return payloads
+}
+
+func splitSSEDataPayloads(payload string) []string {
+	var payloads []string
+	for {
+		payload = strings.TrimSpace(payload)
+		if payload == "" {
+			return payloads
+		}
+		if strings.HasPrefix(payload, "data:") {
+			payload = strings.TrimSpace(strings.TrimPrefix(payload, "data:"))
+			continue
+		}
+		if strings.HasPrefix(payload, "[DONE]") {
+			payloads = append(payloads, "[DONE]")
+			payload = payload[len("[DONE]"):]
+			continue
+		}
+
+		reader := strings.NewReader(payload)
+		decoder := json.NewDecoder(reader)
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err == nil {
+			payloads = append(payloads, string(raw))
+			payload = payload[decoder.InputOffset():]
+			continue
+		}
+
+		next := strings.Index(payload, "data:")
+		if next < 0 {
+			return payloads
+		}
+		if first := strings.TrimSpace(payload[:next]); first != "" {
+			payloads = append(payloads, first)
+		}
+		payload = payload[next:]
+	}
+}
+
+func sseEventName(line string) (string, bool) {
+	for _, part := range strings.Split(strings.TrimRight(line, "\r\n"), "\n") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "event:") {
+			return strings.TrimSpace(strings.TrimPrefix(part, "event:")), true
+		}
+	}
+	return "", false
+}
+
+func streamHandoffTopicFromPayload(payload string, currentEvent string) (string, bool) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return "", false
+	}
+	eventType, _ := raw["type"].(string)
+	if eventType == "stream_handoff" {
+		if topicID := streamHandoffTopicFromEvent(raw); topicID != "" {
+			return topicID, true
+		}
+		return "", true
+	}
+	if eventType == "server_ste_metadata" || currentEvent == "server_ste_metadata" {
+		if topicID := streamHandoffTopicFromMetadata(raw); topicID != "" {
+			return topicID, true
+		}
+		return "", eventType == "server_ste_metadata"
+	}
+	if eventType == "resume_conversation_token" {
+		return "", true
+	}
+	return "", false
+}
+
+func streamHandoffTopicFromEvent(raw map[string]interface{}) string {
+	options, ok := raw["options"].([]interface{})
+	if !ok {
+		return ""
+	}
+	for _, optionValue := range options {
+		option, ok := optionValue.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		optionType, _ := option["type"].(string)
+		if optionType != "subscribe_ws_topic" {
+			continue
+		}
+		topicID, _ := option["topic_id"].(string)
+		return topicID
+	}
+	return ""
+}
+
+func streamHandoffTopicFromMetadata(raw map[string]interface{}) string {
+	if turnExchangeID, _ := raw["turn_exchange_id"].(string); turnExchangeID != "" {
+		return "conversation-turn-" + turnExchangeID
+	}
+	metadata, ok := raw["metadata"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if turnExchangeID, _ := metadata["turn_exchange_id"].(string); turnExchangeID != "" {
+		return "conversation-turn-" + turnExchangeID
+	}
+	return ""
+}
+
+func parseConversationEvent(line string, state *conversationPatchState, model string) (conversationStreamEvent, bool) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return conversationStreamEvent{}, false
+	}
+
+	if chunk, ok := chatCompletionChunkFromRaw(raw, model); ok {
+		event := conversationStreamEvent{
+			chunk:          &chunk,
+			text:           firstChunkContent(chunk),
+			role:           firstChunkRole(chunk),
+			conversationID: chunk.ConversationID,
+			finishReason:   firstChunkFinishReason(chunk),
+		}
+		event.isStop = event.finishReason != ""
+		return event, true
+	}
+
+	var direct chatgpt_types.ChatGPTResponse
+	if err := json.Unmarshal([]byte(line), &direct); err == nil && isUsableConversationResponse(direct) {
+		return conversationStreamEvent{response: direct}, true
+	}
+
+	if response, ok := responseFromValue(raw["v"]); ok {
+		state.response = response
+		return conversationStreamEvent{response: state.response}, true
+	}
+	if text, ok := raw["v"].(string); ok && raw["p"] == nil && raw["o"] == nil {
+		ensureConversationPatchDefaults(state)
+		current, _ := state.response.Message.Content.Parts[0].(string)
+		state.response.Message.Content.Parts[0] = current + text
+		return conversationStreamEvent{response: state.response}, true
+	}
+
+	if patchPath, ok := raw["p"].(string); ok {
+		patchOperation, _ := raw["o"].(string)
+		if applyConversationPatch(state, patchPath, patchOperation, raw["v"]) {
+			return conversationStreamEvent{response: state.response}, true
+		}
+	}
+
+	return conversationStreamEvent{}, false
+}
+
+func chatCompletionChunkFromRaw(raw map[string]interface{}, model string) (official_types.ChatCompletionChunk, bool) {
+	choices, ok := raw["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return official_types.ChatCompletionChunk{}, false
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return official_types.ChatCompletionChunk{}, false
+	}
+	delta, ok := choice["delta"].(map[string]interface{})
+	if !ok {
+		return official_types.ChatCompletionChunk{}, false
+	}
+
+	text, _ := delta["content"].(string)
+	chunk := official_types.NewChatCompletionChunk(text, model)
+	if id, ok := raw["id"].(string); ok && id != "" {
+		chunk.ID = id
+	}
+	if object, ok := raw["object"].(string); ok && object != "" {
+		chunk.Object = object
+	}
+	if created, ok := numberToInt64(raw["created"]); ok {
+		chunk.Created = created
+	}
+	if upstreamModel, ok := raw["model"].(string); ok && upstreamModel != "" {
+		chunk.Model = upstreamModel
+	}
+	if role, ok := delta["role"].(string); ok && role != "" {
+		chunk.Choices[0].Delta.Role = role
+	}
+	if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
+		chunk.Choices[0].FinishReason = finishReason
+	}
+	if conversationID, ok := raw["conversation_id"].(string); ok && conversationID != "" {
+		chunk.ConversationID = conversationID
+	}
+	if sentinel, ok := raw["sentinel"].(map[string]interface{}); ok {
+		chunk.Sentinel = sentinel
+	}
+	return chunk, true
+}
+
+func numberToInt64(value interface{}) (int64, bool) {
+	switch item := value.(type) {
+	case float64:
+		return int64(item), true
+	case int64:
+		return item, true
+	case int:
+		return int64(item), true
+	default:
+		return 0, false
+	}
+}
+
+func firstChunkContent(chunk official_types.ChatCompletionChunk) string {
+	if len(chunk.Choices) == 0 {
+		return ""
+	}
+	return chunk.Choices[0].Delta.Content
+}
+
+func firstChunkRole(chunk official_types.ChatCompletionChunk) string {
+	if len(chunk.Choices) == 0 {
+		return ""
+	}
+	return chunk.Choices[0].Delta.Role
+}
+
+func normalizeOpenAIContentDelta(currentText string, incoming string) string {
+	if incoming == "" {
+		return ""
+	}
+	if currentText == "" {
+		return incoming
+	}
+	if strings.HasPrefix(incoming, currentText) {
+		return incoming[len(currentText):]
+	}
+	return incoming
+}
+
+func firstChunkFinishReason(chunk official_types.ChatCompletionChunk) string {
+	if len(chunk.Choices) == 0 || chunk.Choices[0].FinishReason == nil {
+		return ""
+	}
+	if reason, ok := chunk.Choices[0].FinishReason.(string); ok {
+		return reason
+	}
+	return fmt.Sprint(chunk.Choices[0].FinishReason)
+}
+
+func sentinelsFromResponse(response chatgpt_types.ChatGPTResponse) []map[string]interface{} {
+	var raw map[string]interface{}
+	data, err := json.Marshal(response)
+	if err != nil {
+		return nil
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	var sentinel []map[string]interface{}
+	collectSentinelsFromValue(raw["sentinel"], &sentinel)
+	collectSentinelsFromValue(raw["message"], &sentinel)
+	return sentinel
+}
+
+func collectSentinelsFromValue(value interface{}, sentinel *[]map[string]interface{}) {
+	switch item := value.(type) {
+	case map[string]interface{}:
+		if event, ok := item["event"].(string); ok && event != "" {
+			*sentinel = append(*sentinel, item)
+		}
+		for _, nested := range item {
+			collectSentinelsFromValue(nested, sentinel)
+		}
+	case []interface{}:
+		for _, nested := range item {
+			collectSentinelsFromValue(nested, sentinel)
+		}
+	}
+}
+
+func isUsableConversationResponse(response chatgpt_types.ChatGPTResponse) bool {
+	return response.Error != nil ||
+		response.Message.ID != "" ||
+		response.Message.Author.Role != "" ||
+		len(response.Message.Content.Parts) > 0 ||
+		response.Message.EndTurn != nil
+}
+
+func responseFromValue(value interface{}) (chatgpt_types.ChatGPTResponse, bool) {
+	if value == nil {
+		return chatgpt_types.ChatGPTResponse{}, false
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return chatgpt_types.ChatGPTResponse{}, false
+	}
+
+	var response chatgpt_types.ChatGPTResponse
+	if err := json.Unmarshal(data, &response); err == nil && isUsableConversationResponse(response) {
+		return response, true
+	}
+
+	var message chatgpt_types.Message
+	if err := json.Unmarshal(data, &message); err == nil && (message.ID != "" || message.Author.Role != "" || len(message.Content.Parts) > 0 || message.EndTurn != nil) {
+		response.Message = message
+		return response, true
+	}
+
+	return chatgpt_types.ChatGPTResponse{}, false
+}
+
+func applyConversationPatch(state *conversationPatchState, patchPath string, operation string, value interface{}) bool {
+	ensureConversationPatchDefaults(state)
+	switch {
+	case patchPath == "/conversation_id":
+		if text, ok := value.(string); ok {
+			state.response.ConversationID = text
+		}
+	case patchPath == "/message":
+		if response, ok := responseFromValue(value); ok {
+			if response.ConversationID != "" {
+				state.response.ConversationID = response.ConversationID
+			}
+			state.response.Message = response.Message
+		}
+	case patchPath == "/message/id":
+		if text, ok := value.(string); ok {
+			state.response.Message.ID = text
+		}
+	case patchPath == "/message/author/role":
+		if text, ok := value.(string); ok {
+			state.response.Message.Author.Role = text
+		}
+	case patchPath == "/message/recipient":
+		if text, ok := value.(string); ok {
+			state.response.Message.Recipient = text
+		}
+	case patchPath == "/message/content/content_type":
+		if text, ok := value.(string); ok {
+			state.response.Message.Content.ContentType = text
+		}
+	case patchPath == "/message/content/parts":
+		if parts, ok := value.([]interface{}); ok {
+			state.response.Message.Content.Parts = parts
+		}
+	case strings.HasPrefix(patchPath, "/message/content/parts/0"):
+		if text, ok := value.(string); ok {
+			current, _ := state.response.Message.Content.Parts[0].(string)
+			if operation == "append" {
+				text = current + text
+			}
+			state.response.Message.Content.Parts[0] = text
+		}
+	case patchPath == "/message/metadata/message_type":
+		if text, ok := value.(string); ok {
+			state.response.Message.Metadata.MessageType = text
+		}
+	case patchPath == "/message/metadata/model_slug":
+		if text, ok := value.(string); ok {
+			state.response.Message.Metadata.ModelSlug = text
+		}
+	case patchPath == "/message/metadata/finish_details":
+		if value == nil {
+			state.response.Message.Metadata.FinishDetails = nil
+			break
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			break
+		}
+		var finishDetails chatgpt_types.FinishDetails
+		if json.Unmarshal(data, &finishDetails) == nil {
+			state.response.Message.Metadata.FinishDetails = &finishDetails
+		}
+	case patchPath == "/message/end_turn":
+		state.response.Message.EndTurn = value
+	default:
+		return false
+	}
+	return true
+}
+
+func ensureConversationPatchDefaults(state *conversationPatchState) {
+	if state.response.Message.Author.Role == "" {
+		state.response.Message.Author.Role = "assistant"
+	}
+	if state.response.Message.Recipient == "" {
+		state.response.Message.Recipient = "all"
+	}
+	if state.response.Message.Content.ContentType == "" {
+		state.response.Message.Content.ContentType = "text"
+	}
+	if state.response.Message.Content.Parts == nil {
+		state.response.Message.Content.Parts = []interface{}{""}
+	}
+	if state.response.Message.Metadata.MessageType == "" {
+		state.response.Message.Metadata.MessageType = "next"
+	}
 }
 
 type fileInfo struct {
@@ -1184,6 +1803,7 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 		},
 		"paragen_cot_summary_display_override": "allow",
 		"force_parallel_switch":                "auto",
+		"thinking_effort":                      "standard",
 	}
 	bodyJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -1211,15 +1831,30 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 }
 
 func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string) (string, *ContinueInfo) {
+	result := HandlerDetailed(c, response, client, secret, uuid, translated_request, stream, model)
+	return result.Text, result.Continue
+}
+
+func HandlerDetailed(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string) HandlerResult {
 	max_tokens := false
 
 	// Create a bufio.Reader from the response body
 	reader := bufio.NewReader(response.Body)
+	var wsConn *websocket.Conn
+	if stream && client != nil && secret != nil {
+		if conn, err := dialChatWebsocket(client, secret); err == nil {
+			wsConn = conn
+			defer wsConn.Close()
+		}
+	}
 
 	// Read the response byte by byte until a newline character is encountered
 	if stream {
 		// Response content type is text/event-stream
 		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 	} else {
 		// Response content type is application/json
 		c.Header("Content-Type", "application/json")
@@ -1232,30 +1867,110 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 	var isEnd = false
 	var imgSource []string
 	var convId string
+	var sentinel []map[string]interface{}
+	var patchState conversationPatchState
+	var handoffTopicID string
+	var currentEvent string
+	var readingWebsocket bool
+	var websocketStream io.ReadCloser
+readLoop:
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF && line == "" {
 				break
 			}
-			return "", nil
+			if err != io.EOF {
+				return HandlerResult{}
+			}
 		}
-		if len(line) < 6 {
-			continue
+		if eventName, ok := sseEventName(line); ok {
+			currentEvent = eventName
 		}
-		// Remove "data: " from the beginning of the line
-		line = line[6:]
-		// Check if line starts with [DONE]
-		if !strings.HasPrefix(line, "[DONE]") {
-			// Parse the line as JSON
-			err = json.Unmarshal([]byte(line), &original_response)
-			if err != nil {
+		for _, line := range sseDataPayloads(line) {
+			// Check if line starts with [DONE]
+			if strings.HasPrefix(line, "[DONE]") {
+				if shouldUseWebsocketHandoff(readingWebsocket, handoffTopicID, wsConn, previous_text.Text, imgSource) {
+					wsReader, err := chatWebsocketStreamReader(wsConn, handoffTopicID)
+					if err == nil {
+						websocketStream = wsReader
+						defer websocketStream.Close()
+						reader = bufio.NewReader(wsReader)
+						readingWebsocket = true
+						currentEvent = ""
+						continue readLoop
+					}
+				}
+				break readLoop
+			}
+			if topicID, skip := streamHandoffTopicFromPayload(line, currentEvent); skip {
+				if topicID != "" {
+					handoffTopicID = topicID
+				}
+				currentEvent = ""
 				continue
 			}
+			// Parse the line as JSON
+			streamEvent, ok := parseConversationEvent(line, &patchState, model)
+			if !ok {
+				currentEvent = ""
+				continue
+			}
+			if streamEvent.chunk != nil {
+				if streamEvent.conversationID != "" {
+					convId = streamEvent.conversationID
+				}
+				if streamEvent.chunk.Sentinel != nil {
+					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
+				}
+				deltaText := normalizeOpenAIContentDelta(previous_text.Text, streamEvent.text)
+				if streamEvent.finishReason != "" {
+					finish_reason = streamEvent.finishReason
+					isEnd = true
+				}
+				if stream {
+					outChunk := *streamEvent.chunk
+					if len(outChunk.Choices) > 0 {
+						outChunk.Choices[0].Delta.Content = deltaText
+						if streamEvent.role == "" || !isRole {
+							outChunk.Choices[0].Delta.Role = ""
+						}
+					}
+					if streamEvent.isStop && outChunk.ConversationID == "" {
+						outChunk.ConversationID = convId
+					}
+					shouldWrite := deltaText != "" ||
+						(streamEvent.role != "" && isRole) ||
+						streamEvent.chunk.Sentinel != nil ||
+						streamEvent.isStop
+					if shouldWrite {
+						c.Writer.WriteString("data: " + outChunk.String() + "\n\n")
+						c.Writer.Flush()
+					}
+					if streamEvent.role != "" && isRole {
+						isRole = false
+					}
+				}
+				if deltaText != "" {
+					previous_text.Text += deltaText
+				}
+				if streamEvent.isStop {
+					return HandlerResult{
+						Text:           strings.Join(imgSource, "") + previous_text.Text,
+						ConversationID: convId,
+						Sentinel:       sentinel,
+						StopSent:       true,
+					}
+				}
+				currentEvent = ""
+				continue
+			}
+			original_response = streamEvent.response
 			if original_response.Error != nil {
 				c.JSON(500, gin.H{"error": original_response.Error})
-				return "", nil
+				return HandlerResult{}
 			}
+			sentinel = append(sentinel, sentinelsFromResponse(original_response)...)
 			if original_response.ConversationID != convId {
 				if convId == "" {
 					convId = original_response.ConversationID
@@ -1354,7 +2069,7 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 			if stream {
 				_, err = c.Writer.WriteString(response_string)
 				if err != nil {
-					return "", nil
+					return HandlerResult{}
 				}
 				c.Writer.Flush()
 			}
@@ -1367,19 +2082,38 @@ func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHt
 			}
 			if isEnd {
 				if stream {
-					final_line := official_types.StopChunk(finish_reason, model)
+					final_line := official_types.StopChunkWithConversation(finish_reason, model, convId)
 					c.Writer.WriteString("data: " + final_line.String() + "\n\n")
+					c.Writer.Flush()
 				}
-				break
+				return HandlerResult{
+					Text:           strings.Join(imgSource, "") + previous_text.Text,
+					ConversationID: convId,
+					Sentinel:       sentinel,
+					StopSent:       stream,
+				}
 			}
+			currentEvent = ""
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	if !max_tokens {
-		return strings.Join(imgSource, "") + previous_text.Text, nil
+		return HandlerResult{
+			Text:           strings.Join(imgSource, "") + previous_text.Text,
+			ConversationID: convId,
+			Sentinel:       sentinel,
+		}
 	}
-	return strings.Join(imgSource, "") + previous_text.Text, &ContinueInfo{
-		ConversationID: original_response.ConversationID,
-		ParentID:       original_response.Message.ID,
+	return HandlerResult{
+		Text:           strings.Join(imgSource, "") + previous_text.Text,
+		ConversationID: convId,
+		Sentinel:       sentinel,
+		Continue: &ContinueInfo{
+			ConversationID: original_response.ConversationID,
+			ParentID:       original_response.Message.ID,
+		},
 	}
 }
 
@@ -1480,15 +2214,15 @@ func parseCookies(cookies []*http.Cookie) map[string]string {
 func createBaseHeader() httpclient.AuroraHeaders {
 	header := make(httpclient.AuroraHeaders)
 	header.Set("accept", "*/*")
-	header.Set("accept-language", "en-US,en;q=0.9")
-	header.Set("oai-language", util.RandomLanguage())
+	header.Set("accept-language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6")
+	header.Set("oai-language", "zh-CN")
 	header.Set("origin", "https://chatgpt.com")
 	header.Set("referer", "https://chatgpt.com/")
-	header.Set("sec-ch-ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
+	header.Set("sec-ch-ua", `"Chromium";v="146", "Not-A.Brand";v="24", "Microsoft Edge";v="146"`)
 	header.Set("sec-ch-ua-arch", `"x86"`)
 	header.Set("sec-ch-ua-bitness", `"64"`)
-	header.Set("sec-ch-ua-full-version", `"148.0.7778.218"`)
-	header.Set("sec-ch-ua-full-version-list", `"Chromium";v="148.0.7778.218", "Google Chrome";v="148.0.7778.218", "Not/A)Brand";v="99.0.0.0"`)
+	header.Set("sec-ch-ua-full-version", `"146.0.3856.72"`)
+	header.Set("sec-ch-ua-full-version-list", `"Chromium";v="146.0.7680.154", "Not-A.Brand";v="24.0.0.0", "Microsoft Edge";v="146.0.3856.72"`)
 	header.Set("sec-ch-ua-mobile", "?0")
 	header.Set("sec-ch-ua-model", `""`)
 	header.Set("sec-ch-ua-platform", `"Windows"`)
@@ -1498,10 +2232,10 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
 	header.Set("user-agent", userAgent)
-	header.Set("oai-device-id", uuid.New().String())
-	header.Set("oai-session-id", uuid.New().String())
-	header.Set("oai-client-version", "prod-a9e268687461965b9507d0c5eeb8d58ad00b12dd")
-	header.Set("oai-client-build-number", "7215851")
+	header.Set("oai-device-id", oaiDeviceID)
+	header.Set("oai-session-id", oaiSessionID)
+	header.Set("oai-client-version", "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029")
+	header.Set("oai-client-build-number", "6128297")
 	return header
 }
 
