@@ -15,3 +15,5 @@ tools/authenticator/.proxies.txt.swp
 /bin/
 .claude
 .gocache
+.atomcode
+CLAUDE.md
