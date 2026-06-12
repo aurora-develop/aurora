@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -23,6 +25,8 @@ type UploadedFile struct {
 	Filename      string `json:"filename,omitempty"`
 	Purpose       string `json:"purpose,omitempty"`
 	MimeType      string `json:"mime_type,omitempty"`
+	Width         int    `json:"width,omitempty"`
+	Height        int    `json:"height,omitempty"`
 	LibraryFileID string `json:"library_file_id,omitempty"`
 }
 
@@ -56,34 +60,61 @@ func LookupUploadedFile(fileID string) (UploadedFile, bool) {
 	return file, ok
 }
 
-func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy, filename, contentType, purpose string, data []byte) (UploadedFile, int, error) {
+// UploadFile 执行完整三步上传,对齐 chatgpttoapi/files.go UploadFile。
+func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy, filename, mimeHint string, data []byte) (UploadedFile, int, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
 	if secret == nil || secret.Token == "" || secret.IsFree {
 		return UploadedFile{}, http.StatusBadRequest, fmt.Errorf("file upload requires a logged-in ChatGPT access token")
 	}
-	filename = strings.TrimSpace(filename)
-	if filename == "" {
-		filename = "upload.bin"
-	}
-	if contentType == "" {
-		contentType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
-	}
-	if contentType == "" {
-		contentType = http.DetectContentType(data)
-	}
-	if purpose == "" {
-		purpose = "assistants"
+	if len(data) == 0 {
+		return UploadedFile{}, http.StatusBadRequest, fmt.Errorf("empty file data")
 	}
 
-	meta, status, err := createUpload(client, secret, filename, len(data))
+	mime, ext := resolveMime(data, mimeHint)
+	useCase := "multimodal"
+	if !strings.HasPrefix(mime, "image/") {
+		useCase = "my_files"
+	}
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = fmt.Sprintf("file-%d%s", len(data), ext)
+	}
+
+	var width, height int
+	if strings.HasPrefix(mime, "image/") {
+		if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+			width = cfg.Width
+			height = cfg.Height
+		}
+	}
+
+	// ---- Step 1: POST /backend-api/files ----
+	step1Payload := map[string]interface{}{
+		"file_name":  filename,
+		"file_size":  len(data),
+		"use_case":   useCase,
+		"mime_type":  mime,
+		"store_in_library":         true,
+		"library_persistence_mode": "opportunistic",
+	}
+	if width > 0 && height > 0 {
+		step1Payload["width"] = width
+		step1Payload["height"] = height
+	}
+
+	meta, status, err := createUpload(client, secret, step1Payload)
 	if err != nil {
 		return UploadedFile{}, status, err
 	}
-	if status, err := putUpload(client, meta.UploadURL, contentType, data); err != nil {
+
+	// ---- Step 2: PUT upload_url (Azure Blob) ----
+	if status, err := putUpload(client, meta.UploadURL, mime, data); err != nil {
 		return UploadedFile{}, status, err
 	}
+
+	// ---- Step 3: POST /backend-api/files/{file_id}/uploaded ----
 	if status, err := confirmUpload(client, secret, meta.FileID); err != nil {
 		return UploadedFile{}, status, err
 	}
@@ -94,24 +125,16 @@ func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 		Object:        "file",
 		Bytes:         int64(len(data)),
 		Filename:      filename,
-		Purpose:       purpose,
-		MimeType:      contentType,
+		MimeType:      mime,
+		Width:         width,
+		Height:        height,
 		LibraryFileID: meta.LibraryFileID,
 	}
 	RegisterUploadedFile(result)
 	return result, http.StatusOK, nil
 }
 
-func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, filename string, size int) (uploadMetaResponse, int, error) {
-	payload := map[string]interface{}{
-		"file_name":                filename,
-		"file_size":                size,
-		"use_case":                 "multimodal",
-		"timezone_offset_min":      -480,
-		"reset_rate_limits":        false,
-		"store_in_library":         true,
-		"library_persistence_mode": "opportunistic",
-	}
+func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, payload map[string]interface{}) (uploadMetaResponse, int, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
@@ -188,4 +211,62 @@ func confirmUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, fi
 		return response.StatusCode, fmt.Errorf("confirm file upload failed: %s", string(responseBody))
 	}
 	return response.StatusCode, nil
+}
+
+// ── MIME 检测(对齐 chatgpttoapi/files.go) ──
+
+func resolveMime(data []byte, mimeHint string) (mime, ext string) {
+	sniffed, sniffExt := sniffMime(data)
+	hint := normalizeMime(mimeHint)
+	if hint != "" && hint != "application/octet-stream" {
+		ext = extFromMime(hint)
+		if ext == "" {
+			ext = sniffExt
+		}
+		return hint, ext
+	}
+	return sniffed, sniffExt
+}
+
+func normalizeMime(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ";"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+func sniffMime(data []byte) (mime, ext string) {
+	n := 512
+	if len(data) < n {
+		n = len(data)
+	}
+	mime = http.DetectContentType(data[:n])
+	ext = extFromMime(mime)
+	return mime, ext
+}
+
+func extFromMime(m string) string {
+	switch strings.ToLower(normalizeMime(m)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "application/pdf":
+		return ".pdf"
+	case "text/plain":
+		return ".txt"
+	case "text/csv":
+		return ".csv"
+	case "application/json":
+		return ".json"
+	case "text/markdown":
+		return ".md"
+	default:
+		return ""
+	}
 }

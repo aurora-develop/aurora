@@ -5,6 +5,7 @@ import (
 	"aurora/httpclient"
 	"aurora/internal/prooftoken"
 	"aurora/internal/tokens"
+	"aurora/internal/turnstile"
 	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
@@ -141,7 +142,7 @@ func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua)
+	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua, cachedScripts, cachedDpl)
 }
 
 type ChatRequire struct {
@@ -182,7 +183,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	requirementsToken := prooftoken.NewPOWConfig(ua).RequirementsToken()
+	requirementsToken := prooftoken.NewPOWConfig(ua, cachedScripts, cachedDpl).RequirementsToken()
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -216,9 +217,9 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	}
 	var turnstileToken string
 	if prepare.Turnstile.DX != "" {
-		turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, requirementsToken)
+		turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, requirementsToken, cachedScripts)
 		if turnstileToken == "" {
-			turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, "")
+			turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, "", cachedScripts)
 		}
 	}
 
@@ -344,7 +345,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		client.SetProxy(proxy)
 	}
 	if cachedRequireProof == "" {
-		cachedRequireProof = prooftoken.NewPOWConfig(defaultUserAgent()).RequirementsToken()
+		cachedRequireProof = prooftoken.NewPOWConfig(defaultUserAgent(), cachedScripts, cachedDpl).RequirementsToken()
 	}
 	var apiUrl string
 	if secret.IsFree {
@@ -2240,6 +2241,9 @@ readLoop:
 				}
 				if streamEvent.finishReason != "" {
 					finish_reason = streamEvent.finishReason
+					if finish_reason == "length" {
+						max_tokens = true
+					}
 					isEnd = true
 				}
 				if activeChannel == "analysis" {
@@ -2249,6 +2253,25 @@ readLoop:
 							finalLine := official_types.StopChunkWithConversation(finish_reason, model, convId)
 							c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
 							c.Writer.Flush()
+						}
+						if max_tokens && convId != "" && assistantMessageID != "" {
+							finalizeArtifacts()
+							return HandlerResult{
+								Text:              strings.Join(imgSource, "") + previous_text.Text,
+								ThinkingText:      thinkingText,
+								ConversationID:    convId,
+								ParentMessageID:   assistantMessageID,
+								Sentinel:          sentinel,
+								ArtifactSignals:   artifactState.Signals,
+								SandboxArtifacts:  artifactState.SandboxArtifacts,
+								PDFArtifacts:      artifactState.PDFArtifacts,
+								GeneratedImageIDs: artifactState.ImageFileIDs,
+								StopSent:          true,
+								Continue: &ContinueInfo{
+									ConversationID: convId,
+									ParentID:       assistantMessageID,
+								},
+							}
 						}
 						finalizeArtifacts()
 						return HandlerResult{
@@ -2294,6 +2317,25 @@ readLoop:
 					previous_text.Text += deltaText
 				}
 				if streamEvent.isStop {
+					if max_tokens && convId != "" && assistantMessageID != "" {
+						finalizeArtifacts()
+						return HandlerResult{
+							Text:              strings.Join(imgSource, "") + previous_text.Text,
+							ThinkingText:      thinkingText,
+							ConversationID:    convId,
+							ParentMessageID:   assistantMessageID,
+							Sentinel:          sentinel,
+							ArtifactSignals:   artifactState.Signals,
+							SandboxArtifacts:  artifactState.SandboxArtifacts,
+							PDFArtifacts:      artifactState.PDFArtifacts,
+							GeneratedImageIDs: artifactState.ImageFileIDs,
+							StopSent:          true,
+							Continue: &ContinueInfo{
+								ConversationID: convId,
+								ParentID:       assistantMessageID,
+							},
+						}
+					}
 					finalizeArtifacts()
 					return HandlerResult{
 						Text:              strings.Join(imgSource, "") + previous_text.Text,
