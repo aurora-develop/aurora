@@ -54,7 +54,6 @@ func init() {
 var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
-	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
 	oaiDeviceID         = uuid.NewString()
 	oaiSessionID        = uuid.NewString()
 	oaiStartTime        = time.Now()
@@ -134,11 +133,15 @@ func GetInitConfig() []interface{} {
 	timeNum := float64(time.Since(oaiStartTime).Milliseconds())
 	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
 	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
-	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
+	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, defaultUserAgent(), script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
 }
 
-func CalcProofToken(require *ChatRequire) string {
-	return prooftoken.CalcProofToken(require.Proof.Seed, require.Proof.Difficulty, userAgent)
+func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua)
 }
 
 type ChatRequire struct {
@@ -175,7 +178,11 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	requirementsToken := prooftoken.LegacyRequirementsToken(userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	requirementsToken := prooftoken.NewPOWConfig(ua).RequirementsToken()
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -202,7 +209,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 
 	var proofToken string
 	if prepare.Proof.Required {
-		proofToken = CalcProofToken(prepare)
+		proofToken = CalcProofToken(prepare, state)
 		if proofToken == "" {
 			return nil, http.StatusForbidden, errors.New("calculation proof token failure. Please retry the operation")
 		}
@@ -337,7 +344,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		client.SetProxy(proxy)
 	}
 	if cachedRequireProof == "" {
-		cachedRequireProof = prooftoken.LegacyRequirementsToken(userAgent)
+		cachedRequireProof = prooftoken.NewPOWConfig(defaultUserAgent()).RequirementsToken()
 	}
 	var apiUrl string
 	if secret.IsFree {
@@ -583,7 +590,11 @@ func DialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secr
 		dialer.Proxy = proxyFunc
 	}
 	header := http.Header{}
-	header.Set("User-Agent", userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	header.Set("User-Agent", ua)
 	header.Set("Origin", "https://chatgpt.com")
 	conn, _, err := dialer.Dial(wsURL, header)
 	if err != nil {
@@ -973,7 +984,7 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	reqUrl := BaseURL + "/models"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
 	header.Set("origin", "https://chatgpt.com")
@@ -1548,7 +1559,7 @@ func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url 
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -1572,7 +1583,7 @@ func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, secret 
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -1604,7 +1615,7 @@ func DownloadImageBytes(client httpclient.AuroraHttpClient, url string, secret *
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -2549,7 +2560,7 @@ func GETTokenForSessionToken(client httpclient.AuroraHttpClient, session_token s
 	header := make(httpclient.AuroraHeaders)
 	header.Set("authority", "chat.openai.com")
 	header.Set("accept-language", "zh-CN,zh;q=0.9")
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
 	header.Set("origin", "https://chatgpt.com")
@@ -2603,7 +2614,11 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("sec-fetch-dest", "empty")
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
-	header.Set("user-agent", userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	header.Set("user-agent", ua)
 	deviceID := oaiDeviceID
 	sessionID := oaiSessionID
 	if state != nil {
@@ -2619,6 +2634,10 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("oai-client-version", "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029")
 	header.Set("oai-client-build-number", "6128297")
 	return header
+}
+
+func defaultUserAgent() string {
+	return util.RandomUserAgent()
 }
 
 func HandlerTTS(response *http.Response, input string) (string, string) {
