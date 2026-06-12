@@ -129,12 +129,41 @@ func GetConfig() []interface{} {
 	return nil
 }
 func GetInitConfig() []interface{} {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-	script := cachedScripts[rand.Intn(len(cachedScripts))]
-	timeNum := float64(time.Since(oaiStartTime).Milliseconds())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	script := cachedScripts[rng.Intn(len(cachedScripts))]
+	nowMs := float64(time.Now().UnixMilli())
+	perfNow := float64(int64(rng.Float64()*49000)+1000) + rng.Float64()
+	timeOrigin := nowMs - perfNow
 	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
 	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
-	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, defaultUserAgent(), script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
+
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	reactSuffix := make([]byte, 11)
+	for i := range reactSuffix {
+		reactSuffix[i] = letters[rng.Intn(len(letters))]
+	}
+
+	return []interface{}{
+		cachedHardware,                                      // [0]  screen.width + screen.height
+		parseTime,                                           // [1]  Date.toString()
+		int64(4294967296),                                   // [2]  jsHeapSizeLimit
+		rng.Float64(),                                       // [3]  Math.random()
+		defaultUserAgent(),                                  // [4]  navigator.userAgent
+		script,                                              // [5]  currentScript.src
+		nil,                                                 // [6]  documentElement[data-build]
+		"zh-CN",                                             // [7]  navigator.language
+		"zh-CN,en,en-GB,en-US",                              // [8]  navigator.languages.join(",")
+		rng.Float64(),                                       // [9]  Math.random()
+		"vibrate−function vibrate() { [native code] }",      // [10] navigator 原型方法
+		"_reactListening" + string(reactSuffix),             // [11] document 随机 key
+		"requestIdleCallback",                               // [12] window 随机 key
+		perfNow,                                             // [13] performance.now()
+		oaiDeviceID,                                         // [14] device_id
+		"",                                                  // [15] location.search
+		32,                                                  // [16] hardwareConcurrency
+		timeOrigin,                                          // [17] performance.timeOrigin
+		0, 0, 0, 0, 0, 0, 0,                                // [18-24] "X in window" 检查
+	}
 }
 
 func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
@@ -142,7 +171,7 @@ func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua, cachedScripts, cachedDpl)
+	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua, cachedScripts, oaiDeviceID)
 }
 
 type ChatRequire struct {
@@ -183,7 +212,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	requirementsToken := prooftoken.NewPOWConfig(ua, cachedScripts, cachedDpl).RequirementsToken()
+	requirementsToken := prooftoken.RequirementsToken(ua, cachedScripts, oaiDeviceID)
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -217,7 +246,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	}
 	var turnstileToken string
 	if prepare.Turnstile.DX != "" {
-		turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, requirementsToken, cachedScripts)
+		turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, proofToken, cachedScripts)
 		if turnstileToken == "" {
 			turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, "", cachedScripts)
 		}
@@ -345,7 +374,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		client.SetProxy(proxy)
 	}
 	if cachedRequireProof == "" {
-		cachedRequireProof = prooftoken.NewPOWConfig(defaultUserAgent(), cachedScripts, cachedDpl).RequirementsToken()
+		cachedRequireProof = prooftoken.RequirementsToken(defaultUserAgent(), cachedScripts, oaiDeviceID)
 	}
 	var apiUrl string
 	if secret.IsFree {

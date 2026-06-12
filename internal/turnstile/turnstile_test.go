@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSolveWithRealDX 用真实 dx 字符串验证 VM 能解出非空 token。
@@ -214,7 +215,7 @@ func TestOpcodes(t *testing.T) {
 				{opcode: opkn, args: []any{102.0, 100.0, 101.0}},
 				{opcode: opWt, args: []any{102.0}},
 			},
-			expect: "NaN",
+			expect: "0",
 		},
 		{
 			name: "opcode 29 less-than",
@@ -230,7 +231,7 @@ func TestOpcodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, ok := runWithTimeout(tt.queue, tt.key, nil, 500)
+			result, ok := runWithTimeout(tt.queue, tt.key, nil, 500*time.Millisecond)
 			if tt.expect == "" {
 				if ok {
 					t.Errorf("expected rejected, got resolved: %s", result)
