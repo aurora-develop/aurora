@@ -16,44 +16,18 @@ type userAgentSpec struct {
 	Family     string
 }
 
-// 模板覆盖 Chrome / Edge / Firefox / Safari 四大主流桌面浏览器，
-// 版本号在 [MinVersion, MaxVersion] 闭区间内随机。
+// 模板限定为 Edge（Windows）一族。
+//
+// 为什么不能用其他浏览器：internal/chatgpt 的 createBaseHeaderForState 同时
+// 写死了 sec-ch-ua = "Microsoft Edge";v="146"，如果 user-agent 跟 sec-ch-ua
+// 不一致，Cloudflare/ChatGPT 一眼就能看出是脚本客户端。版本号在
+// [MinVersion, MaxVersion] 闭区间内随机，仍然保留一定的指纹多样性。
 var userAgentSpecs = []userAgentSpec{
-	{
-		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36",
-		MinVersion: 120,
-		MaxVersion: 147,
-		Family:     "Chrome-Win",
-	},
-	{
-		Template:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36",
-		MinVersion: 120,
-		MaxVersion: 147,
-		Family:     "Chrome-Mac",
-	},
 	{
 		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36 Edg/%d.0.0.0",
 		MinVersion: 120,
 		MaxVersion: 147,
 		Family:     "Edge-Win",
-	},
-	{
-		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:%d.0) Gecko/20100101 Firefox/%d.0",
-		MinVersion: 120,
-		MaxVersion: 132,
-		Family:     "Firefox-Win",
-	},
-	{
-		Template:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:%d.0) Gecko/20100101 Firefox/%d.0",
-		MinVersion: 120,
-		MaxVersion: 132,
-		Family:     "Firefox-Mac",
-	},
-	{
-		Template:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%d.0 Safari/605.1.15",
-		MinVersion: 17,
-		MaxVersion: 18,
-		Family:     "Safari-Mac",
 	},
 }
 
