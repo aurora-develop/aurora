@@ -951,29 +951,29 @@ func (h *Handler) tts(c *gin.Context) {
 	}
 
 	client := bogdanfinn.NewStdClient()
-	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
-	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
-		return
-	}
 
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertTTSAPIRequest(original_request.Input)
+	clientState := chatgpt.NewChatClientState()
+	clientState.ConversationID = translated_request.ConversationID
+	clientState.ParentMessageID = translated_request.ParentMessageID
 
-	response, err := chatgpt.POSTconversation(client, translated_request, secret, turnStile, proxyUrl)
+	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"error": "error sending request",
-		})
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "request_conversion_error",
+			"param":   "model",
+			"code":    "request_conversion_error",
+		}})
 		return
 	}
 	defer response.Body.Close()
 	if chatgpt.Handle_request_error(c, response) {
+		if wsConn != nil {
+			wsConn.Close()
+			wsConn = nil
+		}
 		return
 	}
 	msgId, convId := chatgpt.HandlerTTS(response, original_request.Input)

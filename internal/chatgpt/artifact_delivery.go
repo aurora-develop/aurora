@@ -238,7 +238,7 @@ func DownloadURLBytes(client httpclient.AuroraHttpClient, url string, secret *to
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	if accept == "" {
 		accept = "*/*"
 	}

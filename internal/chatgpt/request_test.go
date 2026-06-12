@@ -96,8 +96,9 @@ func TestHandlerStreamsOpenAIChunksAndSentinel(t *testing.T) {
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	full, continueInfo := Handler(c, response, nil, nil, "request-id", chatGPTRequestForTest(), true, "gpt-4o")
+	full, continueInfo := Handler(c, response, nil, nil, "request-id", request, true, request.Model)
 
 	if continueInfo != nil {
 		t.Fatalf("continueInfo = %#v, want nil", continueInfo)
@@ -277,8 +278,9 @@ func TestHandlerDetailedCollectsOpenAIChunkMetadataWithoutStreaming(t *testing.T
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	result := HandlerDetailed(c, response, nil, nil, "request-id", chatGPTRequestForTest(), false, "gpt-4o")
+	result := HandlerDetailed(c, response, nil, nil, "request-id", request, false, request.Model)
 
 	if result.Text != "你好" {
 		t.Fatalf("text = %q, want %q", result.Text, "你好")
@@ -584,6 +586,39 @@ func TestHandlerSeparatesAnalysisAndFinalChannels(t *testing.T) {
 	}
 	if result.ParentMessageID != "msg-final" {
 		t.Fatalf("parent message id = %q, want msg-final", result.ParentMessageID)
+	}
+}
+
+func TestHandlerTTSParsesPatchStream(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-tts"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-tts"}`,
+		`data: {"p":"/message/author/role","o":"replace","v":"assistant"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"hello tts"}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "hello tts")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want msg-tts conv-tts", msgID, convID)
+	}
+}
+
+func TestHandlerTTSFallsBackToAssistantMessageID(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"conversation_id":"conv-tts","message":{"id":"msg-tts","author":{"role":"assistant"},"content":{"content_type":"text","parts":["different text"]},"metadata":{"message_type":"next"},"recipient":"all"}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "requested text")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want fallback assistant message", msgID, convID)
 	}
 }
 

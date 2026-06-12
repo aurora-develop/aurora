@@ -152,7 +152,7 @@ func putUpload(client httpclient.AuroraHttpClient, uploadURL, contentType string
 	header.Set("x-ms-version", "2020-04-08")
 	header.Set("Origin", "https://chatgpt.com")
 	header.Set("Referer", "https://chatgpt.com/")
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "application/json, text/plain, */*")
 	header.Set("Accept-Language", "en-US,en;q=0.8")
 	response, err := client.Request(http.MethodPut, uploadURL, header, nil, bytes.NewReader(data))
