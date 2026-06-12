@@ -926,11 +926,19 @@ func conversationPartialText(message chatgpt_types.ChatGPTRequest) string {
 		}
 		for _, part := range msg.Content.Parts {
 			if text, ok := part.(string); ok && strings.TrimSpace(text) != "" {
-				return text
+				return runeSlice(text, 5)
 			}
 		}
 	}
 	return "h"
+}
+
+func runeSlice(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) > maxRunes {
+		r = r[:maxRunes]
+	}
+	return string(r)
 }
 
 func conversationPrepareClientContext(message chatgpt_types.ChatGPTRequest) map[string]interface{} {

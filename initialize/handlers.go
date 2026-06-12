@@ -23,8 +23,9 @@ import (
 )
 
 type Handler struct {
-	proxy *proxys.IProxy
-	token *tokens.AccessToken
+	proxy    *proxys.IProxy
+	token    *tokens.AccessToken
+	sessions *SessionManager
 }
 
 func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, conversationID string) {
@@ -38,7 +39,7 @@ func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, 
 }
 
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
-	return &Handler{proxy: proxy, token: token}
+	return &Handler{proxy: proxy, token: token, sessions: NewSessionManager()}
 }
 
 // initTurnStileWithRetry 初始化 turnstile，当 paid token 返回 401 时自动禁用并轮询下一个
@@ -287,7 +288,15 @@ func (h *Handler) nightmare(c *gin.Context) {
 
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
-	clientState := chatgpt.NewChatClientState()
+
+	// 按 conversationID 复用 ChatClientState，保持 DeviceID/SessionID 一致
+	var clientState *chatgpt.ChatClientState
+	if translated_request.ConversationID != "" {
+		clientState = h.sessions.Get(translated_request.ConversationID)
+	}
+	if clientState == nil {
+		clientState = chatgpt.NewChatClientState()
+	}
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
 
@@ -342,6 +351,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		full_response += result.Text
 		if result.ConversationID != "" {
 			conversationID = result.ConversationID
+			h.sessions.Register(conversationID, clientState)
 		}
 		sentinel = append(sentinel, result.Sentinel...)
 		if result.StopSent {
@@ -439,7 +449,15 @@ func (h *Handler) responses(c *gin.Context) {
 	client := bogdanfinn.NewStdClient()
 
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
-	clientState := chatgpt.NewChatClientState()
+
+	// 按 conversationID 复用 ChatClientState，保持 DeviceID/SessionID 一致
+	var clientState *chatgpt.ChatClientState
+	if translated_request.ConversationID != "" {
+		clientState = h.sessions.Get(translated_request.ConversationID)
+	}
+	if clientState == nil {
+		clientState = chatgpt.NewChatClientState()
+	}
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
 	reqModel := original_request.Model
@@ -482,6 +500,9 @@ func (h *Handler) responses(c *gin.Context) {
 			parentMessageID = continue_info.ParentID
 		}
 		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
+		if result.ConversationID != "" {
+			h.sessions.Register(result.ConversationID, clientState)
+		}
 		if continue_info == nil {
 			break
 		}
