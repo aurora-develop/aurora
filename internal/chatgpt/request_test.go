@@ -409,8 +409,11 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	if first["oai-language"] != "zh-CN" {
 		t.Fatalf("oai-language = %q, want zh-CN", first["oai-language"])
 	}
-	if !strings.Contains(first["user-agent"], "Edg/147.0.0.0") {
-		t.Fatalf("user-agent = %q, want Edge 147 shape", first["user-agent"])
+	// UA must be the Edge variant to stay consistent with the hardcoded
+	// sec-ch-ua = "Microsoft Edge";v="146". Version is randomized.
+	ua := first["user-agent"]
+	if !strings.Contains(ua, "Edg/") {
+		t.Fatalf("user-agent = %q, want Edge variant to match sec-ch-ua=Microsoft Edge 146", ua)
 	}
 	if first["oai-device-id"] == "" || first["oai-device-id"] != second["oai-device-id"] {
 		t.Fatalf("oai-device-id should be stable across headers: first=%q second=%q", first["oai-device-id"], second["oai-device-id"])
