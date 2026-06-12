@@ -27,6 +27,7 @@ type MessageContent struct {
 type MessageContentPart struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text,omitempty"`
+	ImageURL *ImageURLDetail `json:"image_url,omitempty"`
 	FileID   string          `json:"file_id,omitempty"`
 	FileName string          `json:"filename,omitempty"`
 	Name     string          `json:"name,omitempty"`
@@ -36,6 +37,11 @@ type MessageContentPart struct {
 	Width    int             `json:"width,omitempty"`
 	Height   int             `json:"height,omitempty"`
 	File     *FileAttachment `json:"file,omitempty"`
+}
+
+type ImageURLDetail struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type FileAttachment struct {
@@ -108,6 +114,18 @@ func (c MessageContent) Files() []FileAttachment {
 	var files []FileAttachment
 	for _, part := range c.Parts {
 		partType := strings.TrimSpace(part.Type)
+		if partType == "image_url" && part.ImageURL != nil && part.ImageURL.URL != "" {
+			files = append(files, FileAttachment{
+				ID:       part.ImageURL.URL,
+				FileID:   part.ImageURL.URL,
+				Name:     guessImageFilename(part.ImageURL.URL),
+				Filename: guessImageFilename(part.ImageURL.URL),
+				MimeType: guessImageMime(part.ImageURL.URL),
+				MIMEType: guessImageMime(part.ImageURL.URL),
+				Source:   part.ImageURL.URL,
+			})
+			continue
+		}
 		if partType != "file" && partType != "input_file" && partType != "image" && partType != "input_image" {
 			continue
 		}
@@ -132,6 +150,45 @@ func (c MessageContent) Files() []FileAttachment {
 		})
 	}
 	return files
+}
+
+func guessImageFilename(url string) string {
+	if strings.HasPrefix(url, "data:") {
+		return "image.png"
+	}
+	idx := strings.LastIndex(url, "/")
+	if idx >= 0 && idx < len(url)-1 {
+		name := url[idx+1:]
+		if q := strings.Index(name, "?"); q >= 0 {
+			name = name[:q]
+		}
+		if name != "" {
+			return name
+		}
+	}
+	return "image.png"
+}
+
+func guessImageMime(url string) string {
+	if strings.HasPrefix(url, "data:") {
+		end := strings.Index(url, ";")
+		if end > 5 {
+			return url[5:end]
+		}
+	}
+	lower := strings.ToLower(url)
+	switch {
+	case strings.Contains(lower, ".png"):
+		return "image/png"
+	case strings.Contains(lower, ".jpg") || strings.Contains(lower, ".jpeg"):
+		return "image/jpeg"
+	case strings.Contains(lower, ".webp"):
+		return "image/webp"
+	case strings.Contains(lower, ".gif"):
+		return "image/gif"
+	default:
+		return "image/png"
+	}
 }
 
 func (m APIMessage) Text() string {

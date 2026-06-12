@@ -34,11 +34,11 @@ type ChatGPTRequest struct {
 	TimezoneOffsetMin                int                    `json:"timezone_offset_min"`
 	Timezone                         string                 `json:"timezone"`
 	ConversationMode                 map[string]string      `json:"conversation_mode"`
-	EnableMessageFollowups           bool                   `json:"enable_message_followups"`
+	EnableMessageFollowups           bool                   `json:"enable_message_followups,omitempty"`
 	SystemHints                      []string               `json:"system_hints"`
-	SupportsBuffering                bool                   `json:"supports_buffering"`
-	SupportedEncodings               []string               `json:"supported_encodings"`
-	ClientContextualInfo             map[string]interface{} `json:"client_contextual_info"`
+	SupportsBuffering                bool                   `json:"supports_buffering,omitempty"`
+	SupportedEncodings               []string               `json:"supported_encodings,omitempty"`
+	ClientContextualInfo             map[string]interface{} `json:"client_contextual_info,omitempty"`
 	Suggestions                      []interface{}          `json:"suggestions,omitempty"`
 	HistoryAndTrainingDisabled       bool                   `json:"history_and_training_disabled"`
 	ParagenCotSummaryDisplayOverride string                 `json:"paragen_cot_summary_display_override"`
@@ -59,20 +59,7 @@ func NewChatGPTRequest() ChatGPTRequest {
 		TimezoneOffsetMin:          -480,
 		Timezone:                   "Asia/Shanghai",
 		ConversationMode:           map[string]string{"kind": "primary_assistant"},
-		EnableMessageFollowups:     true,
 		SystemHints:                []string{},
-		SupportsBuffering:          true,
-		SupportedEncodings:         []string{"v1"},
-		ClientContextualInfo: map[string]interface{}{
-			"is_dark_mode":      false,
-			"time_since_loaded": 0,
-			"page_height":       1014,
-			"page_width":        1055,
-			"pixel_ratio":       1,
-			"screen_height":     1080,
-			"screen_width":      1920,
-			"app_name":          "chatgpt.com",
-		},
 		ParagenCotSummaryDisplayOverride: "allow",
 		ForceParallelSwitch:              "auto",
 		ThinkingEffort:                   "standard",

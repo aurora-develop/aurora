@@ -286,7 +286,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	client := bogdanfinn.NewStdClient()
 
 	// Convert the chat request to a ChatGPT request
-	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl)
+	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
 	clientState := chatgpt.NewChatClientState()
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
@@ -438,7 +438,7 @@ func (h *Handler) responses(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 
-	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl)
+	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
 	clientState := chatgpt.NewChatClientState()
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
@@ -726,7 +726,7 @@ func (h *Handler) files(c *gin.Context) {
 	contentType := formFile.Header.Get("Content-Type")
 	client := bogdanfinn.NewStdClient()
 	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	uploaded, status, err := chatgpt.UploadFile(client, secret, h.proxy.GetProxyIP(), formFile.Filename, contentType, c.PostForm("purpose"), data)
+	uploaded, status, err := chatgpt.UploadFile(client, secret, h.proxy.GetProxyIP(), formFile.Filename, contentType, data)
 	if err != nil {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
