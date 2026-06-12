@@ -14,7 +14,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/pkoukk/tiktoken-go v0.1.7
-	github.com/xqdoo00o/funcaptcha v0.0.0-20240403090732-1b604d808f6c
 	golang.org/x/crypto v0.52.0
 )
 

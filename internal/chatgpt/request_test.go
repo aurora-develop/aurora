@@ -96,8 +96,9 @@ func TestHandlerStreamsOpenAIChunksAndSentinel(t *testing.T) {
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	full, continueInfo := Handler(c, response, nil, nil, "request-id", chatGPTRequestForTest(), true, "gpt-4o")
+	full, continueInfo := Handler(c, response, nil, nil, "request-id", request, true, request.Model)
 
 	if continueInfo != nil {
 		t.Fatalf("continueInfo = %#v, want nil", continueInfo)
@@ -277,8 +278,9 @@ func TestHandlerDetailedCollectsOpenAIChunkMetadataWithoutStreaming(t *testing.T
 	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
+	request := chatGPTRequestForTest()
 
-	result := HandlerDetailed(c, response, nil, nil, "request-id", chatGPTRequestForTest(), false, "gpt-4o")
+	result := HandlerDetailed(c, response, nil, nil, "request-id", request, false, request.Model)
 
 	if result.Text != "你好" {
 		t.Fatalf("text = %q, want %q", result.Text, "你好")
@@ -407,8 +409,11 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	if first["oai-language"] != "zh-CN" {
 		t.Fatalf("oai-language = %q, want zh-CN", first["oai-language"])
 	}
-	if !strings.Contains(first["user-agent"], "Edg/147.0.0.0") {
-		t.Fatalf("user-agent = %q, want Edge 147 shape", first["user-agent"])
+	// UA must be the Edge variant to stay consistent with the hardcoded
+	// sec-ch-ua = "Microsoft Edge";v="146". Version is randomized.
+	ua := first["user-agent"]
+	if !strings.Contains(ua, "Edg/") {
+		t.Fatalf("user-agent = %q, want Edge variant to match sec-ch-ua=Microsoft Edge 146", ua)
 	}
 	if first["oai-device-id"] == "" || first["oai-device-id"] != second["oai-device-id"] {
 		t.Fatalf("oai-device-id should be stable across headers: first=%q second=%q", first["oai-device-id"], second["oai-device-id"])
@@ -584,6 +589,39 @@ func TestHandlerSeparatesAnalysisAndFinalChannels(t *testing.T) {
 	}
 	if result.ParentMessageID != "msg-final" {
 		t.Fatalf("parent message id = %q, want msg-final", result.ParentMessageID)
+	}
+}
+
+func TestHandlerTTSParsesPatchStream(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-tts"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-tts"}`,
+		`data: {"p":"/message/author/role","o":"replace","v":"assistant"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"hello tts"}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "hello tts")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want msg-tts conv-tts", msgID, convID)
+	}
+}
+
+func TestHandlerTTSFallsBackToAssistantMessageID(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"conversation_id":"conv-tts","message":{"id":"msg-tts","author":{"role":"assistant"},"content":{"content_type":"text","parts":["different text"]},"metadata":{"message_type":"next"},"recipient":"all"}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+	msgID, convID := HandlerTTS(response, "requested text")
+
+	if msgID != "msg-tts" || convID != "conv-tts" {
+		t.Fatalf("msgID=%q convID=%q, want fallback assistant message", msgID, convID)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"aurora/httpclient"
 	"aurora/internal/prooftoken"
 	"aurora/internal/tokens"
+	"aurora/internal/turnstile"
 	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
@@ -54,7 +55,6 @@ func init() {
 var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
-	userAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
 	oaiDeviceID         = uuid.NewString()
 	oaiSessionID        = uuid.NewString()
 	oaiStartTime        = time.Now()
@@ -134,11 +134,15 @@ func GetInitConfig() []interface{} {
 	timeNum := float64(time.Since(oaiStartTime).Milliseconds())
 	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
 	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
-	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
+	return []interface{}{cachedHardware, parseTime, int64(4294705152), 0, defaultUserAgent(), script, cachedDpl, "zh-CN", "zh-CN", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, uuid.NewString()}
 }
 
-func CalcProofToken(require *ChatRequire) string {
-	return prooftoken.CalcProofToken(require.Proof.Seed, require.Proof.Difficulty, userAgent)
+func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua, cachedScripts, cachedDpl)
 }
 
 type ChatRequire struct {
@@ -175,7 +179,11 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	requirementsToken := prooftoken.LegacyRequirementsToken(userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	requirementsToken := prooftoken.NewPOWConfig(ua, cachedScripts, cachedDpl).RequirementsToken()
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -202,16 +210,16 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 
 	var proofToken string
 	if prepare.Proof.Required {
-		proofToken = CalcProofToken(prepare)
+		proofToken = CalcProofToken(prepare, state)
 		if proofToken == "" {
 			return nil, http.StatusForbidden, errors.New("calculation proof token failure. Please retry the operation")
 		}
 	}
 	var turnstileToken string
 	if prepare.Turnstile.DX != "" {
-		turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, requirementsToken)
+		turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, requirementsToken, cachedScripts)
 		if turnstileToken == "" {
-			turnstileToken = prooftoken.Solve(prepare.Turnstile.DX, "")
+			turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, "", cachedScripts)
 		}
 	}
 
@@ -337,7 +345,7 @@ func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, pr
 		client.SetProxy(proxy)
 	}
 	if cachedRequireProof == "" {
-		cachedRequireProof = prooftoken.LegacyRequirementsToken(userAgent)
+		cachedRequireProof = prooftoken.NewPOWConfig(defaultUserAgent(), cachedScripts, cachedDpl).RequirementsToken()
 	}
 	var apiUrl string
 	if secret.IsFree {
@@ -583,7 +591,11 @@ func DialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secr
 		dialer.Proxy = proxyFunc
 	}
 	header := http.Header{}
-	header.Set("User-Agent", userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	header.Set("User-Agent", ua)
 	header.Set("Origin", "https://chatgpt.com")
 	conn, _, err := dialer.Dial(wsURL, header)
 	if err != nil {
@@ -973,7 +985,7 @@ func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	reqUrl := BaseURL + "/models"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
 	header.Set("origin", "https://chatgpt.com")
@@ -1548,7 +1560,7 @@ func GetImageSource(client httpclient.AuroraHttpClient, wg *sync.WaitGroup, url 
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -1572,7 +1584,7 @@ func GetImageDownloadURL(client httpclient.AuroraHttpClient, url string, secret 
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -1604,7 +1616,7 @@ func DownloadImageBytes(client httpclient.AuroraHttpClient, url string, secret *
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	if secret != nil && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -2070,6 +2082,9 @@ func HandlerDetailedWithWebsocket(c *gin.Context, response *http.Response, clien
 }
 
 func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string, options HandlerDetailedOptions) HandlerResult {
+	if model == "" {
+		model = translated_request.Model
+	}
 	wsConn := options.Websocket
 	if options.ClientState != nil {
 		options.ClientState.ApplyToRequest(&translated_request)
@@ -2226,6 +2241,9 @@ readLoop:
 				}
 				if streamEvent.finishReason != "" {
 					finish_reason = streamEvent.finishReason
+					if finish_reason == "length" {
+						max_tokens = true
+					}
 					isEnd = true
 				}
 				if activeChannel == "analysis" {
@@ -2235,6 +2253,25 @@ readLoop:
 							finalLine := official_types.StopChunkWithConversation(finish_reason, model, convId)
 							c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
 							c.Writer.Flush()
+						}
+						if max_tokens && convId != "" && assistantMessageID != "" {
+							finalizeArtifacts()
+							return HandlerResult{
+								Text:              strings.Join(imgSource, "") + previous_text.Text,
+								ThinkingText:      thinkingText,
+								ConversationID:    convId,
+								ParentMessageID:   assistantMessageID,
+								Sentinel:          sentinel,
+								ArtifactSignals:   artifactState.Signals,
+								SandboxArtifacts:  artifactState.SandboxArtifacts,
+								PDFArtifacts:      artifactState.PDFArtifacts,
+								GeneratedImageIDs: artifactState.ImageFileIDs,
+								StopSent:          true,
+								Continue: &ContinueInfo{
+									ConversationID: convId,
+									ParentID:       assistantMessageID,
+								},
+							}
 						}
 						finalizeArtifacts()
 						return HandlerResult{
@@ -2280,6 +2317,25 @@ readLoop:
 					previous_text.Text += deltaText
 				}
 				if streamEvent.isStop {
+					if max_tokens && convId != "" && assistantMessageID != "" {
+						finalizeArtifacts()
+						return HandlerResult{
+							Text:              strings.Join(imgSource, "") + previous_text.Text,
+							ThinkingText:      thinkingText,
+							ConversationID:    convId,
+							ParentMessageID:   assistantMessageID,
+							Sentinel:          sentinel,
+							ArtifactSignals:   artifactState.Signals,
+							SandboxArtifacts:  artifactState.SandboxArtifacts,
+							PDFArtifacts:      artifactState.PDFArtifacts,
+							GeneratedImageIDs: artifactState.ImageFileIDs,
+							StopSent:          true,
+							Continue: &ContinueInfo{
+								ConversationID: convId,
+								ParentID:       assistantMessageID,
+							},
+						}
+					}
 					finalizeArtifacts()
 					return HandlerResult{
 						Text:              strings.Join(imgSource, "") + previous_text.Text,
@@ -2546,7 +2602,7 @@ func GETTokenForSessionToken(client httpclient.AuroraHttpClient, session_token s
 	header := make(httpclient.AuroraHeaders)
 	header.Set("authority", "chat.openai.com")
 	header.Set("accept-language", "zh-CN,zh;q=0.9")
-	header.Set("User-Agent", userAgent)
+	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
 	header.Set("origin", "https://chatgpt.com")
@@ -2600,7 +2656,11 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("sec-fetch-dest", "empty")
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
-	header.Set("user-agent", userAgent)
+	ua := defaultUserAgent()
+	if state != nil && state.UserAgent != "" {
+		ua = state.UserAgent
+	}
+	header.Set("user-agent", ua)
 	deviceID := oaiDeviceID
 	sessionID := oaiSessionID
 	if state != nil {
@@ -2618,45 +2678,62 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	return header
 }
 
+func defaultUserAgent() string {
+	return util.RandomUserAgent()
+}
+
 func HandlerTTS(response *http.Response, input string) (string, string) {
 	reader := bufio.NewReader(response.Body)
 
-	var original_response chatgpt_types.ChatGPTResponse
 	var convId string
 	var fallbackMsgID string
+	var patchState conversationPatchState
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF && line == "" {
 				break
 			}
-			return "", ""
-		}
-		if len(line) < 6 {
-			continue
-		}
-		line = line[6:]
-		if !strings.HasPrefix(line, "[DONE]") {
-			original_response.Message.ID = ""
-			err = json.Unmarshal([]byte(line), &original_response)
-			if err != nil {
-				continue
-			}
-			if original_response.Error != nil {
+			if err != io.EOF {
 				return "", ""
 			}
-			if original_response.Message.ID == "" {
+		}
+		for _, payload := range sseDataPayloads(line) {
+			if strings.HasPrefix(payload, "[DONE]") {
+				break
+			}
+			streamEvent, ok := parseConversationEvent(payload, &patchState, "auto")
+			if !ok {
+				var raw map[string]interface{}
+				if json.Unmarshal([]byte(payload), &raw) == nil {
+					if cid := firstConversationID(raw); cid != "" && convId == "" {
+						convId = cid
+					}
+					if msgID := lastAssistantMessageID(raw); msgID != "" && fallbackMsgID == "" {
+						fallbackMsgID = msgID
+					}
+				}
 				continue
 			}
-			if original_response.ConversationID != convId {
+			if streamEvent.response.Error != nil {
+				return "", ""
+			}
+			originalResponse := streamEvent.response
+			if streamEvent.conversationID != "" && convId == "" {
+				convId = streamEvent.conversationID
+			}
+			if originalResponse.ConversationID != convId {
 				if convId == "" {
-					convId = original_response.ConversationID
+					convId = originalResponse.ConversationID
 				} else {
 					continue
 				}
 			}
-			if original_response.Message.Author.Role != "assistant" {
+			if originalResponse.Message.ID == "" {
+				continue
+			}
+			if originalResponse.Message.Author.Role != "assistant" {
 				continue
 			}
 
@@ -2664,20 +2741,23 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 			// requested TTS input. Prefer an exact match, then fall back to the first
 			// assistant message in the same conversation so synthesize still works.
 			if fallbackMsgID == "" {
-				fallbackMsgID = original_response.Message.ID
+				fallbackMsgID = originalResponse.Message.ID
 			}
-			if len(original_response.Message.Content.Parts) == 0 {
+			if len(originalResponse.Message.Content.Parts) == 0 {
 				continue
 			}
-			for _, rawPart := range original_response.Message.Content.Parts {
+			for _, rawPart := range originalResponse.Message.Content.Parts {
 				part, ok := rawPart.(string)
 				if !ok {
 					continue
 				}
 				if part == input || strings.Contains(part, input) || strings.Contains(input, part) {
-					return original_response.Message.ID, convId
+					return originalResponse.Message.ID, convId
 				}
 			}
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	if fallbackMsgID != "" && convId != "" {
