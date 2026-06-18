@@ -8,7 +8,7 @@ import (
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
-	"github.com/bogdanfinn/tls-client/profiles"
+	"github.com/xiaozhou26/re-tlsclient/chrome"
 )
 
 type TlsClient struct {
@@ -22,7 +22,9 @@ func NewStdClient() *TlsClient {
 	client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
 		tls_client.WithTimeoutSeconds(600),
-		tls_client.WithClientProfile(profiles.Chrome_146),
+		tls_client.WithClientProfile(chrome.Profile()),
+		tls_client.WithRandomTLSExtensionOrder(),
+		tls_client.WithDefaultHeaders(chrome.Chrome148WindowsHeaders),
 	}...)
 
 	stdClient := &TlsClient{Client: client}
@@ -85,6 +87,10 @@ func (t *TlsClient) Request(method httpclient.HttpMethod, url string, headers ht
 	}
 	t.handleHeaders(req, headers)
 	t.handleCookies(req, cookies)
+	// Pin the Chrome profile headers last so they win over any caller-set
+	// values. tls-client's WithDefaultHeaders only fills missing keys; it
+	// does not overwrite the request's own header set.
+	chrome.ApplyHeaders(req, chrome.V148, chrome.Windows)
 	if t.ReqBefore != nil {
 		if err := t.ReqBefore(req); err != nil {
 			return nil, err

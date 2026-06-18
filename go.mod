@@ -1,19 +1,20 @@
 module aurora
 
-go 1.25.0
+go 1.26.4
 
 require (
 	github.com/EDDYCJY/fake-useragent v0.2.0
 	github.com/PuerkitoBio/goquery v1.9.2
 	github.com/acheong08/endless v0.0.0-20230615162514-90545c7793fd
 	github.com/bogdanfinn/fhttp v0.6.8
-	github.com/bogdanfinn/tls-client v1.15.0
+	github.com/bogdanfinn/tls-client v1.15.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-resty/resty/v2 v2.14.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/pkoukk/tiktoken-go v0.1.7
+	github.com/xiaozhou26/re-tlsclient v1.0.9
 	golang.org/x/crypto v0.52.0
 )
 
