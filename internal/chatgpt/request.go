@@ -146,8 +146,8 @@ func GetInitConfig() []interface{} {
 	nowMs := float64(time.Now().UnixMilli())
 	perfNow := float64(int64(rng.Float64()*49000)+1000) + rng.Float64()
 	timeOrigin := nowMs - perfNow
-	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
-	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
+	loc := time.FixedZone("Pacific Standard Time", -8*60*60)
+	parseTime := time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0800 (Pacific Standard Time)"
 
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 	reactSuffix := make([]byte, 11)
@@ -163,8 +163,8 @@ func GetInitConfig() []interface{} {
 		defaultUserAgent(),     // [4]  navigator.userAgent
 		script,                 // [5]  currentScript.src
 		nil,                    // [6]  documentElement[data-build]
-		"zh-CN",                // [7]  navigator.language
-		"zh-CN,en,en-GB,en-US", // [8]  navigator.languages.join(",")
+		"en-US",                // [7]  navigator.language
+		"en-US,en",             // [8]  navigator.languages.join(",")
 		rng.Float64(),          // [9]  Math.random()
 		"vibrate−function vibrate() { [native code] }", // [10] navigator 原型方法
 		"_reactListening" + string(reactSuffix),        // [11] document 随机 key
@@ -172,7 +172,7 @@ func GetInitConfig() []interface{} {
 		perfNow,                                        // [13] performance.now()
 		oaiDeviceID,                                    // [14] device_id
 		"",                                             // [15] location.search
-		32,                                             // [16] hardwareConcurrency
+		16,                                             // [16] hardwareConcurrency (对齐 prooftoken.NewConfig)
 		timeOrigin,                                     // [17] performance.timeOrigin
 		0, 0, 0, 0, 0, 0, 0,                            // [18-24] "X in window" 检查
 	}
@@ -411,6 +411,70 @@ func sentinelURL(secret *tokens.Secret, path string) (string, string) {
 	return BaseURL + path, "/backend-api" + path
 }
 
+// sentinelReqResponse 是 POST /sentinel/req 的响应。
+// 服务端会返回 token + flow 字段(对齐 sdk.deob.pretty.js / OpenSentinel client.js)。
+type sentinelReqResponse struct {
+	Token       string `json:"token"`
+	Flow        string `json:"flow"`
+	ExpiresAt   int64  `json:"expires_at,omitempty"`
+	ChatReq     string `json:"chat_req,omitempty"`     // 备用:有时服务端把 chat-requirements token 嵌在这里
+	Persona     string `json:"persona,omitempty"`
+}
+
+// POSTSentinelReq 调用 /sentinel/req 端点 (对齐 conversation.txt 抓包的第 3 步)。
+//
+// 请求格式(对齐 sdk.deob.pretty.js OpenSentinel/client.js):
+//   POST /backend-api/sentinel/req
+//   Content-Type: text/plain;charset=UTF-8
+//   body: {"p":<requirementsToken>,"id":<deviceID>,"flow":"conversation"}
+//
+// 响应:服务端下发 flow token,可作为后续 prepare/finalize 的辅助 token。
+// 失败返回 (nil, status, err)。
+func POSTSentinelReq(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken, deviceID, flow string, state *ChatClientState) (*sentinelReqResponse, int, error) {
+	if flow == "" {
+		flow = "conversation"
+	}
+	apiUrl, targetPath := sentinelURL(secret, "/sentinel/req")
+	bodyJSON, err := json.Marshal(map[string]string{
+		"p":    requirementsToken,
+		"id":   deviceID,
+		"flow": flow,
+	})
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	header := createBaseHeaderForState(state)
+	header.Set("Accept", "*/*")
+	// 对齐 conversation.txt:sentinel/req 端点用 text/plain;charset=UTF-8
+	header.Set("Content-Type", "text/plain;charset=UTF-8")
+	header.Set("x-openai-target-path", targetPath)
+	header.Set("x-openai-target-route", targetPath)
+	// referer 应该指向 sentinel/frame.html(对齐 conversation.txt 抓包)
+	if state == nil || state.ConversationID == "" {
+		header.Set("referer", "https://chatgpt.com/backend-api/sentinel/frame.html?sv=20260423af3c")
+	}
+	if secret != nil && secret.IsFree && secret.Token != "" {
+		header.Set("oai-device-id", secret.Token)
+	}
+	if secret != nil && !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	setTeamAccountHeader(header, secret)
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, response.StatusCode, fmt.Errorf("sentinel req failed: %s", readResponseSnippet(response.Body, 500))
+	}
+	var result sentinelReqResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, response.StatusCode, err
+	}
+	return &result, response.StatusCode, nil
+}
+
 func sentinelHeader(secret *tokens.Secret, targetPath string) httpclient.AuroraHeaders {
 	return sentinelHeaderWithState(secret, targetPath, nil)
 }
@@ -502,6 +566,9 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 	}
 	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") {
 		header.Set("X-Conduit-Token", conduitToken)
+	} else if strings.HasSuffix(targetPath, "/f/conversation/prepare") {
+		// prepare 阶段尚无 conduit token,服务端要求 literal "no-token"
+		header.Set("X-Conduit-Token", "no-token")
 	}
 	if chatToken != nil {
 		if chatToken.TurnStileToken != "" {
@@ -820,7 +887,7 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		"parent_message_id":   parentMessageID,
 		"model":               conversationPrepareModel(message.Model),
 		"timezone_offset_min": message.TimezoneOffsetMin,
-		"timezone":            "Asia/Shanghai",
+		"timezone":            "America/Los_Angeles",
 		"conversation_mode":   map[string]string{"kind": "primary_assistant"},
 		"system_hints":        []string{},
 		"partial_query": map[string]interface{}{
@@ -1898,8 +1965,8 @@ func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens
 		"parent_message_id":     parentMessageID,
 		"model":                 imageModelSlug(model),
 		"client_prepare_state":  "success",
-		"timezone_offset_min":   -480,
-		"timezone":              "Asia/Shanghai",
+		"timezone_offset_min":   420,
+		"timezone":              "America/Los_Angeles",
 		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
 		"system_hints":          []string{"picture_v2"},
 		"partial_query": map[string]interface{}{
@@ -1968,8 +2035,8 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 		"parent_message_id":                    state.ParentMessageID,
 		"model":                                imageModelSlug(model),
 		"client_prepare_state":                 "sent",
-		"timezone_offset_min":                  -480,
-		"timezone":                             "Asia/Shanghai",
+		"timezone_offset_min":                  420,
+		"timezone":                             "America/Los_Angeles",
 		"conversation_mode":                    map[string]string{"kind": "primary_assistant"},
 		"enable_message_followups":             true,
 		"system_hints":                         []string{"picture_v2"},
@@ -2545,7 +2612,7 @@ func GETTokenForSessionToken(client httpclient.AuroraHttpClient, session_token s
 	url := "https://chatgpt.com/api/auth/session"
 	header := make(httpclient.AuroraHeaders)
 	header.Set("authority", "chat.openai.com")
-	header.Set("accept-language", "zh-CN,zh;q=0.9")
+	header.Set("accept-language", "en-US,en;q=0.9")
 	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
 	header.Set("oai-language", "en-US")
@@ -2582,25 +2649,33 @@ func createBaseHeader() httpclient.AuroraHeaders {
 
 func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header := make(httpclient.AuroraHeaders)
+	// 对齐 conversation.txt 2026-06 抓包:Chrome 148 Win64 英文浏览器
 	header.Set("accept", "*/*")
-	header.Set("accept-language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6")
-	header.Set("oai-language", "zh-CN")
+	header.Set("accept-language", "en-US,en;q=0.9")
+	header.Set("oai-language", "en-US")
 	header.Set("origin", "https://chatgpt.com")
-	header.Set("referer", "https://chatgpt.com/")
-	header.Set("sec-ch-ua", `"Chromium";v="146", "Not-A.Brand";v="24", "Microsoft Edge";v="146"`)
+	// referer 跟 state.ConversationID 联动;空就发首页
+	if state != nil && state.ConversationID != "" {
+		header.Set("referer", "https://chatgpt.com/c/"+state.ConversationID)
+	} else {
+		header.Set("referer", "https://chatgpt.com/")
+	}
+	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步)
+	header.Set("sec-ch-ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
 	header.Set("sec-ch-ua-arch", `"x86"`)
 	header.Set("sec-ch-ua-bitness", `"64"`)
-	header.Set("sec-ch-ua-full-version", `"146.0.3856.72"`)
-	header.Set("sec-ch-ua-full-version-list", `"Chromium";v="146.0.7680.154", "Not-A.Brand";v="24.0.0.0", "Microsoft Edge";v="146.0.3856.72"`)
+	header.Set("sec-ch-ua-full-version", `"148.0.7778.98"`)
+	header.Set("sec-ch-ua-full-version-list", `"Chromium";v="148.0.7778.98", "Google Chrome";v="148.0.7778.98", "Not/A)Brand";v="99.0.0.0"`)
 	header.Set("sec-ch-ua-mobile", "?0")
 	header.Set("sec-ch-ua-model", `""`)
 	header.Set("sec-ch-ua-platform", `"Windows"`)
-	header.Set("sec-ch-ua-platform-version", `"19.0.0"`)
+	// Windows 10.0.15063 → Chromium UA 报 "15.0.0";当前 Chrome 148 报 "15.0.0"
+	header.Set("sec-ch-ua-platform-version", `"15.0.0"`)
 	header.Set("priority", "u=1, i")
 	header.Set("sec-fetch-dest", "empty")
 	header.Set("sec-fetch-mode", "cors")
 	header.Set("sec-fetch-site", "same-origin")
-	ua := defaultUserAgent()
+	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
@@ -2617,8 +2692,9 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	}
 	header.Set("oai-device-id", deviceID)
 	header.Set("oai-session-id", sessionID)
-	header.Set("oai-client-version", "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029")
-	header.Set("oai-client-build-number", "6128297")
+	// 对齐 conversation.txt 2026-06 抓包的 build / version
+	header.Set("oai-client-version", "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769")
+	header.Set("oai-client-build-number", "7624276")
 	return header
 }
 

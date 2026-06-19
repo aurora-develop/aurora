@@ -26,13 +26,20 @@ const (
 	PrefixProof = "gAAAAAB"
 	// Suffix 附加在 base64(config) 后面的分隔符
 	Suffix = "~S"
+	// ErrorPrefix PoW 失败时的占位指纹前缀 (对齐 sdk.deob.pretty.js:292 /
+	// 4813494d-lryin3horwb01cb5.js class constructor)。
+	// 最终 token 格式: PrefixProof + ErrorPrefix + base64(JSON.stringify("e" or error)) + Suffix
+	ErrorPrefix = "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D"
+	// DefaultErrorPayload 失败 fallback 默认 base64 内容 (= base64(JSON.stringify("e")) = "ImUi")。
+	// 对齐 buildGenerateFailMessage(e) 里 String(e ?? "e") → NM("e")。
+	DefaultErrorPayload = "ImUi"
 )
 
 // DefaultFlow 是 sentinel prepare/finalize 流程标识。
 const DefaultFlow = "chatgpt"
 
-// fingerprintSize 23 元素 config, 对齐新版 SDK 算法。
-const fingerprintSize = 23
+// fingerprintSize 25 元素 config, 对齐新版 SDK 算法 (conversation.txt 2026-06 样本)。
+const fingerprintSize = 25
 
 // windowKeys 候选 [13] (Object.getOwnPropertyNames(window) 随机键)
 var windowKeys = []string{
@@ -44,39 +51,39 @@ var reactLetters = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
 
 // Config 持有 p 字段生成所需的全部上下文 (对齐新版 BrowserSession 字段)。
 type Config struct {
-	DeviceID            string
-	UserAgent           string
-	Language            string
-	Languages           string
-	// Timezone IANA 时区名(如 "America/Los_Angeles" / "Asia/Shanghai"),传给
+	DeviceID  string
+	UserAgent string
+	Language  string
+	Languages string
+	// Timezone IANA 时区名(如 "America/Los_Angeles"),传给
 	// fingerprint.Options.Timezone。如果为空,fingerprint 用 Go 本地时区。
 	Timezone            string
 	ScreenWidth         int
 	ScreenHeight        int
 	HardwareConcurrency int
-	SentinelSV          string // SDK 版本, e.g. "20260219f9f6"
+	SentinelSV          string // SDK 版本, e.g. "20260423af3c"
 	BuildID             string // 来自 chatgpt.com 页面的 data-build
 	// 可选:固定 Math.random (用于测试)
 	FixedRandom *float64
 }
 
-// NewConfig 用默认 Windows / zh-CN / Edge UA 配置构造。
-// userAgent 为空时使用 Chrome 147 (与新版 SDK 抓包一致)。
+// NewConfig 用默认 Windows / en-US / Chrome UA 配置构造(对齐 conversation.txt 2026-06 抓包)。
+// userAgent 为空时使用 Chrome 148 (与新版 SDK 抓包一致)。
 func NewConfig(userAgent string) *Config {
 	if userAgent == "" {
-		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
+		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
 	}
 	return &Config{
 		DeviceID:            randomUUID(),
 		UserAgent:           userAgent,
-		Language:            "zh-CN",
-		Languages:           "zh-CN,en,en-GB,en-US",
-		Timezone:            "Asia/Shanghai",
+		Language:            "en-US",
+		Languages:           "en-US,en",
+		Timezone:            "America/Los_Angeles",
 		ScreenWidth:         1920,
 		ScreenHeight:        1080,
-		HardwareConcurrency: 8,
-		SentinelSV:          "20260219f9f6",
-		BuildID:             "",
+		HardwareConcurrency: 16,
+		SentinelSV:          "20260423af3c",
+		BuildID:             "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769",
 	}
 }
 
@@ -93,6 +100,17 @@ func randomUUID() string {
 // EncodeConfig 把 config 数组编码为 base64 字符串 (对齐 base64.b64encode(json_str.encode('utf-8')))。
 func EncodeConfig(config []any) string {
 	b, err := json.Marshal(config)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// EncodeString 把任意字符串 JSON 序列化后 base64 编码(对齐 SDK 的
+// NM(String(e)) 行为:先把字符串当 JSON 值序列化,再 btoa + UTF-8)。
+// 用在 PoW 失败 fallback 拼 base64(error)。
+func EncodeString(s string) string {
+	b, err := json.Marshal(s)
 	if err != nil {
 		return ""
 	}
@@ -138,50 +156,53 @@ func (c *Config) envFlags() [4]int {
 	return [4]int{0, 0, 0, 0}
 }
 
-// buildConfig 构造 23 元素 fingerprint config (但 [3]/[9] 是占位, 由调用方设置)。
+// buildConfig 构造 25 元素 fingerprint config (但 [3]/[9] 是占位, 由调用方设置)。
 //
-// 走 internal/fingerprint 拿到真实浏览器形态(对齐 deob_js/out.js 真值样本),
-// 然后只覆盖 PoW 的 [3] nonce 和 [9] elapsed 字段。
+// 走 internal/fingerprint.Build25 拿到真实浏览器形态(对齐 deob_js/out.js 真值样本
+// + conversation.txt 2026-06 抓包),然后只覆盖 PoW 的 [3] nonce 和 [9] elapsed 字段。
 func (c *Config) buildConfig(rng *mathRand, attempt *int, elapsedMs *int64) []any {
 	// 把 c 的字段映射成 fingerprint.Options;rng 注入保持 deterministic
 	opts := fingerprint.Options{
-		UserAgent:       c.UserAgent,
-		Platform:        "Win32", // Config 暂时没存 platform,固定 Win32 跟 [17] 一致
-		ScreenWidth:     c.ScreenWidth,
-		ScreenHeight:    c.ScreenHeight,
-		JSHeapSizeLimit: 4294967296,
-		BuildID:         c.BuildID,
-		// SessionID: Config 里的 DeviceID 不写到 [15] (浏览器真实为空);
-		//          真要 device id,应该走 [15] 之外的字段(不影响 PoW 算)。
-		Timezone: c.Timezone, // IANA 名,空则 fingerprint fallback 用 local
-		Rand:     rng,
+		UserAgent:           c.UserAgent,
+		Platform:            "Win32", // Config 暂时没存 platform,固定 Win32 跟 [17] 一致
+		ScreenWidth:         c.ScreenWidth,
+		ScreenHeight:        c.ScreenHeight,
+		HardwareConcurrency: c.HardwareConcurrency,
+		JSHeapSizeLimit:     4294967296,
+		BuildID:             c.BuildID,
+		Timezone:            c.Timezone, // IANA 名,空则 fingerprint fallback 用 local
+		Rand:                rng,
 	}
-	// 如果 Languages 是 "zh-CN,en,en-GB,en-US" 字符串形式,拆成 []string
+	// 如果 Languages 是 "en-US,en" 字符串形式,拆成 []string
 	if c.Languages != "" {
 		opts.Languages = splitLangList(c.Languages)
 	} else {
 		opts.Languages = []string{c.Language, "en"}
 	}
 
-	config := fingerprint.Build23(opts)
+	config := fingerprint.Build25(opts)
 
 	// [3] / [9] 覆盖:PoW 阶段用 nonce(int) 和 elapsedMs(int64)
 	if attempt != nil {
 		config[3] = *attempt
 	} else {
-		// requirements 阶段:保留 fingerprint 生成的 Math.random() (float)
-		// (新版 SDK requirements 也跑 mini-PoW,所以 [3] 是 nonce)
-		config[3] = c.rngFloat(rng)
+		// requirements 阶段:对齐 sdk.deob.pretty.js:413 `n[3] = 1`(固定 int 1,
+		// 不是 Math.random)。requirements token 不跑 PoW,只是固定一个
+		// 标记让服务端验设备形态。
+		config[3] = 1
 	}
 	if elapsedMs != nil {
 		config[9] = *elapsedMs
 	} else {
+		// requirements 阶段:[9] 是 performance.now() - t0 的一次性测时;
+		// 这里不传 elapsedMs 时沿用 fingerprint 的 Math.random()(float),
+		// 跟 SDK 行为一致(SDK 也不传)。
 		config[9] = c.rngFloat(rng)
 	}
 	return config
 }
 
-// splitLangList 把 "zh-CN,en,en-GB,en-US" 拆成 []string。
+// splitLangList 把 "en-US,en" 拆成 []string。
 func splitLangList(s string) []string {
 	out := []string{}
 	cur := ""
@@ -201,27 +222,35 @@ func splitLangList(s string) []string {
 	return out
 }
 
-// GenerateRequirementsToken 生成首次 sentinel/req 的 p 字段值。
-// 跑 mini-PoW (difficulty="0" 期望 16 次命中,1/16 概率);若 500_000 次未命中返回 fallback。
+// GenerateRequirementsToken 生成首次 sentinel/req 的 p 字段值 (gAAAAAC 前缀)。
+//
+// 对齐 sdk.deob.pretty.js:407-418 _generateRequirementsTokenAnswerBlocking:
+//  1. 拿 fingerprint config(本包 buildConfig)
+//  2. [3] = 1 (固定)
+//  3. [9] = performance.now() - t0 (一次性测时,不循环)
+//  4. base64(JSON.stringify(config)) → 返回
+//  5. 失败 → errorPrefix + base64(error)  (errorPrefix = "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D")
+//
+// 注意:requirements token **不跑 PoW**(proof token 才跑);这里只是
+// 一次性拼一份带时间戳的 config 让服务端验设备形态。
 func (c *Config) GenerateRequirementsToken() string {
 	rng := mathRandNew(time.Now().UnixNano())
-	const minDifficulty = "0"
-	for i := 0; i < 500_000; i++ {
-		nonce := i
-		config := c.buildConfig(rng, &nonce, nil)
-		encoded := EncodeConfig(config)
-		// mini-PoW 用 Math.random() 作 seed(SDK 行为,见 deob/out.js)
-		seed := String(c.rngFloat(rng))
-		if FNV1aHash(seed + encoded)[:len(minDifficulty)] <= minDifficulty {
-			return PrefixRequirements + encoded + Suffix
-		}
-	}
-	// fallback:跑一次 buildConfig 后直接返回
-	return PrefixRequirements + EncodeConfig(c.buildConfig(rng, nil, nil)) + Suffix
+	startTime := time.Now()
+	elapsed := time.Since(startTime).Milliseconds()
+	config := c.buildConfig(rng, nil, &elapsed)
+	config[3] = 1
+	encoded := EncodeConfig(config)
+	return PrefixRequirements + encoded + Suffix
 }
 
 // SolveProofOfWork 按服务端挑战求解 proof token (gAAAAAB 前缀 + FNV-1a 哈希)。
-// [14]/[18] 时间自洽由 fingerprint.Build23 内部保证,这里不用再覆盖。
+// [13]/[17] 时间自洽由 fingerprint.Build25 内部保证,这里不用再覆盖。
+//
+// 失败 fallback 格式(对齐 sdk.deob.pretty.js:329 + buildGenerateFailMessage:364-366):
+//
+//	"gAAAAAB" + ErrorPrefix + base64(JSON.stringify("e" or error)) + "~S"
+//
+// 500k 次未命中时 err=nil → 用 DefaultErrorPayload ("ImUi" = base64('"e"'))。
 func (c *Config) SolveProofOfWork(seed, difficulty string) string {
 	if seed == "" || difficulty == "" {
 		return PrefixProof + Suffix
@@ -242,8 +271,17 @@ func (c *Config) SolveProofOfWork(seed, difficulty string) string {
 			return PrefixProof + encoded + Suffix
 		}
 	}
-	// 达到最大次数仍未找到,返回 fallback
-	return PrefixProof + "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + Suffix
+	// 达到最大次数仍未找到,返回 fallback (error=nil → 默认 "e")
+	return PrefixProof + ErrorPrefix + DefaultErrorPayload + Suffix
+}
+
+// BuildFailToken 构造 PoW 失败 fallback token。
+// errMessage 为空时使用 SDK 默认 "e"。
+func BuildFailToken(errMessage string) string {
+	if errMessage == "" {
+		errMessage = "e"
+	}
+	return PrefixProof + ErrorPrefix + EncodeString(errMessage) + Suffix
 }
 
 // String 辅助:float64 → string (避免重复写 strconv.FormatFloat)。

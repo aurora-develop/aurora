@@ -15,15 +15,11 @@ var CommonUserAgents = []string{
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 }
 
-// CommonLanguages 真实浏览器 navigator.languages 组合。
+// CommonLanguages 真实浏览器 navigator.languages 组合(全英文环境,避免风控)。
 var CommonLanguages = [][]string{
 	{"en-US", "en"},
-	{"zh-CN", "en", "en-GB", "en-US"},
 	{"en-GB", "en", "en-US"},
-	{"de-DE", "de", "en-US", "en"},
-	{"ja-JP", "en-US", "en"},
-	{"fr-FR", "fr", "en-US", "en"},
-	{"es-ES", "es", "en-US", "en"},
+	{"en", "en-US"},
 }
 
 // CommonPlatforms 真 platform 值。

@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/acheong08/endless"
+	"github.com/g-utils/endless"
 	"github.com/joho/godotenv"
 )
 

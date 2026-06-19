@@ -2,10 +2,10 @@
 //
 // 流程(对齐 sdk_sentinel.js / OpenSentinel client.js / deob_js/out.js):
 //
-//   1. POST sentinel/req 拿到 chatReq(响应里含 so.collector_dx / so.snapshot_dx)
-//   2. client 异步跑 collector_dx(60s 超时,fire-and-forget,初始化 VM 寄存器)
-//   3. 业务发请求前,client 跑 snapshot_dx(复用 collector 的 VM 寄存器,毫秒级)
-//   4. 拼 openai-sentinel-so-token = base64(json({so, c, id, flow})) 放 header
+//  1. POST sentinel/req 拿到 chatReq(响应里含 so.collector_dx / so.snapshot_dx)
+//  2. client 异步跑 collector_dx(60s 超时,fire-and-forget,初始化 VM 寄存器)
+//  3. 业务发请求前,client 跑 snapshot_dx(复用 collector 的 VM 寄存器,毫秒级)
+//  4. 拼 openai-sentinel-so-token = base64(json({so, c, id, flow})) 放 header
 //
 // collector 与 snapshot 必须**复用同一 VM 实例**——snapshot_dx 字节码里只写
 // "读 reg[42]" 这种寄存器编号,字段含义在 collector 那边每次会话动态生成。
@@ -104,7 +104,8 @@ func (s *Session) Snapshot(snapshotDX string) (string, error) {
 }
 
 // BuildToken 拼 openai-sentinel-so-token,格式:
-//   base64(json({"so": soResult, "c": chatReqToken, "id": deviceId, "flow": flow}))
+//
+//	base64(json({"so": soResult, "c": chatReqToken, "id": deviceId, "flow": flow}))
 //
 // 对齐 out.js:924 ce({so, c}, t) → ce 在 js 里是 base64(json({...obj,id,flow}))。
 func BuildToken(soResult, chatReqToken, deviceID, flow string) (string, error) {
@@ -550,7 +551,7 @@ func (s *soSolver) buildWindow() map[string]any {
 	html.appendChild(body)
 
 	sdk := mkElement("script")
-	sdk.src = "https://sentinel.openai.com/sentinel/20260219f9f6/sdk.js"
+	sdk.src = "https://chatgpt.com/sentinel/20260423af3c/sdk.js"
 	sdk.attrs["src"] = sdk.src
 	sdk.getAttribute = func(name string) any {
 		if name == "src" {
@@ -620,7 +621,7 @@ func (s *soSolver) buildWindow() map[string]any {
 		"referrer":        "",
 		"title":           "",
 		"readyState":      "complete",
-		"location":        map[string]any{"href": "https://sentinel.openai.com/sentinel/frame.html", "origin": "https://sentinel.openai.com", "search": ""},
+		"location":        map[string]any{"href": "https://chatgpt.com/sentinel/frame.html", "origin": "https://chatgpt.com", "search": ""},
 		"body":            body,
 		"head":            head,
 		"documentElement": html,
@@ -655,15 +656,15 @@ func (s *soSolver) buildWindow() map[string]any {
 			"width": 1440, "height": 900, "availWidth": 1440, "availHeight": 860,
 			"availLeft": 0, "availTop": 0, "colorDepth": 24, "pixelDepth": 24,
 		},
-		"localStorage":  newStorageProxy(),
-		"sessionStorage": newStorageProxy(),
-		"history":        map[string]any{"length": 1},
-		"setTimeout":     time.AfterFunc,
-		"setInterval":    time.Tick,
-		"atob":           func(s any) any { return atobLatin1(toStr(s)) },
-		"btoa":           func(s any) any { return latin1Base64Encode(toStr(s)) },
-		"console":        map[string]any{},
-		"origin":         "https://sentinel.openai.com",
+		"localStorage":    newStorageProxy(),
+		"sessionStorage":  newStorageProxy(),
+		"history":         map[string]any{"length": 1},
+		"setTimeout":      time.AfterFunc,
+		"setInterval":     time.Tick,
+		"atob":            func(s any) any { return atobLatin1(toStr(s)) },
+		"btoa":            func(s any) any { return latin1Base64Encode(toStr(s)) },
+		"console":         map[string]any{},
+		"origin":          "https://chatgpt.com",
 		"isSecureContext": true,
 	}
 	mockWin["window"] = mockWin
@@ -675,8 +676,8 @@ func (s *soSolver) buildWindow() map[string]any {
 // ─── 注册/读取工具 ────────────────────────────────────────────────────────────
 
 func (s *soSolver) setReg(key any, value any) { s.regs[regKey(key)] = value }
-func (s *soSolver) getReg(key any) any         { return s.regs[regKey(key)] }
-func (s *soSolver) copyQueue() []any            { q, _ := s.getReg(pcReg).([]any); return copyAnySlice(q) }
+func (s *soSolver) getReg(key any) any        { return s.regs[regKey(key)] }
+func (s *soSolver) copyQueue() []any          { q, _ := s.getReg(pcReg).([]any); return copyAnySlice(q) }
 
 func (s *soSolver) runQueue() error {
 	for {
@@ -836,17 +837,17 @@ func (s *soSolver) jsGetProp(obj any, prop any) any {
 // ─── DOM element mock ──────────────────────────────────────────────────────────
 
 type mockElement struct {
-	tagName    string
-	style      map[string]any
-	children   []any
-	attrs      map[string]any
-	parent     any
-	innerHTML  string
-	innerText  string
-	lang       string
-	src        string
-	width      int
-	height     int
+	tagName      string
+	style        map[string]any
+	children     []any
+	attrs        map[string]any
+	parent       any
+	innerHTML    string
+	innerText    string
+	lang         string
+	src          string
+	width        int
+	height       int
 	getAttribute func(name string) any
 }
 
@@ -896,9 +897,14 @@ func newStorageProxy() map[string]any {
 		"getItem":    func(k any) any { return data[toStr(k)] },
 		"setItem":    func(k, v any) any { data[toStr(k)] = toStr(v); return nil },
 		"removeItem": func(k any) any { delete(data, toStr(k)); return nil },
-		"clear":      func() any { for k := range data { delete(data, k) }; return nil },
-		"length":     func() any { return float64(len(data)) },
-		"key":        func(idx any) any {
+		"clear": func() any {
+			for k := range data {
+				delete(data, k)
+			}
+			return nil
+		},
+		"length": func() any { return float64(len(data)) },
+		"key": func(idx any) any {
 			i, ok := idx.(float64)
 			if !ok {
 				return nil

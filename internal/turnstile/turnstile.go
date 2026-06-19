@@ -616,8 +616,8 @@ func (s *turnstileSolver) buildWindow() map[string]any {
 		"search": "",
 	}, []string{})
 	scripts := []any{
-		withOrderedKeys(map[string]any{"src": "https://sentinel.openai.com/backend-api/sentinel/sdk.js"}, []string{}),
-		withOrderedKeys(map[string]any{"src": "https://sentinel.openai.com/sentinel/20260219f9f6/sdk.js"}, []string{}),
+		withOrderedKeys(map[string]any{"src": "https://chatgpt.com/backend-api/sentinel/sdk.js"}, []string{}),
+		withOrderedKeys(map[string]any{"src": "https://chatgpt.com/sentinel/20260423af3c/sdk.js"}, []string{}),
 	}
 	localStorageData := withOrderedKeys(map[string]any{
 		"statsig.stable_id.444584300":         `"` + deviceID + `"`,

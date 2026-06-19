@@ -406,14 +406,20 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	first := createBaseHeader()
 	second := createBaseHeader()
 
-	if first["oai-language"] != "zh-CN" {
-		t.Fatalf("oai-language = %q, want zh-CN", first["oai-language"])
+	// 对齐 conversation.txt 2026-06 抓包:英文浏览器 (en-US,en)
+	if first["oai-language"] != "en-US" {
+		t.Fatalf("oai-language = %q, want en-US", first["oai-language"])
 	}
-	// UA must be the Edge variant to stay consistent with the hardcoded
-	// sec-ch-ua = "Microsoft Edge";v="146". Version is randomized.
+	if first["accept-language"] != "en-US,en;q=0.9" {
+		t.Fatalf("accept-language = %q, want en-US,en;q=0.9", first["accept-language"])
+	}
+	// UA must be the Chrome 148 variant to match sec-ch-ua="Google Chrome";"v="148"
 	ua := first["user-agent"]
-	if !strings.Contains(ua, "Edg/") {
-		t.Fatalf("user-agent = %q, want Edge variant to match sec-ch-ua=Microsoft Edge 146", ua)
+	if !strings.Contains(ua, "Chrome/148.") {
+		t.Fatalf("user-agent = %q, want Chrome 148 to match sec-ch-ua=Chrome 148", ua)
+	}
+	if strings.Contains(ua, "Edg/") {
+		t.Fatalf("user-agent = %q, must not be Edge variant (conversation.txt uses Chrome)", ua)
 	}
 	if first["oai-device-id"] == "" || first["oai-device-id"] != second["oai-device-id"] {
 		t.Fatalf("oai-device-id should be stable across headers: first=%q second=%q", first["oai-device-id"], second["oai-device-id"])
@@ -421,8 +427,20 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	if first["oai-session-id"] == "" || first["oai-session-id"] != second["oai-session-id"] {
 		t.Fatalf("oai-session-id should be stable across headers: first=%q second=%q", first["oai-session-id"], second["oai-session-id"])
 	}
-	if first["oai-client-version"] != "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029" {
-		t.Fatalf("oai-client-version = %q", first["oai-client-version"])
+	// 对齐 conversation.txt 2026-06 抓包
+	if first["oai-client-version"] != "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769" {
+		t.Fatalf("oai-client-version = %q, want prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769", first["oai-client-version"])
+	}
+	if first["oai-client-build-number"] != "7624276" {
+		t.Fatalf("oai-client-build-number = %q, want 7624276", first["oai-client-build-number"])
+	}
+	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 148)
+	if first["sec-ch-ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {
+		t.Fatalf("sec-ch-ua = %q, want Chrome 148", first["sec-ch-ua"])
+	}
+	// sec-ch-ua-platform-version 对齐 Chrome 148 Win64 ("15.0.0")
+	if first["sec-ch-ua-platform-version"] != `"15.0.0"` {
+		t.Fatalf("sec-ch-ua-platform-version = %q, want 15.0.0", first["sec-ch-ua-platform-version"])
 	}
 }
 
