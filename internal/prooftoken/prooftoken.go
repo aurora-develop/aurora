@@ -1,18 +1,3 @@
-// Package pow 实现 chatgpt.com sentinel 的 PoW 求解 (基于 Python 参考实现)。
-//
-// 三种 sentinel token:
-//
-//  1. RequirementsToken (gAAAAAC + base64(config) + ~S)
-//     首次 sentinel/chat-requirements 的 p 字段。
-//     config 是 18 元素 config,无 PoW (用 fixedRandom 填 config[3]/[9])。
-//
-//  2. ProofToken (gAAAAAB + base64(config) + ~S)
-//     proofofwork.required=true 时的 p 字段。
-//     config 18 元素,但 config[3]=nonce、config[9]=elapsedMs(整数);
-//     哈希算法 FNV-1a 32-bit,fnv1a(seed + base64(config))[:len(difficulty)] <= difficulty。
-//
-//  3. SentinelToken (服务端返回的 token, 1500+ 字符 base64)
-//     final / sentinel_token, 由 prepare/finalize 流程产生。
 package prooftoken
 
 import (
@@ -23,6 +8,8 @@ import (
 	mathrand "math/rand"
 	"strconv"
 	"time"
+
+	"aurora/internal/fingerprint"
 )
 
 // mathRandNew 是 math/rand.New 的本地别名 (避免类型混淆)。
@@ -44,44 +31,37 @@ const (
 // DefaultFlow 是 sentinel prepare/finalize 流程标识。
 const DefaultFlow = "chatgpt"
 
-// NavigatorProps 是 config[10] 候选 — 常见 navigator 原型方法 toString 表征
-var navigatorProps = []string{
-	"clearOriginJoinedAdInterestGroups−function clearOriginJoinedAdInterestGroups() { [native code] }",
-	"canLoadAdAuctionFencedFrame−function canLoadAdAuctionFencedFrame() { [native code] }",
-	"clipboard−[object Clipboard]",
-	"getBattery−function getBattery() { [native code] }",
-	"getGamepads−function getGamepads() { [native code] }",
-	"javaEnabled−function javaEnabled() { [native code] }",
-	"sendBeacon−function sendBeacon() { [native code] }",
-	"vibrate−function vibrate() { [native code] }",
-}
+// fingerprintSize 23 元素 config, 对齐新版 SDK 算法。
+const fingerprintSize = 23
 
+// windowKeys 候选 [13] (Object.getOwnPropertyNames(window) 随机键)
 var windowKeys = []string{
 	"requestIdleCallback", "webkitRequestAnimationFrame", "onfocus", "onblur",
 }
 
-// reactLetters 是 config[11] 随机 suffix 字符表
+// reactLetters 是 [12] 随机 suffix 字符表
 var reactLetters = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
 
-// Config 持有 p 字段生成所需的全部上下文 (对齐 Python BrowserSession 字段)。
+// Config 持有 p 字段生成所需的全部上下文 (对齐新版 BrowserSession 字段)。
 type Config struct {
 	DeviceID            string
 	UserAgent           string
 	Language            string
 	Languages           string
-	TimezoneString      string
-	TimezoneLabel       string
+	// Timezone IANA 时区名(如 "America/Los_Angeles" / "Asia/Shanghai"),传给
+	// fingerprint.Options.Timezone。如果为空,fingerprint 用 Go 本地时区。
+	Timezone            string
 	ScreenWidth         int
 	ScreenHeight        int
 	HardwareConcurrency int
-	SentinelSV          string // SDK 版本, e.g. "20260423af3c"
+	SentinelSV          string // SDK 版本, e.g. "20260219f9f6"
 	BuildID             string // 来自 chatgpt.com 页面的 data-build
 	// 可选:固定 Math.random (用于测试)
 	FixedRandom *float64
 }
 
 // NewConfig 用默认 Windows / zh-CN / Edge UA 配置构造。
-// userAgent 为空时使用 Edge 147 (与 web2api buildProfileHeaders 一致)。
+// userAgent 为空时使用 Chrome 147 (与新版 SDK 抓包一致)。
 func NewConfig(userAgent string) *Config {
 	if userAgent == "" {
 		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
@@ -91,13 +71,12 @@ func NewConfig(userAgent string) *Config {
 		UserAgent:           userAgent,
 		Language:            "zh-CN",
 		Languages:           "zh-CN,en,en-GB,en-US",
-		TimezoneString:      "GMT+0800",
-		TimezoneLabel:       "中国标准时间",
+		Timezone:            "Asia/Shanghai",
 		ScreenWidth:         1920,
 		ScreenHeight:        1080,
 		HardwareConcurrency: 8,
-		SentinelSV:          "20260423af3c",
-		BuildID:             "prod-4987068829830ddc3ae6683bd4e633f61b79dec9",
+		SentinelSV:          "20260219f9f6",
+		BuildID:             "",
 	}
 }
 
@@ -111,16 +90,7 @@ func randomUUID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-var _ = strconv.Itoa // 防 unused import 警告
-
-// dateToString 模拟 Chrome Date.prototype.toString() 输出。
-func (c *Config) dateToString() string {
-	// 简化: 假设 TimezoneString 已经是 "GMT+0800" / TimezoneLabel 是 "中国标准时间"
-	now := time.Now().UTC()
-	return now.Format("Mon Jan 02 2006 15:04:05 ") + c.TimezoneString + " (" + c.TimezoneLabel + ")"
-}
-
-// EncodeConfig 把 config 数组编码为 base64 字符串 (对齐 Python base64.b64encode(json_str.encode('utf-8'))).
+// EncodeConfig 把 config 数组编码为 base64 字符串 (对齐 base64.b64encode(json_str.encode('utf-8')))。
 func EncodeConfig(config []any) string {
 	b, err := json.Marshal(config)
 	if err != nil {
@@ -162,95 +132,109 @@ func (c *Config) rngFloat(rng *mathRand) float64 {
 	return rng.Float64()
 }
 
-// buildBaseConfig 返回 18 元素 config (但 [3] / [9] / [13] 是占位, 由调用方设置)。
-func (c *Config) buildBaseConfig(rng *mathRand, attempt *int, elapsedMs *float64) []any {
-	dateStr := c.dateToString()
+// envFlags 返回 [19-22] 的环境探测值 (Number("X" in window))。
+// 当前 aurora 不是真浏览器,默认全部 0;后续如需模拟,可在 Config 里加字段。
+func (c *Config) envFlags() [4]int {
+	return [4]int{0, 0, 0, 0}
+}
 
-	nowMs := float64(time.Now().UnixMilli())
-	var perfNow float64
-	if c.FixedRandom != nil {
-		// 固定场景: perfNow 取一个固定值
-		perfNow = 1000.0
-	} else {
-		// 真实场景: perfNow 与 timeOrigin 自洽
-		perfNow = 1000.0 + rng.Float64()*49999
+// buildConfig 构造 23 元素 fingerprint config (但 [3]/[9] 是占位, 由调用方设置)。
+//
+// 走 internal/fingerprint 拿到真实浏览器形态(对齐 deob_js/out.js 真值样本),
+// 然后只覆盖 PoW 的 [3] nonce 和 [9] elapsed 字段。
+func (c *Config) buildConfig(rng *mathRand, attempt *int, elapsedMs *int64) []any {
+	// 把 c 的字段映射成 fingerprint.Options;rng 注入保持 deterministic
+	opts := fingerprint.Options{
+		UserAgent:       c.UserAgent,
+		Platform:        "Win32", // Config 暂时没存 platform,固定 Win32 跟 [17] 一致
+		ScreenWidth:     c.ScreenWidth,
+		ScreenHeight:    c.ScreenHeight,
+		JSHeapSizeLimit: 4294967296,
+		BuildID:         c.BuildID,
+		// SessionID: Config 里的 DeviceID 不写到 [15] (浏览器真实为空);
+		//          真要 device id,应该走 [15] 之外的字段(不影响 PoW 算)。
+		Timezone: c.Timezone, // IANA 名,空则 fingerprint fallback 用 local
+		Rand:     rng,
 	}
-	timeOrigin := nowMs - perfNow
-
-	// config[3] / config[9] 填充规则
-	var c3, c9 any
-	if attempt != nil {
-		c3 = *attempt
+	// 如果 Languages 是 "zh-CN,en,en-GB,en-US" 字符串形式,拆成 []string
+	if c.Languages != "" {
+		opts.Languages = splitLangList(c.Languages)
 	} else {
-		c3 = c.rngFloat(rng)
+		opts.Languages = []string{c.Language, "en"}
+	}
+
+	config := fingerprint.Build23(opts)
+
+	// [3] / [9] 覆盖:PoW 阶段用 nonce(int) 和 elapsedMs(int64)
+	if attempt != nil {
+		config[3] = *attempt
+	} else {
+		// requirements 阶段:保留 fingerprint 生成的 Math.random() (float)
+		// (新版 SDK requirements 也跑 mini-PoW,所以 [3] 是 nonce)
+		config[3] = c.rngFloat(rng)
 	}
 	if elapsedMs != nil {
-		c9 = int(*elapsedMs)
+		config[9] = *elapsedMs
 	} else {
-		c9 = c.rngFloat(rng)
-	}
-
-	// config[11] _reactListening 随机 suffix
-	reactSuffix := make([]rune, 11)
-	for i := range reactSuffix {
-		reactSuffix[i] = reactLetters[rng.Intn(len(reactLetters))]
-	}
-
-	// config[12] window 随机 key
-	windowKey := windowKeys[rng.Intn(len(windowKeys))]
-
-	// config[5] currentScript.src
-	scriptSrc := "https://sentinel.openai.com/sentinel/" + c.SentinelSV + "/sdk.js"
-
-	config := []any{
-		c.ScreenWidth + c.ScreenHeight, // [0]
-		dateStr,                        // [1] Date.toString()
-		int64(4294967296),              // [2] jsHeapSizeLimit
-		c3,                             // [3] Math.random() / PoW nonce
-		c.UserAgent,                    // [4]
-		scriptSrc,                      // [5]
-		nil,                            // [6] documentElement[data-build] (auth.openai.com 为 null)
-		c.Language,                     // [7]
-		c.Languages,                    // [8]
-		c9,                             // [9] Math.random() / PoW elapsed
-		navigatorProps[rng.Intn(len(navigatorProps))], // [10]
-		"_reactListening" + string(reactSuffix),       // [11]
-		windowKey,                                     // [12]
-		perfNow,                                       // [13] performance.now()
-		c.DeviceID,                                    // [14] sid
-		"",                                            // [15] location.search
-		c.HardwareConcurrency,                         // [16]
-		timeOrigin,                                    // [17] performance.timeOrigin
-		0, 0, 0, 0, 0, 0, 0,                           // [18]-[24] 全 0 (其他 navigator 探测)
+		config[9] = c.rngFloat(rng)
 	}
 	return config
 }
 
+// splitLangList 把 "zh-CN,en,en-GB,en-US" 拆成 []string。
+func splitLangList(s string) []string {
+	out := []string{}
+	cur := ""
+	for _, r := range s {
+		if r == ',' {
+			if cur != "" {
+				out = append(out, cur)
+				cur = ""
+			}
+			continue
+		}
+		cur += string(r)
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
+
 // GenerateRequirementsToken 生成首次 sentinel/req 的 p 字段值。
-// 不需要 PoW,18 元素 config 用 Math.random() 填 [3]/[9]。
+// 跑 mini-PoW (difficulty="0" 期望 16 次命中,1/16 概率);若 500_000 次未命中返回 fallback。
 func (c *Config) GenerateRequirementsToken() string {
 	rng := mathRandNew(time.Now().UnixNano())
-	config := c.buildBaseConfig(rng, nil, nil)
-	return PrefixRequirements + EncodeConfig(config) + Suffix
+	const minDifficulty = "0"
+	for i := 0; i < 500_000; i++ {
+		nonce := i
+		config := c.buildConfig(rng, &nonce, nil)
+		encoded := EncodeConfig(config)
+		// mini-PoW 用 Math.random() 作 seed(SDK 行为,见 deob/out.js)
+		seed := String(c.rngFloat(rng))
+		if FNV1aHash(seed + encoded)[:len(minDifficulty)] <= minDifficulty {
+			return PrefixRequirements + encoded + Suffix
+		}
+	}
+	// fallback:跑一次 buildConfig 后直接返回
+	return PrefixRequirements + EncodeConfig(c.buildConfig(rng, nil, nil)) + Suffix
 }
 
 // SolveProofOfWork 按服务端挑战求解 proof token (gAAAAAB 前缀 + FNV-1a 哈希)。
+// [14]/[18] 时间自洽由 fingerprint.Build23 内部保证,这里不用再覆盖。
 func (c *Config) SolveProofOfWork(seed, difficulty string) string {
 	if seed == "" || difficulty == "" {
 		return PrefixProof + Suffix
 	}
-	startTime := time.Now().UnixMilli()
+	startTime := time.Now()
 	rng := mathRandNew(time.Now().UnixNano())
 	diffLen := len(difficulty)
 	const maxIter = 500_000
 
 	for i := 0; i < maxIter; i++ {
-		elapsed := time.Now().UnixMilli() - startTime
-		elapsedF := float64(elapsed)
-		attempt := i
-		config := c.buildBaseConfig(rng, &attempt, &elapsedF)
-		// 同步 perfNow 让 timeOrigin 保持自洽
-		config[13] = config[17].(float64) - float64(startTime) + elapsedF
+		nonce := i
+		elapsed := time.Since(startTime).Milliseconds()
+		config := c.buildConfig(rng, &nonce, &elapsed)
 		encoded := EncodeConfig(config)
 		hashInput := seed + encoded
 		hashResult := FNV1aHash(hashInput)
@@ -260,6 +244,11 @@ func (c *Config) SolveProofOfWork(seed, difficulty string) string {
 	}
 	// 达到最大次数仍未找到,返回 fallback
 	return PrefixProof + "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + Suffix
+}
+
+// String 辅助:float64 → string (避免重复写 strconv.FormatFloat)。
+func String(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // BackwardCompat 旧 API 兼容 (client-go 旧版代码依赖这些)。
@@ -310,5 +299,3 @@ func BuildSentinelTokenHeader(p, turnstileToken, sentinelToken, deviceID, flow s
 	b, _ := json.Marshal(h)
 	return string(b)
 }
-
-var _ = strconv.Itoa // 防止 import 警告 (strconv 用于 ext)
