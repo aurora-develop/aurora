@@ -4,6 +4,7 @@ import (
 	"aurora/conversion/response/chatgpt"
 	"aurora/httpclient"
 	"aurora/internal/prooftoken"
+	"aurora/internal/so"
 	"aurora/internal/tokens"
 	"aurora/internal/turnstile"
 	"aurora/typings"
@@ -117,12 +118,26 @@ type TurnStile struct {
 	TurnStileToken   string
 	ProofOfWorkToken string
 	TurnstileToken   string
+	SOToken          string
+	soSession        *so.Session
+	soSnapshotDX     string
+	soChatToken      string
+	soFlow           string
+	soOnce           sync.Once
+	soResult         string
+	soErr            error
 }
 
 type ProofWork struct {
 	Difficulty string `json:"difficulty,omitempty"`
 	Required   bool   `json:"required"`
 	Seed       string `json:"seed,omitempty"`
+}
+
+type SoSegment struct {
+	Required    bool   `json:"required"`
+	CollectorDX string `json:"collector_dx,omitempty"`
+	SnapshotDX  string `json:"snapshot_dx,omitempty"`
 }
 
 func GetInitConfig() []interface{} {
@@ -141,25 +156,25 @@ func GetInitConfig() []interface{} {
 	}
 
 	return []interface{}{
-		cachedHardware,                                      // [0]  screen.width + screen.height
-		parseTime,                                           // [1]  Date.toString()
-		int64(4294967296),                                   // [2]  jsHeapSizeLimit
-		rng.Float64(),                                       // [3]  Math.random()
-		defaultUserAgent(),                                  // [4]  navigator.userAgent
-		script,                                              // [5]  currentScript.src
-		nil,                                                 // [6]  documentElement[data-build]
-		"zh-CN",                                             // [7]  navigator.language
-		"zh-CN,en,en-GB,en-US",                              // [8]  navigator.languages.join(",")
-		rng.Float64(),                                       // [9]  Math.random()
-		"vibrate−function vibrate() { [native code] }",      // [10] navigator 原型方法
-		"_reactListening" + string(reactSuffix),             // [11] document 随机 key
-		"requestIdleCallback",                               // [12] window 随机 key
-		perfNow,                                             // [13] performance.now()
-		oaiDeviceID,                                         // [14] device_id
-		"",                                                  // [15] location.search
-		32,                                                  // [16] hardwareConcurrency
-		timeOrigin,                                          // [17] performance.timeOrigin
-		0, 0, 0, 0, 0, 0, 0,                                // [18-24] "X in window" 检查
+		cachedHardware,         // [0]  screen.width + screen.height
+		parseTime,              // [1]  Date.toString()
+		int64(4294967296),      // [2]  jsHeapSizeLimit
+		rng.Float64(),          // [3]  Math.random()
+		defaultUserAgent(),     // [4]  navigator.userAgent
+		script,                 // [5]  currentScript.src
+		nil,                    // [6]  documentElement[data-build]
+		"zh-CN",                // [7]  navigator.language
+		"zh-CN,en,en-GB,en-US", // [8]  navigator.languages.join(",")
+		rng.Float64(),          // [9]  Math.random()
+		"vibrate−function vibrate() { [native code] }", // [10] navigator 原型方法
+		"_reactListening" + string(reactSuffix),        // [11] document 随机 key
+		"requestIdleCallback",                          // [12] window 随机 key
+		perfNow,                                        // [13] performance.now()
+		oaiDeviceID,                                    // [14] device_id
+		"",                                             // [15] location.search
+		32,                                             // [16] hardwareConcurrency
+		timeOrigin,                                     // [17] performance.timeOrigin
+		0, 0, 0, 0, 0, 0, 0,                            // [18-24] "X in window" 检查
 	}
 }
 
@@ -168,19 +183,20 @@ func CalcProofToken(require *ChatRequire, state *ChatClientState) string {
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua, cachedScripts, oaiDeviceID)
+	return prooftoken.SolveProofToken(require.Proof.Seed, require.Proof.Difficulty, ua)
 }
 
 type ChatRequire struct {
 	Persona      string    `json:"persona,omitempty"`
 	Token        string    `json:"token"`
 	PrepareToken string    `json:"prepare_token,omitempty"`
-	Proof        ProofWork `json:"proofofwork,omitempty"`
+	Proof        ProofWork `json:"proofofwork"`
 	Turnstile    struct {
 		Required bool   `json:"required"`
 		DX       string `json:"dx,omitempty"`
 	} `json:"turnstile"`
-	ForceLogin bool `json:"force_login"`
+	So         SoSegment `json:"so"`
+	ForceLogin bool      `json:"force_login"`
 }
 
 type sentinelFinalizeResponse struct {
@@ -205,7 +221,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	requirementsToken := prooftoken.RequirementsToken(ua, cachedScripts, oaiDeviceID)
+	requirementsToken := prooftoken.NewConfig(ua).RequirementsToken()
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -239,9 +255,9 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 	}
 	var turnstileToken string
 	if prepare.Turnstile.DX != "" {
-		turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, proofToken, cachedScripts)
+		turnstileToken, _ = turnstile.SolveDX(requirementsToken, prepare.Turnstile.DX)
 		if turnstileToken == "" {
-			turnstileToken = turnstile.SolveWithScripts(prepare.Turnstile.DX, "", cachedScripts)
+			turnstileToken, _ = turnstile.SolveDX(requirementsToken, prepare.Turnstile.DX)
 		}
 	}
 
@@ -258,11 +274,75 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 		return nil, status, fmt.Errorf("sentinel finalize token is missing")
 	}
 
-	return &TurnStile{
+	ts := &TurnStile{
 		TurnStileToken:   finalize.Token,
 		ProofOfWorkToken: proofToken,
 		TurnstileToken:   turnstileToken,
-	}, status, nil
+	}
+
+	// so 段:对齐 out.js se()/Et() 行为——仅在服务端要求时启动 collector(fire-and-forget,
+	// 不阻塞当前 prepare)。Snapshot 由 ensureSOToken() 在首次发请求时同步触发。
+	if prepare.So.Required && prepare.So.CollectorDX != "" && prepare.So.SnapshotDX != "" && prepare.Token != "" {
+		ts.soSession = so.NewSession(requirementsToken, prepare.So.CollectorDX)
+		ts.soSnapshotDX = prepare.So.SnapshotDX
+		ts.soChatToken = prepare.Token
+		ts.soFlow = stateFlow(state, ua)
+		ts.soSession.Start()
+	}
+
+	return ts, status, nil
+}
+
+// stateFlow 推导 so token 里的 flow 字段(对齐 deob_js/out.js:924 ce() 行为)。
+// 优先用 secret.Token 当作 flow 标识;若 secret 不可用则用 ua 简写。
+func stateFlow(state *ChatClientState, ua string) string {
+	if state != nil && state.DeviceID != "" {
+		return state.DeviceID
+	}
+	if ua != "" {
+		return "chatgpt-freeaccount"
+	}
+	return "chatgpt"
+}
+
+// soDeviceIDFor 给出 openai-sentinel-so-token 的 deviceID 参数。对齐 out.js
+// sessionObserverToken() 流程,deviceID 是 ne.get() 的 key,也是 ce({...}, t) 里的
+// id;实际取值对应 qn.getCookies()["oai-did"](out.js:735),即 secret.Token。
+func soDeviceIDFor(secret *tokens.Secret) string {
+	if secret != nil && secret.Token != "" {
+		return secret.Token
+	}
+	return ""
+}
+
+// ensureSOToken 懒求值 openai-sentinel-so-token header 值:第一次调用时跑
+// snapshot_dx(复用 collector 留下的 VM 寄存器),后续直接返回缓存结果。
+// 对齐 out.js sessionObserverToken():取 snapshot 后用 ce({so,c}, id, flow) 编码。
+// deviceID 是这次请求使用的实际 deviceID(通常来自 secret.Token 或 cookie)。
+func (ts *TurnStile) ensureSOToken(deviceID string) string {
+	if ts == nil || ts.soSession == nil {
+		return ts.SOToken
+	}
+	ts.soOnce.Do(func() {
+		soResult, err := ts.soSession.Snapshot(ts.soSnapshotDX)
+		if err != nil {
+			ts.soErr = err
+			return
+		}
+		ts.soResult = soResult
+	})
+	if ts.soErr != nil {
+		return ""
+	}
+	if ts.SOToken != "" {
+		return ts.SOToken
+	}
+	tok, err := so.BuildToken(ts.soResult, ts.soChatToken, deviceID, ts.soFlow)
+	if err != nil {
+		return ""
+	}
+	ts.SOToken = tok
+	return ts.SOToken
 }
 
 func POSTSentinelPrepare(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken string) (*ChatRequire, int, error) {
@@ -432,6 +512,12 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 		}
 		if chatToken.TurnstileToken != "" {
 			header.Set("openai-sentinel-turnstile-token", chatToken.TurnstileToken)
+		}
+		// openai-sentinel-so-token:对齐 out.js sessionObserverToken() 行为,需要在
+		// 首次发请求前触发 snapshot(fire-and-forget collector 必须已经起好)。
+		// deviceID 沿用 secret.Token(对应 out.js qn.getCookies()["oai-did"])。
+		if soToken := chatToken.ensureSOToken(soDeviceIDFor(secret)); soToken != "" {
+			header.Set("openai-sentinel-so-token", soToken)
 		}
 	}
 	if secret != nil && secret.PUID != "" {
@@ -730,14 +816,13 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		parentMessageID = "client-created-root"
 	}
 	payload := map[string]interface{}{
-		"action":                "next",
-		"fork_from_shared_post": false,
-		"parent_message_id":     parentMessageID,
-		"model":                 conversationPrepareModel(message.Model),
-		"timezone_offset_min":   message.TimezoneOffsetMin,
-		"timezone":              "Asia/Shanghai",
-		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
-		"system_hints":          []string{},
+		"action":              "next",
+		"parent_message_id":   parentMessageID,
+		"model":               conversationPrepareModel(message.Model),
+		"timezone_offset_min": message.TimezoneOffsetMin,
+		"timezone":            "Asia/Shanghai",
+		"conversation_mode":   map[string]string{"kind": "primary_assistant"},
+		"system_hints":        []string{},
 		"partial_query": map[string]interface{}{
 			"id":      uuid.NewString(),
 			"author":  map[string]string{"role": "user"},
@@ -746,7 +831,6 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		"supports_buffering":     true,
 		"supported_encodings":    []string{"v1"},
 		"client_contextual_info": conversationPrepareClientContext(message),
-		"thinking_effort":        "standard",
 	}
 	if message.ConversationID != "" {
 		payload["conversation_id"] = message.ConversationID
@@ -755,7 +839,7 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 	if err != nil {
 		return "", err
 	}
-	header := conversationHeadersWithState(secret, chatToken, "*/*", targetPath, "no-token", turnTraceID, state)
+	header := conversationHeadersWithState(secret, chatToken, "*/*", targetPath, "", turnTraceID, state)
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err

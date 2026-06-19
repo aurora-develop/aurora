@@ -20,3 +20,5 @@ tools/authenticator/.proxies.txt.swp
 CLAUDE.md
 MIGRATION_PLAN.md
 _scratch/
+OpenSentinel/
+chatgpt-turnstile-reversed/
