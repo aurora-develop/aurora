@@ -8,8 +8,7 @@ import (
 )
 
 // SessionManager 按 conversationID 缓存 ChatClientState，
-// 使得同一对话的多轮请求复用相同的 DeviceID / SessionID，
-// 与 chatgpttoapi 的 session 行为对齐。
+// 使得同一对话的多轮请求复用相同的 DeviceID / SessionID。
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionEntry
@@ -32,8 +31,8 @@ func NewSessionManager() *SessionManager {
 	return sm
 }
 
-// GetOrCreate 根据 conversationID 获取已有状态，不存在则返回 nil。
-// 调用方在拿到 conversationID 后调用 Register 注册。
+// Get 根据 conversationID 获取缓存的 ChatClientState。
+// 不存在时返回 nil；调用方拿到 conversationID 后再调用 Register 注册新状态。
 func (sm *SessionManager) Get(conversationID string) *chatgpt.ChatClientState {
 	if conversationID == "" {
 		return nil

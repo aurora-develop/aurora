@@ -81,7 +81,7 @@ func TestChatGPTModel(t *testing.T) {
 		return
 	}
 
-	type EnginesData struct {
+	var result struct {
 		Models []struct {
 			Slug         string   `json:"slug"`
 			MaxTokens    int      `json:"max_tokens"`
@@ -101,8 +101,6 @@ func TestChatGPTModel(t *testing.T) {
 			CodeInterpreterModel string `json:"code_interpreter_model,omitempty"`
 		} `json:"categories"`
 	}
-
-	var result EnginesData
 	json.NewDecoder(response.Body).Decode(&result)
 	fmt.Println(result)
 }

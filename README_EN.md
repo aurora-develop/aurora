@@ -7,11 +7,6 @@ https://t.me/aurora_develop
 
 ## Deployment
 
-### Deployment on Vercel
-Since Vercel does not support streaming, if deploying on Vercel, please fill in False in STREAM_MODE. It does not support any default streaming client but supports immersive translation.
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faurora-develop%2Faurora&env=STREAM_MODE&project-name=aurora&repository-name=aurora)
-
 ### Deployment on Render
 [![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 

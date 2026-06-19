@@ -50,6 +50,9 @@ func (a *AccessToken) GetSecret() *Secret {
 		return &Secret{}
 	}
 
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
 	if len(a.tokens) == 0 {
 		return &Secret{}
 	}

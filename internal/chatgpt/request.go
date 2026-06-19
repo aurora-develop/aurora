@@ -125,9 +125,6 @@ type ProofWork struct {
 	Seed       string `json:"seed,omitempty"`
 }
 
-func GetConfig() []interface{} {
-	return nil
-}
 func GetInitConfig() []interface{} {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rng.Intn(len(cachedScripts))]
@@ -190,10 +187,6 @@ type sentinelFinalizeResponse struct {
 	Persona     string `json:"persona,omitempty"`
 	Token       string `json:"token"`
 	ExpireAfter int    `json:"expire_after,omitempty"`
-}
-
-func InitTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*TurnStile, int, error) {
-	return InitSentinel(client, secret, proxy, 0)
 }
 
 func InitTurnStileWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, state *ChatClientState) (*TurnStile, int, error) {
@@ -369,71 +362,6 @@ func readResponseSnippet(body io.Reader, limit int64) string {
 	return string(data)
 }
 
-func POSTTurnStile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, retry int) (*ChatRequire, int, error) {
-	if proxy != "" {
-		client.SetProxy(proxy)
-	}
-	if cachedRequireProof == "" {
-		cachedRequireProof = prooftoken.RequirementsToken(defaultUserAgent(), cachedScripts, oaiDeviceID)
-	}
-	var apiUrl string
-	if secret.IsFree {
-		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/sentinel/chat-requirements"
-	} else {
-		apiUrl = BaseURL + "/sentinel/chat-requirements"
-	}
-	payload := bytes.NewBuffer([]byte(`{"p":"` + cachedRequireProof + `"}`))
-
-	header := createBaseHeader()
-	header.Set("content-type", "application/json")
-	if !secret.IsFree && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
-	if secret.IsFree {
-		header.Set("oai-device-id", secret.Token)
-	}
-	response, err := client.Request(http.MethodPost, apiUrl, header, nil, payload)
-	if err != nil {
-		return nil, http.StatusInternalServerError, err
-	}
-	if response.StatusCode == 401 && secret.IsFree {
-		if retry > 1 {
-			return nil, http.StatusUnauthorized, err
-		}
-		time.Sleep(time.Second * 2)
-		secret.Token = uuid.NewString()
-		return POSTTurnStile(client, secret, proxy, retry+1)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return nil, response.StatusCode, fmt.Errorf("failed to get chat requirements")
-	}
-	var result ChatRequire
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return nil, response.StatusCode, err
-	}
-	if result.ForceLogin {
-		if !secret.IsFree {
-			return nil, http.StatusUnauthorized, fmt.Errorf("force login required: ChatGPT access token is expired or not accepted")
-		}
-		if retry > 1 {
-			return nil, http.StatusForbidden, fmt.Errorf("force login required")
-		}
-		time.Sleep(time.Second * 1)
-		secret.Token = uuid.NewString()
-		return POSTTurnStile(client, secret, proxy, retry+1)
-	}
-	if strings.HasPrefix(result.Proof.Difficulty, "00003") {
-		if retry > 1 {
-			return &result, response.StatusCode, err
-		}
-		time.Sleep(time.Millisecond * 128)
-		return POSTTurnStile(client, secret, proxy, retry+1)
-	}
-
-	return &result, response.StatusCode, err
-}
-
 var urlAttrMap = make(map[string]string)
 
 type urlAttr struct {
@@ -470,45 +398,6 @@ func getURLAttribution(client httpclient.AuroraHttpClient, secret *tokens.Secret
 		return ""
 	}
 	return attr.Attribution
-}
-
-func GetCf(proxy string) (string, error) {
-	client := &http.Client{}
-	if proxy != "" {
-		client.Transport = &http.Transport{
-			Proxy: func(req *http.Request) (*url.URL, error) {
-				return url.Parse(proxy)
-			},
-		}
-	}
-
-	var data = strings.NewReader(`{}`)
-	req, err := http.NewRequest("POST", "https://chatgpt.com/cdn-cgi/challenge-platform/h/b/jsd/r/"+util.RandomHexadecimalString(), data)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("accept", "*/*")
-	req.Header.Set("accept-language", "zh-CN,zh;q=0.9")
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("origin", "https://chatgpt.com")
-	req.Header.Set("sec-ch-ua", `"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"`)
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.0.0 Safari/537.36")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", errors.New("failed to get cf clearance")
-	}
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == "cf_clearance" {
-			return cookie.Value, nil
-		}
-	}
-	return "", errors.New("ailed to get cf clearance")
 }
 
 func conversationURL(secret *tokens.Secret, path string) (string, string) {
@@ -655,18 +544,6 @@ func websocketProxyFunc(proxy string) (func(*http.Request) (*url.URL, error), er
 		return nil, err
 	}
 	return http.ProxyURL(proxyURL), nil
-}
-
-func dialChatWebsocket(client httpclient.AuroraHttpClient, secret *tokens.Secret) (*websocket.Conn, error) {
-	return DialChatWebsocket(client, secret)
-}
-
-func dialChatWebsocketWithState(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState) (*websocket.Conn, error) {
-	return DialChatWebsocketWithState(client, secret, state)
-}
-
-func dialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState, proxy string) (*websocket.Conn, error) {
-	return DialChatWebsocketWithStateAndProxy(client, secret, state, proxy)
 }
 
 func parseChatWebsocketFrames(raw []byte) []map[string]interface{} {
@@ -992,60 +869,6 @@ func POSTconversationPreparedWithState(client httpclient.AuroraHttpClient, messa
 		return nil, err
 	}
 	return response, nil
-}
-
-type EnginesData struct {
-	Models []struct {
-		Slug         string   `json:"slug"`
-		MaxTokens    int      `json:"max_tokens"`
-		Title        string   `json:"title"`
-		Description  string   `json:"description"`
-		Tags         []string `json:"tags"`
-		Capabilities struct {
-		} `json:"capabilities,omitempty"`
-		ProductFeatures struct {
-		} `json:"product_features,omitempty"`
-	} `json:"models"`
-	Categories []struct {
-		Category             string `json:"category"`
-		HumanCategoryName    string `json:"human_category_name"`
-		SubscriptionLevel    string `json:"subscription_level"`
-		DefaultModel         string `json:"default_model"`
-		CodeInterpreterModel string `json:"code_interpreter_model,omitempty"`
-	} `json:"categories"`
-}
-
-func GETengines(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (*EnginesData, int, error) {
-	if proxy != "" {
-		client.SetProxy(proxy)
-	}
-	reqUrl := BaseURL + "/models"
-	header := make(httpclient.AuroraHeaders)
-	header.Set("Content-Type", "application/json")
-	header.Set("User-Agent", defaultUserAgent())
-	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chatgpt.com")
-	header.Set("referer", "https://chatgpt.com/")
-
-	if !secret.IsFree && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
-	if secret.IsFree {
-		header.Set("Oai-Device-Id", secret.Token)
-	}
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
-	}
-	resp, err := client.Request(http.MethodGet, reqUrl, header, nil, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	var result EnginesData
-	json.NewDecoder(resp.Body).Decode(&result)
-	return &result, resp.StatusCode, nil
 }
 
 func Handle_request_error(c *gin.Context, response *http.Response) bool {
@@ -2132,7 +1955,7 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	reader := bufio.NewReader(response.Body)
 	if stream && client != nil && secret != nil {
 		if wsConn == nil {
-			if conn, err := dialChatWebsocketWithStateAndProxy(client, secret, options.ClientState, options.ProxyURL); err == nil {
+			if conn, err := DialChatWebsocketWithStateAndProxy(client, secret, options.ClientState, options.ProxyURL); err == nil {
 				wsConn = conn
 				defer wsConn.Close()
 			}

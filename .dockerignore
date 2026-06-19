@@ -1,0 +1,33 @@
+.git
+.claude
+.idea
+.vscode
+.github
+
+_scratch
+*.har
+*.exe
+*.exe~
+*.test
+*.out
+*.prof
+*.pprof
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+bin/
+dist/
+target/
+
+# 保留 README 供 Docker 镜像元数据使用
+*.md
+!README.md
+!README_EN.md
+!API.md
+
+# 本地/敏感配置
+.env
+.env.*
+secrets.yaml

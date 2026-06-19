@@ -127,7 +127,6 @@ func (h *Handler) refresh(c *gin.Context) {
 	}
 	proxyUrl := h.proxy.GetProxyIP()
 	client := bogdanfinn.NewStdClient()
-	client.Client.GetCookieJar()
 	openaiRefreshToken, status, err := chatgpt.GETTokenForRefreshToken(client, refreshToken.RefreshToken, proxyUrl)
 	if err != nil {
 		c.JSON(400, gin.H{

@@ -16,7 +16,6 @@ type ChatClientState struct {
 	StartTime       time.Time
 	ConversationID  string
 	ParentMessageID string
-	TurnCount       int
 	UserAgent       string
 }
 
@@ -76,7 +75,6 @@ func (s *ChatClientState) NoteTurnResult(conversationID, parentMessageID string)
 	if parentMessageID != "" {
 		s.ParentMessageID = parentMessageID
 	}
-	s.TurnCount++
 }
 
 func ensureClientContextualInfo(request *chatgpt_types.ChatGPTRequest) {
