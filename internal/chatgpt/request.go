@@ -60,15 +60,15 @@ var (
 	// 每次进程启动都重新生成,保持"每次运行都是新设备"的风控画像,
 	// 避免多个进程/部署共享同一个指纹导致关联降权。
 	// 不落盘:二进制发布到不同机器时指纹天然不同。
-	oaiDeviceID         = uuid.NewString()
-	oaiSessionID        = uuid.NewString()
-	oaiStartTime        = time.Now()
-	timeLayout          = "Mon Jan 2 2006 15:04:05"
-	BasicCookies        []*http.Cookie
-	cachedHardware      = 0
-	cachedScripts       = []string{}
-	cachedDpl           = ""
-	cachedRequireProof  = ""
+	oaiDeviceID        = uuid.NewString()
+	oaiSessionID       = uuid.NewString()
+	oaiStartTime       = time.Now()
+	timeLayout         = "Mon Jan 2 2006 15:04:05"
+	BasicCookies       []*http.Cookie
+	cachedHardware     = 0
+	cachedScripts      = []string{}
+	cachedDpl          = ""
+	cachedRequireProof = ""
 )
 
 func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
@@ -597,11 +597,20 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 			header.Set("Openai-Sentinel-So-Token", soToken)
 		}
 	}
+	cookieStr := ""
 	if secret != nil && secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
+		cookieStr = "_puid=" + secret.PUID
 	}
 	if secret != nil && secret.IsFree && secret.Token != "" {
 		header.Set("Oai-Device-Id", secret.Token)
+		// free 用户的 oai-did 也塞进 cookie
+		if cookieStr != "" {
+			cookieStr += "; "
+		}
+		cookieStr += "oai-did=" + secret.Token
+	}
+	if cookieStr != "" {
+		header["Cookie"] = cookieStr
 	}
 	if secret != nil && !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -905,16 +914,16 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		parentMessageID = "client-created-root"
 	}
 	payload := map[string]interface{}{
-		"action":                "next",
-		"parent_message_id":     parentMessageID,
-		"model":                 conversationPrepareModel(message.Model),
-		"client_prepare_state":  string(prepareState),
-		"timezone_offset_min":   message.TimezoneOffsetMin,
-		"timezone":              "America/Los_Angeles",
-		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
-		"system_hints":          []string{},
-		"supports_buffering":    true,
-		"supported_encodings":   []string{"v1"},
+		"action":                 "next",
+		"parent_message_id":      parentMessageID,
+		"model":                  conversationPrepareModel(message.Model),
+		"client_prepare_state":   string(prepareState),
+		"timezone_offset_min":    message.TimezoneOffsetMin,
+		"timezone":               "America/Los_Angeles",
+		"conversation_mode":      map[string]string{"kind": "primary_assistant"},
+		"system_hints":           []string{},
+		"supports_buffering":     true,
+		"supported_encodings":    []string{"v1"},
 		"client_contextual_info": conversationPrepareClientContext(message),
 	}
 	// partial_query 只在 sent / success 阶段携带,none 阶段用户还没开始打字
@@ -974,6 +983,9 @@ func PrepareConversationConduitFull(client httpclient.AuroraHttpClient, message 
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
+	// 在三态 prepare 之前先确保 CookieJar 有 CF 注入的 cf_clearance / __cf_bm
+	// 等关键 cookie,否则直接被 CF 拦截,根本到不了 OpenAI 后端。
+	ensureBootstrapped(client, secret)
 	// Step 1: none —— 用户还没开始打字,partial_query 不带
 	token1, err := getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateNone, "")
 	if err != nil {
@@ -2754,9 +2766,9 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 
 // defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。
 // 一律走 util.FixedUserAgent,不再随机 —
-//   1. 网络 header 用途: 防止与 sec-ch-ua-* 失配触发 Cloudflare 风控;
-//   2. fingerprint/PoW 用途: 内部算 token 用的 UA 必须跟实际请求一致,
-//      随机会让 prooftoken 跟真实 UA 错位导致 sentinel 验证失败。
+//  1. 网络 header 用途: 防止与 sec-ch-ua-* 失配触发 Cloudflare 风控;
+//  2. fingerprint/PoW 用途: 内部算 token 用的 UA 必须跟实际请求一致,
+//     随机会让 prooftoken 跟真实 UA 错位导致 sentinel 验证失败。
 func defaultUserAgent() string {
 	return util.FixedUserAgent
 }
