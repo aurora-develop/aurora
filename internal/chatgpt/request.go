@@ -2670,13 +2670,14 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("Sec-Ch-Ua-Mobile", "?0")
 	header.Set("Sec-Ch-Ua-Model", `""`)
 	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-	// Windows 10.0.15063 → Chromium UA 报 "15.0.0";当前 Chrome 148 报 "15.0.0"
-	header.Set("Sec-Ch-Ua-Platform-Version", `"15.0.0"`)
+	// Sec-Ch-Ua-Platform-Version 报 "10.0.0" (Windows 10) — 与 UA 报 Windows NT 10.0 保持一致,
+	// 否则 UA/platform-version 交叉对不上会被 Cloudflare 标记。
+	header.Set("Sec-Ch-Ua-Platform-Version", `"10.0.0"`)
 	header.Set("Priority", "u=1, i")
 	header.Set("Sec-Fetch-Dest", "empty")
 	header.Set("Sec-Fetch-Mode", "cors")
 	header.Set("Sec-Fetch-Site", "same-origin")
-	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+	ua := util.FixedUserAgent
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}

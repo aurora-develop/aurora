@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aurora/internal/fingerprint"
+	"aurora/util"
 )
 
 // mathRandNew 是 math/rand.New 的本地别名 (避免类型混淆)。
@@ -68,10 +69,10 @@ type Config struct {
 }
 
 // NewConfig 用默认 Windows / en-US / Chrome UA 配置构造(对齐 conversation.txt 2026-06 抓包)。
-// userAgent 为空时使用 Chrome 148 (与新版 SDK 抓包一致)。
+// userAgent 为空时使用 util.FixedUserAgent (与新版 SDK 抓包一致,与 chatgpt 包 UA 严格同步)。
 func NewConfig(userAgent string) *Config {
 	if userAgent == "" {
-		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+		userAgent = util.FixedUserAgent
 	}
 	return &Config{
 		DeviceID:            randomUUID(),
