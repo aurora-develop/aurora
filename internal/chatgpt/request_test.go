@@ -348,8 +348,8 @@ func TestGetConduitTokenAllowsNullToken(t *testing.T) {
 	if token != "" {
 		t.Fatalf("token = %q, want empty token", token)
 	}
-	if client.headers["X-Conduit-Token"] != "no-token" {
-		t.Fatalf("prepare X-Conduit-Token = %q, want no-token", client.headers["X-Conduit-Token"])
+	if client.headers["x-conduit-token"] != "no-token" {
+		t.Fatalf("prepare x-conduit-token = %q, want no-token", client.headers["x-conduit-token"])
 	}
 }
 
@@ -379,11 +379,11 @@ func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
 func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) {
 	header := conversationHeaders(&tokens.Secret{}, nil, "text/event-stream", "/backend-api/f/conversation", "", "trace-id")
 
-	if _, ok := header["X-Conduit-Token"]; !ok {
-		t.Fatalf("X-Conduit-Token header missing for empty conversation conduit token")
+	if _, ok := header["x-conduit-token"]; !ok {
+		t.Fatalf("x-conduit-token header missing for empty conversation conduit token")
 	}
-	if header["X-Conduit-Token"] != "" {
-		t.Fatalf("X-Conduit-Token = %q, want empty string", header["X-Conduit-Token"])
+	if header["x-conduit-token"] != "" {
+		t.Fatalf("x-conduit-token = %q, want empty string", header["x-conduit-token"])
 	}
 }
 

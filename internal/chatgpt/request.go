@@ -156,16 +156,16 @@ func GetInitConfig() []interface{} {
 	}
 
 	return []interface{}{
-		cachedHardware,         // [0]  screen.width + screen.height
-		parseTime,              // [1]  Date.toString()
-		int64(4294967296),      // [2]  jsHeapSizeLimit
-		rng.Float64(),          // [3]  Math.random()
-		defaultUserAgent(),     // [4]  navigator.userAgent
-		script,                 // [5]  currentScript.src
-		nil,                    // [6]  documentElement[data-build]
-		"en-US",                // [7]  navigator.language
-		"en-US,en",             // [8]  navigator.languages.join(",")
-		rng.Float64(),          // [9]  Math.random()
+		cachedHardware,     // [0]  screen.width + screen.height
+		parseTime,          // [1]  Date.toString()
+		int64(4294967296),  // [2]  jsHeapSizeLimit
+		rng.Float64(),      // [3]  Math.random()
+		defaultUserAgent(), // [4]  navigator.userAgent
+		script,             // [5]  currentScript.src
+		nil,                // [6]  documentElement[data-build]
+		"en-US",            // [7]  navigator.language
+		"en-US,en",         // [8]  navigator.languages.join(",")
+		rng.Float64(),      // [9]  Math.random()
 		"vibrate−function vibrate() { [native code] }", // [10] navigator 原型方法
 		"_reactListening" + string(reactSuffix),        // [11] document 随机 key
 		"requestIdleCallback",                          // [12] window 随机 key
@@ -414,19 +414,20 @@ func sentinelURL(secret *tokens.Secret, path string) (string, string) {
 // sentinelReqResponse 是 POST /sentinel/req 的响应。
 // 服务端会返回 token + flow 字段(对齐 sdk.deob.pretty.js / OpenSentinel client.js)。
 type sentinelReqResponse struct {
-	Token       string `json:"token"`
-	Flow        string `json:"flow"`
-	ExpiresAt   int64  `json:"expires_at,omitempty"`
-	ChatReq     string `json:"chat_req,omitempty"`     // 备用:有时服务端把 chat-requirements token 嵌在这里
-	Persona     string `json:"persona,omitempty"`
+	Token     string `json:"token"`
+	Flow      string `json:"flow"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+	ChatReq   string `json:"chat_req,omitempty"` // 备用:有时服务端把 chat-requirements token 嵌在这里
+	Persona   string `json:"persona,omitempty"`
 }
 
 // POSTSentinelReq 调用 /sentinel/req 端点 (对齐 conversation.txt 抓包的第 3 步)。
 //
 // 请求格式(对齐 sdk.deob.pretty.js OpenSentinel/client.js):
-//   POST /backend-api/sentinel/req
-//   Content-Type: text/plain;charset=UTF-8
-//   body: {"p":<requirementsToken>,"id":<deviceID>,"flow":"conversation"}
+//
+//	POST /backend-api/sentinel/req
+//	Content-Type: text/plain;charset=UTF-8
+//	body: {"p":<requirementsToken>,"id":<deviceID>,"flow":"conversation"}
 //
 // 响应:服务端下发 flow token,可作为后续 prepare/finalize 的辅助 token。
 // 失败返回 (nil, status, err)。
@@ -447,14 +448,14 @@ func POSTSentinelReq(client httpclient.AuroraHttpClient, secret *tokens.Secret, 
 	header.Set("Accept", "*/*")
 	// 对齐 conversation.txt:sentinel/req 端点用 text/plain;charset=UTF-8
 	header.Set("Content-Type", "text/plain;charset=UTF-8")
-	header.Set("x-openai-target-path", targetPath)
-	header.Set("x-openai-target-route", targetPath)
+	header.Set("X-Openai-Target-Path", targetPath)
+	header.Set("X-Openai-Target-Route", targetPath)
 	// referer 应该指向 sentinel/frame.html(对齐 conversation.txt 抓包)
 	if state == nil || state.ConversationID == "" {
-		header.Set("referer", "https://chatgpt.com/backend-api/sentinel/frame.html?sv=20260423af3c")
+		header.Set("Referer", "https://chatgpt.com/backend-api/sentinel/frame.html?sv=20260423af3c")
 	}
 	if secret != nil && secret.IsFree && secret.Token != "" {
-		header.Set("oai-device-id", secret.Token)
+		header.Set("Oai-Device-Id", secret.Token)
 	}
 	if secret != nil && !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -483,10 +484,10 @@ func sentinelHeaderWithState(secret *tokens.Secret, targetPath string, state *Ch
 	header := createBaseHeaderForState(state)
 	header.Set("Accept", "*/*")
 	header.Set("Content-Type", "application/json")
-	header.Set("x-openai-target-path", targetPath)
-	header.Set("x-openai-target-route", targetPath)
+	header.Set("X-Openai-Target-Path", targetPath)
+	header.Set("X-Openai-Target-Route", targetPath)
 	if secret != nil && secret.IsFree && secret.Token != "" {
-		header.Set("oai-device-id", secret.Token)
+		header.Set("Oai-Device-Id", secret.Token)
 	}
 	if secret != nil && !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -559,8 +560,8 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 	header := createBaseHeaderForState(state)
 	header.Set("Accept", accept)
 	header.Set("Content-Type", "application/json")
-	header.Set("x-openai-target-path", targetPath)
-	header.Set("x-openai-target-route", targetPath)
+	header.Set("X-Openai-Target-Path", targetPath)
+	header.Set("X-Openai-Target-Route", targetPath)
 	if turnTraceID != "" {
 		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
 	}
@@ -572,26 +573,26 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 	}
 	if chatToken != nil {
 		if chatToken.TurnStileToken != "" {
-			header.Set("openai-sentinel-chat-requirements-token", chatToken.TurnStileToken)
+			header.Set("Openai-Sentinel-Chat-Requirements-Token", chatToken.TurnStileToken)
 		}
 		if chatToken.ProofOfWorkToken != "" {
-			header.Set("openai-sentinel-proof-token", chatToken.ProofOfWorkToken)
+			header.Set("Openai-Sentinel-Proof-Token", chatToken.ProofOfWorkToken)
 		}
 		if chatToken.TurnstileToken != "" {
-			header.Set("openai-sentinel-turnstile-token", chatToken.TurnstileToken)
+			header.Set("Openai-Sentinel-Turnstile-Token", chatToken.TurnstileToken)
 		}
 		// openai-sentinel-so-token:对齐 out.js sessionObserverToken() 行为,需要在
 		// 首次发请求前触发 snapshot(fire-and-forget collector 必须已经起好)。
 		// deviceID 沿用 secret.Token(对应 out.js qn.getCookies()["oai-did"])。
 		if soToken := chatToken.ensureSOToken(soDeviceIDFor(secret)); soToken != "" {
-			header.Set("openai-sentinel-so-token", soToken)
+			header.Set("Openai-Sentinel-So-Token", soToken)
 		}
 	}
 	if secret != nil && secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
 	}
 	if secret != nil && secret.IsFree && secret.Token != "" {
-		header.Set("oai-device-id", secret.Token)
+		header.Set("Oai-Device-Id", secret.Token)
 	}
 	if secret != nil && !secret.IsFree && secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
@@ -2587,7 +2588,7 @@ func GETTokenForRefreshToken(client httpclient.AuroraHttpClient, refresh_token s
 
 	header := make(httpclient.AuroraHeaders)
 	//req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
-	header.Set("authority", "auth.openai.com")
+	header.Set("Authority", "auth.openai.com")
 	header.Set("Accept-Language", "en-US,en;q=0.9")
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36")
@@ -2611,14 +2612,14 @@ func GETTokenForSessionToken(client httpclient.AuroraHttpClient, session_token s
 	}
 	url := "https://chatgpt.com/api/auth/session"
 	header := make(httpclient.AuroraHeaders)
-	header.Set("authority", "chat.openai.com")
-	header.Set("accept-language", "en-US,en;q=0.9")
+	header.Set("Authority", "chat.openai.com")
+	header.Set("Accept-Language", "en-US,en;q=0.9")
 	header.Set("User-Agent", defaultUserAgent())
 	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chatgpt.com")
-	header.Set("referer", "https://chatgpt.com/")
-	header.Set("cookie", "__Secure-next-auth.session-token="+session_token)
+	header.Set("Oai-Language", "en-US")
+	header.Set("Origin", "https://chatgpt.com")
+	header.Set("Referer", "https://chatgpt.com/")
+	header.Set("Cookie", "__Secure-next-auth.session-token="+session_token)
 	resp, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
 		return nil, 0, err
@@ -2650,36 +2651,36 @@ func createBaseHeader() httpclient.AuroraHeaders {
 func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header := make(httpclient.AuroraHeaders)
 	// 对齐 conversation.txt 2026-06 抓包:Chrome 148 Win64 英文浏览器
-	header.Set("accept", "*/*")
-	header.Set("accept-language", "en-US,en;q=0.9")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chatgpt.com")
+	header.Set("Accept", "*/*")
+	header.Set("Accept-Language", "en-US,en;q=0.9")
+	header.Set("Oai-Language", "en-US")
+	header.Set("Origin", "https://chatgpt.com")
 	// referer 跟 state.ConversationID 联动;空就发首页
 	if state != nil && state.ConversationID != "" {
-		header.Set("referer", "https://chatgpt.com/c/"+state.ConversationID)
+		header.Set("Referer", "https://chatgpt.com/c/"+state.ConversationID)
 	} else {
-		header.Set("referer", "https://chatgpt.com/")
+		header.Set("Referer", "https://chatgpt.com/")
 	}
 	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步)
-	header.Set("sec-ch-ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
-	header.Set("sec-ch-ua-arch", `"x86"`)
-	header.Set("sec-ch-ua-bitness", `"64"`)
-	header.Set("sec-ch-ua-full-version", `"148.0.7778.98"`)
-	header.Set("sec-ch-ua-full-version-list", `"Chromium";v="148.0.7778.98", "Google Chrome";v="148.0.7778.98", "Not/A)Brand";v="99.0.0.0"`)
-	header.Set("sec-ch-ua-mobile", "?0")
-	header.Set("sec-ch-ua-model", `""`)
-	header.Set("sec-ch-ua-platform", `"Windows"`)
+	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
+	header.Set("Sec-Ch-Ua-Arch", `"x86"`)
+	header.Set("Sec-Ch-Ua-Bitness", `"64"`)
+	header.Set("Sec-Ch-Ua-Full-Version", `"148.0.7778.98"`)
+	header.Set("Sec-Ch-Ua-Full-Version-List", `"Chromium";v="148.0.7778.98", "Google Chrome";v="148.0.7778.98", "Not/A)Brand";v="99.0.0.0"`)
+	header.Set("Sec-Ch-Ua-Mobile", "?0")
+	header.Set("Sec-Ch-Ua-Model", `""`)
+	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
 	// Windows 10.0.15063 → Chromium UA 报 "15.0.0";当前 Chrome 148 报 "15.0.0"
-	header.Set("sec-ch-ua-platform-version", `"15.0.0"`)
-	header.Set("priority", "u=1, i")
-	header.Set("sec-fetch-dest", "empty")
-	header.Set("sec-fetch-mode", "cors")
-	header.Set("sec-fetch-site", "same-origin")
+	header.Set("Sec-Ch-Ua-Platform-Version", `"15.0.0"`)
+	header.Set("Priority", "u=1, i")
+	header.Set("Sec-Fetch-Dest", "empty")
+	header.Set("Sec-Fetch-Mode", "cors")
+	header.Set("Sec-Fetch-Site", "same-origin")
 	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
 	}
-	header.Set("user-agent", ua)
+	header.Set("User-Agent", ua)
 	deviceID := oaiDeviceID
 	sessionID := oaiSessionID
 	if state != nil {
@@ -2690,11 +2691,11 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 			sessionID = state.SessionID
 		}
 	}
-	header.Set("oai-device-id", deviceID)
-	header.Set("oai-session-id", sessionID)
+	header.Set("Oai-Device-Id", deviceID)
+	header.Set("Oai-Session-Id", sessionID)
 	// 对齐 conversation.txt 2026-06 抓包的 build / version
-	header.Set("oai-client-version", "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769")
-	header.Set("oai-client-build-number", "7624276")
+	header.Set("Oai-Client-Version", "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769")
+	header.Set("Oai-Client-Build-Number", "7624276")
 	return header
 }
 
@@ -2793,7 +2794,7 @@ func getTTSBlobFromURL(client httpclient.AuroraHttpClient, secret *tokens.Secret
 		header.Set("Authorization", "Bearer "+secret.Token)
 	}
 	if secret.IsFree {
-		header.Set("oai-device-id", secret.Token)
+		header.Set("Oai-Device-Id", secret.Token)
 	}
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")
@@ -2874,7 +2875,7 @@ func RemoveConversation(client httpclient.AuroraHttpClient, secret *tokens.Secre
 		header.Set("Authorization", "Bearer "+secret.Token)
 	}
 	if secret.IsFree {
-		header.Set("oai-device-id", secret.Token)
+		header.Set("Oai-Device-Id", secret.Token)
 	}
 	if secret.PUID != "" {
 		header.Set("Cookie", "_puid="+secret.PUID+";")

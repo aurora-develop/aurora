@@ -140,8 +140,8 @@ func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, pay
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
 	}
 	header := createBaseHeader()
-	header.Set("accept", "application/json")
-	header.Set("content-type", "application/json")
+	header.Set("Accept", "application/json")
+	header.Set("Content-Type", "application/json")
 	if secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
 	}
@@ -171,8 +171,8 @@ func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, pay
 func putUpload(client httpclient.AuroraHttpClient, uploadURL, contentType string, data []byte) (int, error) {
 	header := make(httpclient.AuroraHeaders)
 	header.Set("Content-Type", contentType)
-	header.Set("x-ms-blob-type", "BlockBlob")
-	header.Set("x-ms-version", "2020-04-08")
+	header.Set("X-Ms-Blob-Type", "BlockBlob")
+	header.Set("X-Ms-Version", "2020-04-08")
 	header.Set("Origin", "https://chatgpt.com")
 	header.Set("Referer", "https://chatgpt.com/")
 	header.Set("User-Agent", defaultUserAgent())
@@ -192,8 +192,8 @@ func putUpload(client httpclient.AuroraHttpClient, uploadURL, contentType string
 
 func confirmUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, fileID string) (int, error) {
 	header := createBaseHeader()
-	header.Set("accept", "application/json")
-	header.Set("content-type", "application/json")
+	header.Set("Accept", "application/json")
+	header.Set("Content-Type", "application/json")
 	if secret.Token != "" {
 		header.Set("Authorization", "Bearer "+secret.Token)
 	}

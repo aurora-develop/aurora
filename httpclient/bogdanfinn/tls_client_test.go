@@ -35,10 +35,10 @@ func TestTlsClient_Request(t *testing.T) {
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chatgpt.com")
-	header.Set("referer", "https://chatgpt.com/")
-	header.Set("oai-device-id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
+	header.Set("Oai-Language", "en-US")
+	header.Set("Origin", "https://chatgpt.com")
+	header.Set("Referer", "https://chatgpt.com/")
+	header.Set("Oai-Device-Id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, payload)
 	if err != nil {
 		return
@@ -64,10 +64,10 @@ func TestChatGPTModel(t *testing.T) {
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "*/*")
-	header.Set("oai-language", "en-US")
-	header.Set("origin", "https://chatgpt.com")
-	header.Set("referer", "https://chatgpt.com/")
-	header.Set("oai-device-id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
+	header.Set("Oai-Language", "en-US")
+	header.Set("Origin", "https://chatgpt.com")
+	header.Set("Referer", "https://chatgpt.com/")
+	header.Set("Oai-Device-Id", "c83b24f0-5a9e-4c43-8915-3f67d4332609")
 	response, err := client.Request(http.MethodGet, apiUrl, header, nil, nil)
 	if err != nil {
 		return
