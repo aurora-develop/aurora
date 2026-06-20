@@ -56,6 +56,10 @@ func init() {
 var (
 	API_REVERSE_PROXY   = os.Getenv("API_REVERSE_PROXY")
 	FILES_REVERSE_PROXY = os.Getenv("FILES_REVERSE_PROXY")
+	// oaiDeviceID / oaiSessionID 进程启动时随机生成。
+	// 每次进程启动都重新生成,保持"每次运行都是新设备"的风控画像,
+	// 避免多个进程/部署共享同一个指纹导致关联降权。
+	// 不落盘:二进制发布到不同机器时指纹天然不同。
 	oaiDeviceID         = uuid.NewString()
 	oaiSessionID        = uuid.NewString()
 	oaiStartTime        = time.Now()
@@ -99,9 +103,7 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 	})
 	if BasicCookies == nil {
 		for _, cookie := range client.GetCookies("https://chatgpt.com") {
-			if cookie.Name == "oai-did" {
-				continue
-			}
+			// __Secure-next-auth.callback-url 在登录后服务端会下发,这里强制为根路径
 			if cookie.Name == "__Secure-next-auth.callback-url" {
 				cookie.Value = "https://chatgpt.com"
 			}
@@ -565,11 +567,18 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 	if turnTraceID != "" {
 		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
 	}
-	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") {
+	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") || strings.HasSuffix(targetPath, "/f/conversation/prepare") {
+		// /f/conversation 与 /f/conversation/prepare 都必须携带 X-Conduit-Token 头。
+		// 真实流程:none 状态时送空字符串(服务端会签发新 token),
+		// sent/success/conversation 状态时送上一步返回的 token。
+		// 不再发送字面量 "no-token" —— 那是旧客户端占位,真实浏览器从不发送。
 		header.Set("X-Conduit-Token", conduitToken)
-	} else if strings.HasSuffix(targetPath, "/f/conversation/prepare") {
-		// prepare 阶段尚无 conduit token,服务端要求 literal "no-token"
-		header.Set("X-Conduit-Token", "no-token")
+	}
+	// /f/conversation(主请求)专属头:心跳/遥测,sentinel token 之外的反作弊画像。
+	// prepare 阶段不发这两头。
+	if strings.HasSuffix(targetPath, "/f/conversation") && !strings.HasSuffix(targetPath, "/prepare") {
+		header.Set("Oai-Echo-Logs", "0,3352,1,4100,0,6435,1,6501,0,6506,1,9918,0,11782,1,11804")
+		header.Set("Oai-Telemetry", "[1,null]")
 	}
 	if chatToken != nil {
 		if chatToken.TurnStileToken != "" {
@@ -872,11 +881,23 @@ func shouldUseWebsocketHandoff(readingWebsocket bool, handoffTopicID string, wsC
 	return text == "" && strings.Join(imgSource, "") == ""
 }
 
+// PrepareState 表示 /f/conversation/prepare 的客户端状态机:
+// none -> sent -> success -> conversation
+// 真实浏览器严格按此顺序触发;漏掉任何一阶段都会被服务端识别为非标准客户端,
+// 进而把请求路由到 mini 池。
+type PrepareState string
+
+const (
+	PrepareStateNone    PrepareState = "none"
+	PrepareStateSent    PrepareState = "sent"
+	PrepareStateSuccess PrepareState = "success"
+)
+
 func getConduitToken(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string) (string, error) {
-	return getConduitTokenWithState(client, message, secret, chatToken, turnTraceID, nil)
+	return getConduitTokenWithState(client, message, secret, chatToken, turnTraceID, nil, PrepareStateNone, "")
 }
 
-func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string, state *ChatClientState) (string, error) {
+func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, chatToken *TurnStile, turnTraceID string, state *ChatClientState, prepareState PrepareState, previousConduitToken string) (string, error) {
 	message = requestWithClientState(message, state)
 	apiUrl, targetPath := conversationURL(secret, "/f/conversation/prepare")
 	parentMessageID := message.ParentMessageID
@@ -884,21 +905,25 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		parentMessageID = "client-created-root"
 	}
 	payload := map[string]interface{}{
-		"action":              "next",
-		"parent_message_id":   parentMessageID,
-		"model":               conversationPrepareModel(message.Model),
-		"timezone_offset_min": message.TimezoneOffsetMin,
-		"timezone":            "America/Los_Angeles",
-		"conversation_mode":   map[string]string{"kind": "primary_assistant"},
-		"system_hints":        []string{},
-		"partial_query": map[string]interface{}{
+		"action":                "next",
+		"parent_message_id":     parentMessageID,
+		"model":                 conversationPrepareModel(message.Model),
+		"client_prepare_state":  string(prepareState),
+		"timezone_offset_min":   message.TimezoneOffsetMin,
+		"timezone":              "America/Los_Angeles",
+		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
+		"system_hints":          []string{},
+		"supports_buffering":    true,
+		"supported_encodings":   []string{"v1"},
+		"client_contextual_info": conversationPrepareClientContext(message),
+	}
+	// partial_query 只在 sent / success 阶段携带,none 阶段用户还没开始打字
+	if prepareState == PrepareStateSent || prepareState == PrepareStateSuccess {
+		payload["partial_query"] = map[string]interface{}{
 			"id":      uuid.NewString(),
 			"author":  map[string]string{"role": "user"},
 			"content": map[string]interface{}{"content_type": "text", "parts": []string{conversationPartialText(message)}},
-		},
-		"supports_buffering":     true,
-		"supported_encodings":    []string{"v1"},
-		"client_contextual_info": conversationPrepareClientContext(message),
+		}
 	}
 	if message.ConversationID != "" {
 		payload["conversation_id"] = message.ConversationID
@@ -907,7 +932,8 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 	if err != nil {
 		return "", err
 	}
-	header := conversationHeadersWithState(secret, chatToken, "*/*", targetPath, "", turnTraceID, state)
+	// 关键:conduit token 在每一步都不同,严格按"上一步响应拿到的 token"作为下一步的请求头
+	header := conversationHeadersWithState(secret, chatToken, "*/*", targetPath, previousConduitToken, turnTraceID, state)
 	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
@@ -937,7 +963,33 @@ func PrepareConversationConduitWithState(client httpclient.AuroraHttpClient, mes
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	return getConduitTokenWithState(client, message, secret, nil, turnTraceID, state)
+	return getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateNone, "")
+}
+
+// PrepareConversationConduitFull 走完整的 none -> sent -> success 三态,
+// 每次 prepare 都用上一步返回的 conduit_token 作下一步请求头。
+// success 状态返回的 token 用于 POST /f/conversation,这是真实浏览器
+// 进入"主路由决策"前的最后一步 —— 缺这一步会让后端降级到 mini 池。
+func PrepareConversationConduitFull(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, proxy string, turnTraceID string, state *ChatClientState) (string, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	// Step 1: none —— 用户还没开始打字,partial_query 不带
+	token1, err := getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateNone, "")
+	if err != nil {
+		return "", fmt.Errorf("prepare(none) failed: %w", err)
+	}
+	// Step 2: sent —— 打字中,带 partial_query
+	token2, err := getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateSent, token1)
+	if err != nil {
+		return "", fmt.Errorf("prepare(sent) failed: %w", err)
+	}
+	// Step 3: success —— 用户按回车,后端在这一步给出模型路由决策
+	token3, err := getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateSuccess, token2)
+	if err != nil {
+		return "", fmt.Errorf("prepare(success) failed: %w", err)
+	}
+	return token3, nil
 }
 
 func conversationPrepareModel(model string) string {
@@ -2672,7 +2724,7 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
 	// Sec-Ch-Ua-Platform-Version 报 "10.0.0" (Windows 10) — 与 UA 报 Windows NT 10.0 保持一致,
 	// 否则 UA/platform-version 交叉对不上会被 Cloudflare 标记。
-	header.Set("Sec-Ch-Ua-Platform-Version", `"10.0.0"`)
+	header.Set("Sec-Ch-Ua-Platform-Version", `"15.0.0"`)
 	header.Set("Priority", "u=1, i")
 	header.Set("Sec-Fetch-Dest", "empty")
 	header.Set("Sec-Fetch-Mode", "cors")
@@ -2695,8 +2747,8 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("Oai-Device-Id", deviceID)
 	header.Set("Oai-Session-Id", sessionID)
 	// 对齐 conversation.txt 2026-06 抓包的 build / version
-	header.Set("Oai-Client-Version", "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769")
-	header.Set("Oai-Client-Build-Number", "7624276")
+	header.Set("Oai-Client-Version", "prod-497f333866796e100096ad083b51ca949d22e751")
+	header.Set("Oai-Client-Build-Number", "7646290")
 	return header
 }
 

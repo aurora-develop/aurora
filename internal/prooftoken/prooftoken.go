@@ -84,7 +84,7 @@ func NewConfig(userAgent string) *Config {
 		ScreenHeight:        1080,
 		HardwareConcurrency: 16,
 		SentinelSV:          "20260423af3c",
-		BuildID:             "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769",
+		BuildID:             "prod-497f333866796e100096ad083b51ca949d22e751",
 	}
 }
 

@@ -348,8 +348,8 @@ func TestGetConduitTokenAllowsNullToken(t *testing.T) {
 	if token != "" {
 		t.Fatalf("token = %q, want empty token", token)
 	}
-	if client.headers["x-conduit-token"] != "no-token" {
-		t.Fatalf("prepare x-conduit-token = %q, want no-token", client.headers["x-conduit-token"])
+	if client.headers["x-conduit-token"] != "" {
+		t.Fatalf("prepare x-conduit-token = %q, want empty (no-token 字面量已废弃,真实浏览器首次 prepare 送空串)", client.headers["x-conduit-token"])
 	}
 }
 
@@ -428,11 +428,11 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 		t.Fatalf("oai-session-id should be stable across headers: first=%q second=%q", first["oai-session-id"], second["oai-session-id"])
 	}
 	// 对齐 conversation.txt 2026-06 抓包
-	if first["oai-client-version"] != "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769" {
-		t.Fatalf("oai-client-version = %q, want prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769", first["oai-client-version"])
+	if first["oai-client-version"] != "prod-497f333866796e100096ad083b51ca949d22e751" {
+		t.Fatalf("oai-client-version = %q, want prod-497f333866796e100096ad083b51ca949d22e751", first["oai-client-version"])
 	}
-	if first["oai-client-build-number"] != "7624276" {
-		t.Fatalf("oai-client-build-number = %q, want 7624276", first["oai-client-build-number"])
+	if first["oai-client-build-number"] != "7646290" {
+		t.Fatalf("oai-client-build-number = %q, want 7646290", first["oai-client-build-number"])
 	}
 	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 148)
 	if first["sec-ch-ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {

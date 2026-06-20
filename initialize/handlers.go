@@ -79,7 +79,7 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 	if *secret != nil {
 		secretTokenBefore = (*secret).Token
 	}
-	conduitToken, err := chatgpt.PrepareConversationConduitWithState(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
+	conduitToken, err := chatgpt.PrepareConversationConduitFull(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
 	if err != nil {
 		return nil, nil, http.StatusInternalServerError, err
 	}
@@ -89,7 +89,8 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 		return nil, nil, status, err
 	}
 	if *secret != nil && (*secret).Token != secretTokenBefore {
-		conduitToken, err = chatgpt.PrepareConversationConduitWithState(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
+		// 重新走完整三态,因为 secret 切换后必须重新建立 conduit 信任链
+		conduitToken, err = chatgpt.PrepareConversationConduitFull(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
 		if err != nil {
 			return nil, nil, http.StatusInternalServerError, err
 		}
