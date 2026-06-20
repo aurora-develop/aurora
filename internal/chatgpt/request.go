@@ -2700,8 +2700,13 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	return header
 }
 
+// defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。
+// 一律走 util.FixedUserAgent,不再随机 —
+//   1. 网络 header 用途: 防止与 sec-ch-ua-* 失配触发 Cloudflare 风控;
+//   2. fingerprint/PoW 用途: 内部算 token 用的 UA 必须跟实际请求一致,
+//      随机会让 prooftoken 跟真实 UA 错位导致 sentinel 验证失败。
 func defaultUserAgent() string {
-	return util.RandomUserAgent()
+	return util.FixedUserAgent
 }
 
 func HandlerTTS(response *http.Response, input string) (string, string) {
