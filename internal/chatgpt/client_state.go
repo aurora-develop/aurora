@@ -4,10 +4,10 @@ import (
 	"math"
 	"time"
 
-	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/google/uuid"
 
 	chatgpt_types "aurora/typings/chatgpt"
+	"aurora/util"
 )
 
 type ChatClientState struct {
@@ -25,7 +25,7 @@ func NewChatClientState() *ChatClientState {
 		SessionID:       uuid.NewString(),
 		StartTime:       time.Now(),
 		ParentMessageID: "client-created-root",
-		UserAgent:       browser.Random(),
+		UserAgent:       util.FixedUserAgent,
 	}
 }
 

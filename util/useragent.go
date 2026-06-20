@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const FixedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
 // userAgentSpec 描述一个主流桌面浏览器的 User-Agent 模板
 // 模板中可使用 %d 作为版本占位符
 type userAgentSpec struct {
@@ -17,12 +19,7 @@ type userAgentSpec struct {
 	Family     string
 }
 
-// 模板限定为 Chrome 148 (Windows) — 对齐 conversation.txt 2026-06 抓包。
-//
-// 为什么不能用其他浏览器:internal/chatgpt 的 createBaseHeaderForState 同时
-// 写死了 sec-ch-ua = "Google Chrome";"v="148" + sec-ch-ua-full-version = "148.0.7778.98",
-// 如果 user-agent 跟 sec-ch-ua 不一致,Cloudflare/ChatGPT 一眼就能看出是脚本客户端。
-// 版本号在 [MinVersion, MaxVersion] 闭区间内随机,仍保留一定的指纹多样性。
+// 保留 RandomUserAgent 用于其它场景(测试、临时抓包等)。生产路径走 FixedUserAgent。
 var userAgentSpecs = []userAgentSpec{
 	{
 		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36",
