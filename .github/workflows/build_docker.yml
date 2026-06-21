@@ -51,10 +51,11 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/s390x
           push: true
+          provenance: false
           tags: |
             ${{ env.GHCR_REPO }}:latest
             ${{ env.GHCR_REPO }}:${{ steps.version.outputs.version }}
             ${{ env.GHCR_REPO }}:${{ steps.version.outputs.tag }}
             ${{ env.GHCR_REPO }}:${{ steps.version.outputs.sha_short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
