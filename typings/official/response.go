@@ -24,8 +24,36 @@ type Choices struct {
 }
 
 type Delta struct {
-	Content string `json:"content,omitempty"`
-	Role    string `json:"role,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// ToolCallDelta 是 OpenAI 协议里 delta.tool_calls 元素的最小形态:
+// 流式响应中 name / arguments 按"先 name 后 arguments"分块发出。
+type ToolCallDelta struct {
+	Index    int             `json:"index"`
+	ID       string          `json:"id,omitempty"`
+	Type     string          `json:"type,omitempty"`
+	Function ToolCallFuncDelta `json:"function"`
+}
+
+type ToolCallFuncDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// ToolCall 是非流式响应 message.tool_calls 元素的完整形态。
+type ToolCall struct {
+	Index    int          `json:"index"`
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function ToolCallFunc `json:"function"`
+}
+
+type ToolCallFunc struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 func NewChatCompletionChunk(text string, model string) ChatCompletionChunk {
@@ -73,6 +101,30 @@ func StopChunkWithConversation(reason string, model string, conversationID strin
 	return chunk
 }
 
+// NewToolCallChunk 生成流式 tool_call 增量:OpenAI 协议要求按 index 顺序
+// 发出多块 —— name 段先到(携带 id/type/name),arguments 段后续追加。
+func NewToolCallChunk(model string, deltas ...ToolCallDelta) ChatCompletionChunk {
+	if model == "" {
+		model = "auto"
+	}
+	return ChatCompletionChunk{
+		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:  "chat.completion.chunk",
+		Created: 0,
+		Model:   model,
+		Choices: []Choices{{Index: 0, Delta: Delta{ToolCalls: deltas}}},
+	}
+}
+
+// NewToolCallStopChunk 生成 finish_reason=tool_calls 的尾块。
+func NewToolCallStopChunk(model string, conversationID string) ChatCompletionChunk {
+	chunk := StopChunk("tool_calls", model)
+	if conversationID != "" {
+		chunk.ConversationID = conversationID
+	}
+	return chunk
+}
+
 type ChatCompletion struct {
 	ID             string                   `json:"id"`
 	Object         string                   `json:"object"`
@@ -84,8 +136,9 @@ type ChatCompletion struct {
 	Sentinel       []map[string]interface{} `json:"sentinel,omitempty"`
 }
 type Msg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 type Choice struct {
 	Index        int         `json:"index"`
@@ -103,8 +156,23 @@ func NewChatCompletion(full_test string, input_tokens, output_tokens int, model 
 }
 
 func NewChatCompletionWithMetadata(full_test string, input_tokens, output_tokens int, model string, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
+	return NewChatCompletionWithToolCalls(full_test, nil, input_tokens, output_tokens, model, conversationID, sentinel)
+}
+
+// NewChatCompletionWithToolCalls 构造非流式响应,可同时携带文本与 tool_calls。
+// 当 toolCalls 非空时,Content 设为 nil(对齐 OpenAI:有 tool_calls 时 content 可为 null);
+// finish_reason 自动设为 "tool_calls"。
+func NewChatCompletionWithToolCalls(fullText string, toolCalls []ToolCall, inputTokens, outputTokens int, model, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
 	if model == "" {
 		model = "auto"
+	}
+	finishReason := "stop"
+	var contentPtr *string
+	if len(toolCalls) > 0 {
+		finishReason = "tool_calls"
+		fullText = ""
+	} else {
+		contentPtr = &fullText
 	}
 	return ChatCompletion{
 		ID:             "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
@@ -114,20 +182,29 @@ func NewChatCompletionWithMetadata(full_test string, input_tokens, output_tokens
 		ConversationID: conversationID,
 		Sentinel:       sentinel,
 		Usage: usage{
-			PromptTokens:     input_tokens,
-			CompletionTokens: output_tokens,
-			TotalTokens:      input_tokens + output_tokens,
+			PromptTokens:     inputTokens,
+			CompletionTokens: outputTokens,
+			TotalTokens:      inputTokens + outputTokens,
 		},
 		Choices: []Choice{
 			{
 				Message: Msg{
-					Content: full_test,
-					Role:    "assistant",
+					Content:   derefString(contentPtr),
+					Role:      "assistant",
+					ToolCalls: toolCalls,
 				},
-				Index: 0,
+				Index:        0,
+				FinishReason: finishReason,
 			},
 		},
 	}
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 type ResponsesResponse struct {

@@ -88,6 +88,96 @@ Thanks to all the great developers for their PR support, thank you.
 
 https://github.com/xqdoo00o/ChatGPT-to-API
 
+## Tool Calling (Function Calling)
+
+ChatGPT Web does **not** natively support OpenAI-style function calling. Aurora
+emulates it via a text protocol inspired by [chatgptproxy](https://github.com/acruz6421-bot/chatgptproxy):
+
+- The system prompt is augmented with `<tool_call>{"name": "...", "arguments": {...}}</tool_call>`
+  instructions describing the available tools.
+- Streaming responses are parsed live to extract `<tool_call>` blocks.
+- The response is converted to standard OpenAI format with `tool_calls[]` populated.
+
+### Enabling
+
+Send a standard OpenAI-format request that includes a `tools` field. Aurora detects
+the field and switches to tool-calling mode automatically.
+
+```bash
+curl --location 'http://your-server-ip:8080/v1/chat/completions' \
+--header 'Content-Type: application/json' \
+--data '{
+  "model": "auto",
+  "messages": [{"role": "user", "content": "List the files in the current directory."}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "Run a shell command",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {"type": "string", "description": "Shell command to execute"}
+        },
+        "required": ["command"]
+      }
+    }
+  }]
+}'
+```
+
+When the model wants to call a tool, Aurora returns:
+
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "index": 0,
+        "id": "call_xxxxxxxx",
+        "type": "function",
+        "function": {
+          "name": "bash",
+          "arguments": "{\"command\":\"ls -la\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}
+```
+
+Run the tool on your side, then send a follow-up request with the result:
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "List the files"},
+    {"role": "assistant", "tool_calls": [{"id": "call_xxxxxxxx", "type": "function", "function": {"name": "bash", "arguments": "{\"command\":\"ls -la\"}"}}]},
+    {"role": "tool", "tool_call_id": "call_xxxxxxxx", "name": "bash", "content": "file1.py\nfile2.py"}
+  ],
+  "tools": [...]
+}
+```
+
+The model will produce its final text answer on the next turn.
+
+### Configuration
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TOOL_CALLING_ENABLED` | `true` | Set to `false` to disable the emulation. Requests with `tools` will be passed through as plain chat. |
+| `REFUSAL_RETRIES` | `3` | Max retries when the model falls into the "isolated sandbox" refusal loop. Each retry appends a stronger prompt to force a `<tool_call>` emission. |
+| `DEBUG_TOOL_LOG` | _(empty)_ | Path to a file where each tool-parse attempt is logged (raw text + extracted calls). Set this for debugging only. |
+
+### Limitations
+
+- **Streaming**: tool-calling mode forces `stream=false` internally so that sandbox-rejection retries can buffer the full response. The returned `ChatCompletion` is non-streamed.
+- **No tool execution**: Aurora does **not** execute tools on your behalf. Your client must run the tool and feed the result back via `role: tool` messages.
+- **Tool schema**: Aurora only injects `name`, `description`, and `parameters` into the system prompt. Other OpenAI fields (`strict`, `cache_control`, etc.) are ignored.
+
 ## License
 
 MIT License

@@ -5,11 +5,13 @@ import (
 	"aurora/internal/tokens"
 	"aurora/typings/chatgpt"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,6 +374,228 @@ func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
 	for _, key := range []string{"openai-sentinel-chat-requirements-token", "openai-sentinel-proof-token", "openai-sentinel-turnstile-token"} {
 		if _, ok := client.headers[key]; ok {
 			t.Fatalf("prepare conduit unexpectedly includes %s", key)
+		}
+	}
+}
+
+// sequentialAuroraClient 是一个按调用顺序返回不同响应的 fake client,
+// 用于验证 PrepareConversationConduitFull 的三态时序和 token 链路。
+type sequentialAuroraClient struct {
+	mu        sync.Mutex
+	responses []*http.Response
+	requests  []capturedRequest
+}
+
+type capturedRequest struct {
+	url     string
+	headers httpclient.AuroraHeaders
+	body    string
+}
+
+func (s *sequentialAuroraClient) Request(method httpclient.HttpMethod, url string, headers httpclient.AuroraHeaders, cookies []*http.Cookie, body io.Reader) (*http.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := len(s.requests)
+	var bodyStr string
+	if body != nil {
+		data, _ := io.ReadAll(body)
+		bodyStr = string(data)
+	}
+	s.requests = append(s.requests, capturedRequest{url: url, headers: headers, body: bodyStr})
+	if idx >= len(s.responses) {
+		return nil, fmt.Errorf("unexpected request #%d: %s", idx, url)
+	}
+	return s.responses[idx], nil
+}
+
+func (s *sequentialAuroraClient) SetProxy(url string) error { return nil }
+func (s *sequentialAuroraClient) SetCookies(rawUrl string, cookies []*http.Cookie) {}
+func (s *sequentialAuroraClient) GetCookies(rawUrl string) []*http.Cookie {
+	// 返回一个 cf_clearance,让 ensureBootstrapped 直接走 fast-path
+	return []*http.Cookie{{Name: "cf_clearance", Value: "test-cf"}}
+}
+
+func (s *sequentialAuroraClient) requestBodies() []string {
+	out := make([]string, len(s.requests))
+	for i, r := range s.requests {
+		out[i] = r.body
+	}
+	return out
+}
+
+func (s *sequentialAuroraClient) requestHeaders() []httpclient.AuroraHeaders {
+	out := make([]httpclient.AuroraHeaders, len(s.requests))
+	for i, r := range s.requests {
+		out[i] = r.headers
+	}
+	return out
+}
+
+// TestPrepareConversationConduitFullChainsThreeStates 验证三态 prepare:
+// 1) 严格发起三次 HTTP 请求,顺序 none -> sent -> success
+// 2) 第 2/3 次的 X-Conduit-Token 头分别是上一次响应中的 token
+// 3) client_prepare_state 字段在三次请求中分别为 none / sent / success
+// 4) partial_query 仅在 sent / success 出现,none 阶段不带
+// 5) 返回值是第三次响应的 conduit_token
+func TestPrepareConversationConduitFullChainsThreeStates(t *testing.T) {
+	client := &sequentialAuroraClient{
+		responses: []*http.Response{
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"token-step-1"}`))},
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"token-step-2"}`))},
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"token-step-3"}`))},
+		},
+	}
+
+	msg := chatGPTRequestForTest()
+	msg.AddMessage("user", "hello world") // partial_query 取前 5 rune = "hello"
+
+	token, err := PrepareConversationConduitFull(client, msg, &tokens.Secret{}, "", "trace-id", nil)
+	if err != nil {
+		t.Fatalf("PrepareConversationConduitFull returned error: %v", err)
+	}
+
+	// (1) 调用次数
+	if got := len(client.requests); got != 3 {
+		t.Fatalf("request count = %d, want 3", got)
+	}
+
+	// (2) X-Conduit-Token 链路
+	headers := client.requestHeaders()
+	if got := headers[0]["X-Conduit-Token"]; got != "" {
+		t.Fatalf("step1 X-Conduit-Token = %q, want empty (首次无前驱 token)", got)
+	}
+	if got := headers[1]["X-Conduit-Token"]; got != "token-step-1" {
+		t.Fatalf("step2 X-Conduit-Token = %q, want token-step-1", got)
+	}
+	if got := headers[2]["X-Conduit-Token"]; got != "token-step-2" {
+		t.Fatalf("step3 X-Conduit-Token = %q, want token-step-2", got)
+	}
+
+	// (3) client_prepare_state 序列
+	bodies := client.requestBodies()
+	states := make([]string, 3)
+	hasPartial := make([]bool, 3)
+	for i, b := range bodies {
+		var p map[string]interface{}
+		if err := json.Unmarshal([]byte(b), &p); err != nil {
+			t.Fatalf("step%d body is invalid json: %v", i+1, err)
+		}
+		states[i], _ = p["client_prepare_state"].(string)
+		_, hasPartial[i] = p["partial_query"]
+	}
+	wantStates := []string{"none", "sent", "success"}
+	for i, want := range wantStates {
+		if states[i] != want {
+			t.Fatalf("step%d client_prepare_state = %q, want %q", i+1, states[i], want)
+		}
+	}
+	// (4) partial_query: none 阶段不带,sent/success 带
+	if hasPartial[0] {
+		t.Fatalf("step1 (none) should not carry partial_query, body=%s", bodies[0])
+	}
+	if !hasPartial[1] || !hasPartial[2] {
+		t.Fatalf("step2/3 should carry partial_query, has=[none=%v sent=%v success=%v]", hasPartial[0], hasPartial[1], hasPartial[2])
+	}
+
+	// (5) 返回值 = 第三次响应的 token
+	if token != "token-step-3" {
+		t.Fatalf("returned token = %q, want token-step-3", token)
+	}
+}
+
+// TestPrepareConversationConduitFullFailsFastOnStep1 验证第一步失败时
+// 直接返回带 "prepare(none) failed:" 前缀的错误,不会发起后续请求。
+func TestPrepareConversationConduitFullFailsFastOnStep1(t *testing.T) {
+	client := &sequentialAuroraClient{
+		responses: []*http.Response{
+			{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader(`{"error":"upstream"}`))},
+		},
+	}
+
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "prepare(none) failed") {
+		t.Fatalf("error = %q, want prefix prepare(none) failed", err.Error())
+	}
+	if got := len(client.requests); got != 1 {
+		t.Fatalf("request count = %d, want 1 (fail-fast on step1)", got)
+	}
+}
+
+// TestPrepareConversationConduitFullFailsFastOnStep2 验证第二步失败时报
+// "prepare(sent) failed",且只发起了 2 次请求。
+func TestPrepareConversationConduitFullFailsFastOnStep2(t *testing.T) {
+	client := &sequentialAuroraClient{
+		responses: []*http.Response{
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"token-step-1"}`))},
+			{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader(`{"error":"forbidden"}`))},
+		},
+	}
+
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "prepare(sent) failed") {
+		t.Fatalf("error = %q, want prefix prepare(sent) failed", err.Error())
+	}
+	if got := len(client.requests); got != 2 {
+		t.Fatalf("request count = %d, want 2 (fail-fast on step2)", got)
+	}
+}
+
+// TestPrepareConversationConduitFullFailsFastOnStep3 验证第三步失败时报
+// "prepare(success) failed",且发起了 3 次请求。
+func TestPrepareConversationConduitFullFailsFastOnStep3(t *testing.T) {
+	client := &sequentialAuroraClient{
+		responses: []*http.Response{
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"t1"}`))},
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"t2"}`))},
+			{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(`bad gateway`))},
+		},
+	}
+
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "prepare(success) failed") {
+		t.Fatalf("error = %q, want prefix prepare(success) failed", err.Error())
+	}
+	if got := len(client.requests); got != 3 {
+		t.Fatalf("request count = %d, want 3 (fail-fast on step3)", got)
+	}
+}
+
+// TestPrepareConversationConduitFullPropagatesState 验证 state.DeviceID /
+// SessionID 在三次请求中保持一致(整段对话使用同一对 fingerprint ID)。
+func TestPrepareConversationConduitFullPropagatesState(t *testing.T) {
+	client := &sequentialAuroraClient{
+		responses: []*http.Response{
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"t1"}`))},
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"t2"}`))},
+			{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"conduit_token":"t3"}`))},
+		},
+	}
+	state := NewChatClientState()
+	state.DeviceID = "device-3state"
+	state.SessionID = "session-3state"
+	state.ParentMessageID = "parent-3state"
+
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", state)
+	if err != nil {
+		t.Fatalf("PrepareConversationConduitFull returned error: %v", err)
+	}
+
+	headers := client.requestHeaders()
+	for i, h := range headers {
+		if got := h["Oai-Device-Id"]; got != "device-3state" {
+			t.Fatalf("step%d Oai-Device-Id = %q, want device-3state", i+1, got)
+		}
+		if got := h["Oai-Session-Id"]; got != "session-3state" {
+			t.Fatalf("step%d Oai-Session-Id = %q, want session-3state", i+1, got)
 		}
 	}
 }

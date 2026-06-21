@@ -1132,6 +1132,9 @@ type HandlerResult struct {
 	GeneratedImageIDs []string
 	StopSent          bool
 	Continue          *ContinueInfo
+	// ToolCalls 在 Tools 模式启用时携带从 <tool_call>{...}</tool_call> 协议
+	// 抽取出的工具调用列表。当 len(ToolCalls) > 0 时,FinishReason 为 "tool_calls"。
+	ToolCalls []official_types.ToolCall
 }
 
 type conversationPatchState struct {
@@ -2151,6 +2154,12 @@ type HandlerDetailedOptions struct {
 	ClientState      *ChatClientState
 	ArtifactDelivery string
 	ProxyURL         string
+	// Tools 启用工具调用解析:设置后,HandlerDetailedWithOptions 会把
+	// 累积的 text 喂给 toolcall.Parser,把 <tool_call>{...}</tool_call>
+	// 切成 OpenAI delta.tool_calls 流式 chunk,并在 HandlerResult.ToolCalls
+	// 中返回完整调用列表(用于多轮工具调用循环)。
+	// 为空时保持原行为不变(向后兼容)。
+	Tools []official_types.Tool
 }
 
 func HandlerDetailedWithWebsocket(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string, wsConn *websocket.Conn) HandlerResult {

@@ -62,6 +62,127 @@ curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
 }'
 ```
 
+## 工具调用 (Tool Calling)
+
+ChatGPT Web 不原生支持 OpenAI 的 function calling。Aurora 通过文本协议 `<tool_call>{...}</tool_call>` 模拟该能力：请求里声明 `tools` 字段时，Aurora 自动在 system prompt 中注入调用约定，解析模型输出中的 `<tool_call>` 块并转换为标准 OpenAI 格式的 `tool_calls`。
+
+### 声明工具并发起调用
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
+--data '{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": "列出当前目录的文件"}
+  ],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "执行 shell 命令并返回输出",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {"type": "string", "description": "要执行的命令"}
+        },
+        "required": ["command"]
+      }
+    }
+  }]
+}'
+```
+
+当模型决定调用工具时,Aurora 返回的响应 `finish_reason` 为 `tool_calls`,并在 `choices[0].message.tool_calls` 中列出调用：
+
+```json
+{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "index": 0,
+        "id": "call_a1b2c3d4",
+        "type": "function",
+        "function": {
+          "name": "bash",
+          "arguments": "{\"command\":\"ls -la\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }],
+  "usage": {"prompt_tokens": 123, "completion_tokens": 18, "total_tokens": 141}
+}
+```
+
+### 把工具执行结果回传给模型
+
+由客户端(本服务**不**执行工具)执行 `bash` 命令,得到结果,再发起新一轮请求,把结果以 `role: tool` 消息回传:
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/chat/completions' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
+--data '{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": "列出当前目录的文件"},
+    {"role": "assistant", "content": null, "tool_calls": [{
+      "id": "call_a1b2c3d4",
+      "type": "function",
+      "function": {"name": "bash", "arguments": "{\"command\":\"ls -la\"}"}
+    }]},
+    {"role": "tool", "tool_call_id": "call_a1b2c3d4", "name": "bash", "content": "README.md\nmain.go\n"}
+  ],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "执行 shell 命令并返回输出",
+      "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}
+    }
+  }]
+}'
+```
+
+模型在收到工具结果后会给出最终文字答案,`finish_reason` 为 `stop`。
+
+### tool_choice
+
+通过 `tool_choice` 字段控制工具调用行为,接受以下值:
+
+- `"auto"`(默认):模型自行决定是否调用
+- `"none"`:禁止调用工具
+- `"any"`:强制至少调用一个工具
+- `{"type":"function","function":{"name":"bash"}}`:强制调用指定工具
+
+```json
+{
+  "tool_choice": {"type": "function", "function": {"name": "bash"}},
+  "tools": [...]
+}
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `TOOL_CALLING_ENABLED` | `true` | 设为 `false` 时忽略请求中的 `tools` 字段,关闭模拟 |
+| `REFUSAL_RETRIES` | `3` | 模型陷入"sandbox 隔离"拒绝循环时的最大重试次数 |
+| `DEBUG_TOOL_LOG` | _(空)_ | 设为文件路径,记录每次工具解析的输入文本与解析结果(调试用) |
+
+### 限制
+
+- **强制非流式**:工具调用模式会强制 `stream=false`(需要完整响应才能识别 sandbox 拒绝并重试)。客户端即使传 `stream: true` 也只会拿到单次 ChatCompletion。
+- **不在服务端执行工具**:Aurora 只做协议转换,工具的实际执行完全由客户端负责。
+- **仅解析首个拒绝**:当前实现不会处理"工具执行失败 → 重试"循环;若需重试,由客户端再次发起完整对话。
+
 ## Responses API
 
 ```bash

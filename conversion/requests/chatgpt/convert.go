@@ -3,6 +3,7 @@ package chatgpt
 import (
 	backendchatgpt "aurora/internal/chatgpt"
 	"aurora/internal/tokens"
+	"aurora/internal/toolcall"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
 	"aurora/httpclient"
@@ -22,17 +23,77 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 	}
 	chatgpt_request.Model = model
 
+	// 工具调用协议(可选,默认不启用):当 api_request.Tools 非空时
+	// 在 system 头部注入 BuildInstructions,并在末尾追加 FinalNudge
+	// (强制模型立刻发起 <tool_call>)。
+	toolsBlock := toolcall.BuildInstructions(api_request.Tools, api_request.ToolChoice)
+	hasTools := toolsBlock != ""
+
+	// 收集所有 system 消息(用于 system 头部聚合)
+	var systemMessages []string
+	if hasTools {
+		systemMessages = append(systemMessages, toolsBlock)
+	}
 	for _, apiMessage := range api_request.Messages {
 		if apiMessage.Role == "system" {
-			apiMessage.Role = "critic"
+			systemMessages = append(systemMessages, apiMessage.Text())
+		}
+	}
+
+	if len(systemMessages) > 0 {
+		// 拼成单个 system 文本,作为首条 system 消息
+		chatgpt_request.AddMessage("system", strings.Join(systemMessages, "\n\n"))
+	}
+
+	for _, apiMessage := range api_request.Messages {
+		if apiMessage.Role == "system" {
+			continue // 已合并到头部
+		}
+		// 工具结果消息:role=tool/function
+		if apiMessage.IsToolResult() {
+			toolName := apiMessage.Name
+			if toolName == "" {
+				toolName = "tool"
+			}
+			chatgpt_request.AddToolMessage(toolName, apiMessage.Text())
+			continue
+		}
+		// 转换 role:critic 是 ChatGPT 内部"系统级"角色(由 aurora 在 system 阶段处理)
+		role := apiMessage.Role
+		if role == "system" {
+			role = "critic"
+		}
+		// assistant 消息带 tool_calls:把历史 tool_calls 反序列化为 <tool_call> 标签追加到 content
+		if role == "assistant" && apiMessage.HasToolCalls() {
+			text := apiMessage.Text()
+			text += toolcall.SerializeForHistory(apiMessage.ToolCalls)
+			parts, metadata := buildMessageParts(official_types.APIMessage{
+				Role:    role,
+				Content: official_types.MessageContent{TextValue: text},
+			}, client, secret, proxy)
+			if len(metadata) > 0 {
+				chatgpt_request.AddMultimodalMessage(role, parts, metadata)
+			} else {
+				chatgpt_request.AddMessage(role, text)
+			}
+			continue
 		}
 		parts, metadata := buildMessageParts(apiMessage, client, secret, proxy)
 		if len(metadata) > 0 {
-			chatgpt_request.AddMultimodalMessage(apiMessage.Role, parts, metadata)
+			chatgpt_request.AddMultimodalMessage(role, parts, metadata)
 			continue
 		}
-		chatgpt_request.AddMessage(apiMessage.Role, apiMessage.Text())
+		chatgpt_request.AddMessage(role, apiMessage.Text())
 	}
+
+	// 末尾追加 FinalNudge(取决于最后一条消息的角色),仅在启用工具调用时
+	if hasTools {
+		nudge := toolcall.FinalNudge(api_request.Tools, api_request.Messages)
+		if nudge != "" {
+			chatgpt_request.AddMessage("user", nudge)
+		}
+	}
+
 	return chatgpt_request
 }
 

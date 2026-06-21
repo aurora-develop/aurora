@@ -11,12 +11,114 @@ type APIRequest struct {
 	Stream           bool         `json:"stream"`
 	Model            string       `json:"model"`
 	ArtifactDelivery string       `json:"artifact_delivery,omitempty"`
+	// 工具调用协议(对齐 OpenAI):
+	// - Tools:      客户端声明的可调用工具列表
+	// - ToolChoice: 强制 / 允许 / 禁止模型调用工具
+	// - ParallelToolCalls: 是否允许同一轮发起多个 tool_call(默认 true)
+	Tools              []Tool      `json:"tools,omitempty"`
+	ToolChoice         *ToolChoice `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool       `json:"parallel_tool_calls,omitempty"`
+}
+
+// Tool 对齐 OpenAI 的 tools[*] 项。
+// Type 固定为 "function";Function 描述具体函数。
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction 描述一个函数工具的 name / description / JSON schema 参数。
+type ToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	// Strict / Cache 暂不实现 —— OpenAI 协议可选字段,ChatGPT Web 不消费
+}
+
+// ToolChoice 取值:
+//   - nil       : 模型自行决定
+//   - "auto"    : 模型自行决定(显式)
+//   - "none"    : 禁止调用工具
+//   - "any"     : 强制至少调用一个
+//   - &ToolChoice{Type: "function", Function: {Name: "X"}} : 强制调用 X
+type ToolChoice struct {
+	Type     string             `json:"type"`
+	Function *ToolChoiceFunction `json:"function,omitempty"`
+}
+
+type ToolChoiceFunction struct {
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON 同时接受字符串("auto"/"none"/"any")和对象两种形态,
+// 兼容 OpenAI 协议里 tool_choice 字段的字符串简写。
+func (t *ToolChoice) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		t.Type = s
+		t.Function = nil
+		return nil
+	}
+	type alias ToolChoice
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*t = ToolChoice(a)
+	return nil
+}
+
+// ForcedFunctionName 当 tool_choice 强制某个具名工具时返回它的名字;
+// 否则返回 ""(auto / none / any / nil)。
+func (t *ToolChoice) ForcedFunctionName() string {
+	if t == nil {
+		return ""
+	}
+	if t.Type == "function" && t.Function != nil {
+		return t.Function.Name
+	}
+	return ""
+}
+
+// IsForcedNone 报告 tool_choice 是否显式禁止调用工具。
+func (t *ToolChoice) IsForcedNone() bool {
+	return t != nil && t.Type == "none"
+}
+
+// ToolCallRef 出现在 assistant 历史消息的 tool_calls 字段里,
+// 用于多轮对话时回放工具调用上下文。
+type ToolCallRef struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type APIMessage struct {
 	Role        string           `json:"role"`
 	Content     MessageContent   `json:"content"`
 	Attachments []FileAttachment `json:"attachments,omitempty"`
+	// ToolCalls 在 role=assistant 的消息中携带该轮发起的工具调用列表。
+	// 用于多轮对话时把模型"之前"发起的调用回放进 prompt。
+	ToolCalls []ToolCallRef `json:"tool_calls,omitempty"`
+	// ToolCallID 在 role=tool 的消息中携带对应的 tool_call.id,
+	// 配合 Content 一起作为工具执行结果回传。
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	// Name 在 role=tool 时携带工具名(some clients use this).
+	Name string `json:"name,omitempty"`
+}
+
+// HasToolCalls 报告该消息是否带有 tool_calls(仅 assistant 消息会用到)。
+func (m APIMessage) HasToolCalls() bool {
+	return len(m.ToolCalls) > 0
+}
+
+// IsToolResult 报告该消息是否是 tool 执行结果(role=tool / function)。
+func (m APIMessage) IsToolResult() bool {
+	return m.Role == "tool" || m.Role == "function"
 }
 
 type MessageContent struct {

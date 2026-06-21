@@ -104,6 +104,14 @@ func (c *ChatGPTRequest) AddAssistantMessage(input string) {
 	c.Messages = append(c.Messages, msg)
 }
 
+// AddToolMessage 追加一个 role=tool 的消息,把客户端执行工具的结果回传给上游。
+// toolName 形如 "bash";result 是工具返回的字符串(可能含换行)。
+func (c *ChatGPTRequest) AddToolMessage(toolName, result string) {
+	// 包成 "Tool (Resultado da ferramenta bash): ..." 文本格式以兼容 chatgptproxy 协议
+	text := "Tool (Resultado da ferramenta " + toolName + "): " + result
+	c.AddMessage("tool", text)
+}
+
 func isStringPart(part interface{}) bool {
 	_, ok := part.(string)
 	return ok
