@@ -458,6 +458,9 @@ type ImageGenerationRequest struct {
 	Size           string `json:"size"`
 	Quality        string `json:"quality"`
 	ResponseFormat string `json:"response_format"`
+	// Stream 非 OpenAI 官方字段,但很多客户端会用它来请求增量输出。
+	// 启用时,服务端以 SSE(image.generation.chunk)形式分片返回每张图片。
+	Stream bool `json:"stream,omitempty"`
 }
 
 func (r ImageGenerationRequest) ToAPIRequest() APIRequest {
@@ -479,8 +482,24 @@ type ImageEditRequest struct {
 	Size           string            `json:"size"`
 	ResponseFormat string            `json:"response_format"`
 	Images         []ImageEditSource `json:"images,omitempty"`
+	// Stream 非 OpenAI 官方字段,启用时按 SSE 流式返回。
+	Stream bool `json:"stream,omitempty"`
 }
 
 type ImageEditSource struct {
 	ImageURL string `json:"image_url"`
+}
+
+// ImageVariationRequest 对齐 OpenAI 官方 /v1/images/variations 请求:
+// 仅基于用户提供的源图生成相似变体,prompt 可选;
+// Images 字段沿用 ImageEditSource,语义上 image_url 指向源图(data: 或 http(s))。
+type ImageVariationRequest struct {
+	Prompt         string            `json:"prompt,omitempty"`
+	Model          string            `json:"model"`
+	N              int               `json:"n"`
+	Size           string            `json:"size"`
+	ResponseFormat string            `json:"response_format"`
+	Images         []ImageEditSource `json:"images,omitempty"`
+	// Stream 非 OpenAI 官方字段,启用时按 SSE 流式返回。
+	Stream bool `json:"stream,omitempty"`
 }

@@ -342,3 +342,25 @@ func NewImageGenerationResponse(data []ImageGenerationData) ImageGenerationRespo
 		Data:    data,
 	}
 }
+
+// ImageEditResponse 与 ImageGenerationResponse 同构,
+// 用于 /v1/images/edits 接口,保持 OpenAI 官方响应兼容。
+type ImageEditResponse = ImageGenerationResponse
+
+func NewImageEditResponse(data []ImageGenerationData) ImageEditResponse {
+	return ImageEditResponse{
+		Created: 0,
+		Data:    data,
+	}
+}
+
+// ImageVariationResponse 与 ImageGenerationResponse 同构,
+// 用于 /v1/images/variations 接口,保持 OpenAI 官方响应兼容。
+type ImageVariationResponse = ImageGenerationResponse
+
+func NewImageVariationResponse(data []ImageGenerationData) ImageVariationResponse {
+	return ImageVariationResponse{
+		Created: 0,
+		Data:    data,
+	}
+}

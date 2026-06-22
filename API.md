@@ -251,6 +251,90 @@ curl --location 'http://你的服务器ip:8080/v1/images/generations' \
 
 如需返回 base64，将 `response_format` 改为 `b64_json`。如果不传 `response_format`，默认返回 `b64_json`。
 
+### 流式返回 (SSE)
+
+`/v1/images/generations` 和 `/v1/images/edits` 均支持 SSE 流式返回。开启方式（任一即可）：
+
+- JSON body 传 `"stream": true`
+- 查询参数 `?stream=true`
+- multipart/form-data 传 `stream=true`
+
+返回的事件序列：
+
+```
+event: image.generation.chunk
+data: {"object":"image.generation.chunk","index":0,"total":1,"progress_text":"Generating image 1/1 ..."}
+
+event: image.generation.result
+data: {"object":"image.generation.result","index":0,"b64_json":"..."}
+
+event: image.generation.completed
+data: {"object":"image.generation.completed","data":[{...}]}
+
+data: [DONE]
+```
+
+错误时返回 `image.generation.error` 事件并立即以 `data: [DONE]` 结束流。
+
+## 改图 / 图生图
+
+`/v1/images/edits` 同时承担两个能力：
+
+- **改图（image edit）**：传 `prompt` + 源图，按 prompt 指示修改源图。
+- **图生图（variation）**：不传 `prompt` 时，服务自动注入默认指令 `Generate a variation of the provided image(s). Return only the generated image, not a text description.`，生成与源图相似的新图。
+
+源图可以传多张，模型会综合多张参考图理解后再生成。源图的提供方式：
+
+- `multipart/form-data`：`image` / `image[]` / `images` / `images[]` / `image_url`（文本字段，URL 或 `data:` URL）
+- `application/json`：`image_url` 字符串 / `{ "url": "..." }` 对象；`images` 数组；`image` 字段；以及 **Responses API 风格** 的 `input` / `content` / `messages`，里面含 `type: "input_image"` + `image_url`，`type: "input_text"` + `text` 会被合并成 prompt
+
+### 改图示例
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/images/edits' \
+--header 'Authorization: Bearer access_token' \
+--form 'prompt="把猫改成柴犬"' \
+--form 'model="gpt-image-2"' \
+--form 'n=1' \
+--form 'response_format="url"' \
+--form 'image=@"/path/to/cat.png"'
+```
+
+### 图生图（变体）示例
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/images/edits' \
+--header 'Authorization: Bearer access_token' \
+--form 'n=2' \
+--form 'response_format="b64_json"' \
+--form 'image=@"/path/to/source.png"'
+```
+
+### Responses API 风格：多张参考图
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/images/edits' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer access_token' \
+--data '{
+  "model": "gpt-image-2",
+  "n": 1,
+  "response_format": "url",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "input_text", "text": "把第一张图的人物放进第二张图的场景里"},
+        {"type": "input_image", "image_url": "https://example.com/character.png"},
+        {"type": "input_image", "image_url": "https://example.com/scene.png"}
+      ]
+    }
+  ]
+}'
+```
+
+返回结构同 `/v1/images/generations`：`{ "created": 0, "data": [{ "b64_json": "...", "revised_prompt": "..." }] }`，如使用 `response_format: "url"` 则 `b64_json` 替换为 `url`。
+
 ## TTS 语音合成
 
 ```bash

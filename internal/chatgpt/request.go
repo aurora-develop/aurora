@@ -2140,6 +2140,142 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, secre
 	return results, upstreamText, nil
 }
 
+// ImageEditReference 表示已经上传到 ChatGPT 文件服务的一张源图,
+// 用于构造 /f/conversation 时的 image_asset_pointer 部件。
+type ImageEditReference struct {
+	FileID   string
+	Width    int
+	Height   int
+	Size     int
+	MimeType string
+	Filename string
+}
+
+// GeneratePictureConversationImagesWithReferences 在原有文生图流程基础上支持
+// 携带已上传的源图(image_asset_pointer + attachments)进入对话,
+// 用于实现 OpenAI 兼容的 /v1/images/edits 和 /v1/images/variations。
+// 当 references 为空时,行为等价于 GeneratePictureConversationImages。
+func GeneratePictureConversationImagesWithReferences(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model, proxy string, references []ImageEditReference) ([]ImageGenerationResult, string, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	state := NewChatClientState()
+	conduitToken, err := prepareImageConversation(client, secret, turnStile, prompt, model, state)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// 组装 message.parts:每个 reference -> image_asset_pointer,然后追加 prompt 文本
+	parts := make([]interface{}, 0, len(references)+1)
+	attachments := make([]map[string]interface{}, 0, len(references))
+	for _, ref := range references {
+		if ref.FileID == "" {
+			continue
+		}
+		part := map[string]interface{}{
+			"content_type":  "image_asset_pointer",
+			"asset_pointer": "file-service://" + ref.FileID,
+		}
+		if ref.Width > 0 {
+			part["width"] = ref.Width
+		}
+		if ref.Height > 0 {
+			part["height"] = ref.Height
+		}
+		if ref.Size > 0 {
+			part["size_bytes"] = ref.Size
+		}
+		parts = append(parts, part)
+
+		attachment := map[string]interface{}{
+			"id":     ref.FileID,
+			"size":   ref.Size,
+			"name":   ref.Filename,
+			"mime":   ref.MimeType,
+			"mimeType": ref.MimeType,
+			"source": "library",
+		}
+		if ref.Width > 0 {
+			attachment["width"] = ref.Width
+		}
+		if ref.Height > 0 {
+			attachment["height"] = ref.Height
+		}
+		attachments = append(attachments, attachment)
+	}
+	if prompt != "" {
+		parts = append(parts, prompt)
+	}
+
+	var content map[string]interface{}
+	if len(parts) == 0 {
+		content = map[string]interface{}{"content_type": "text", "parts": []string{prompt}}
+	} else {
+		content = map[string]interface{}{"content_type": "multimodal_text", "parts": parts}
+	}
+
+	metadata := map[string]interface{}{
+		"developer_mode_connector_ids": []interface{}{},
+		"selected_github_repos":        []interface{}{},
+		"selected_all_github_repos":    false,
+		"system_hints":                 []string{"picture_v2"},
+		"serialization_metadata":       map[string]interface{}{"custom_symbol_offsets": []interface{}{}},
+	}
+	if len(attachments) > 0 {
+		metadata["attachments"] = attachments
+	}
+
+	payload := map[string]interface{}{
+		"action": "next",
+		"messages": []map[string]interface{}{
+			{
+				"id":          uuid.NewString(),
+				"author":      map[string]string{"role": "user"},
+				"create_time": time.Now().Unix(),
+				"content":     content,
+				"metadata":    metadata,
+			},
+		},
+		"parent_message_id":                    state.ParentMessageID,
+		"model":                                imageModelSlug(model),
+		"client_prepare_state":                 "sent",
+		"timezone_offset_min":                  420,
+		"timezone":                             "America/Los_Angeles",
+		"conversation_mode":                    map[string]string{"kind": "primary_assistant"},
+		"enable_message_followups":             true,
+		"system_hints":                         []string{"picture_v2"},
+		"supports_buffering":                   true,
+		"supported_encodings":                  []string{"v1"},
+		"client_contextual_info":               state.ClientContextualInfo(),
+		"paragen_cot_summary_display_override": "allow",
+		"force_parallel_switch":                "auto",
+		"thinking_effort":                      "standard",
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+
+	response, err := client.Request(http.MethodPost, BaseURL+"/f/conversation", imageConversationHeadersWithState(secret, turnStile, conduitToken, "text/event-stream", state), nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		return nil, "", fmt.Errorf("image conversation failed: %s", string(body))
+	}
+	results, conversationID, upstreamText, err := CollectImageResults(response, client, secret)
+	if err != nil {
+		return results, upstreamText, err
+	}
+	results, err = PollImageResults(client, secret, conversationID, results)
+	if err != nil {
+		return results, upstreamText, err
+	}
+	return results, upstreamText, nil
+}
+
 func Handler(c *gin.Context, response *http.Response, client httpclient.AuroraHttpClient, secret *tokens.Secret, uuid string, translated_request chatgpt_types.ChatGPTRequest, stream bool, model string) (string, *ContinueInfo) {
 	result := HandlerDetailed(c, response, client, secret, uuid, translated_request, stream, model)
 	return result.Text, result.Continue
