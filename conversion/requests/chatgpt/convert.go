@@ -8,6 +8,7 @@ import (
 	official_types "aurora/typings/official"
 	"aurora/httpclient"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -23,6 +24,58 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 	}
 	chatgpt_request.Model = model
 
+	// ── 映射 OpenAI 标准生成参数到 ChatGPT ──
+
+	// reasoning_effort → ThinkingEffort (直接映射)
+	effort := strings.ToLower(strings.TrimSpace(api_request.ReasoningEffort))
+	if effort == "" {
+		// 兼容 Responses API reasoning.effort
+		effort = "standard"
+	}
+	switch effort {
+	case "low":
+		chatgpt_request.ThinkingEffort = "low"
+	case "medium", "standard":
+		chatgpt_request.ThinkingEffort = "standard"
+	case "high":
+		chatgpt_request.ThinkingEffort = "high"
+	default:
+		chatgpt_request.ThinkingEffort = "standard"
+	}
+
+	// response_format: 通过 system prompt 注入指令
+	var responseFormatHint string
+	if api_request.ResponseFormat != nil {
+		switch api_request.ResponseFormat.Type {
+		case "json_object":
+			responseFormatHint = "You must respond in valid JSON format only. Do not include any text outside the JSON object."
+		case "json_schema":
+			responseFormatHint = "You must respond in valid JSON format only, following the specified schema."
+		}
+	}
+
+	// stop: 通过 system prompt 注入停止条件
+	var stopHint string
+	if api_request.Stop != nil && len(api_request.Stop.Values) > 0 {
+		for i, s := range api_request.Stop.Values {
+			if s == "" {
+				continue
+			}
+			if i > 0 {
+				stopHint += " or "
+			}
+			stopHint += fmt.Sprintf("stop when you see: %q", s)
+		}
+	}
+
+	// max_tokens / max_completion_tokens: 注入 token 限制提示
+	var maxTokenHint string
+	if api_request.MaxCompletionTokens != nil && *api_request.MaxCompletionTokens > 0 {
+		maxTokenHint = fmt.Sprintf("Limit your response to at most %d tokens.", *api_request.MaxCompletionTokens)
+	} else if api_request.MaxTokens != nil && *api_request.MaxTokens > 0 {
+		maxTokenHint = fmt.Sprintf("Limit your response to at most %d tokens.", *api_request.MaxTokens)
+	}
+
 	// 工具调用协议(可选,默认不启用):当 api_request.Tools 非空时
 	// 在 system 头部注入 BuildInstructions,并在末尾追加 FinalNudge
 	// (强制模型立刻发起 <tool_call>)。
@@ -33,6 +86,15 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 	var systemMessages []string
 	if hasTools {
 		systemMessages = append(systemMessages, toolsBlock)
+	}
+	if responseFormatHint != "" {
+		systemMessages = append(systemMessages, responseFormatHint)
+	}
+	if stopHint != "" {
+		systemMessages = append(systemMessages, stopHint)
+	}
+	if maxTokenHint != "" {
+		systemMessages = append(systemMessages, maxTokenHint)
 	}
 	for _, apiMessage := range api_request.Messages {
 		if apiMessage.Role == "system" {

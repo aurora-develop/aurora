@@ -18,6 +18,58 @@ type APIRequest struct {
 	Tools              []Tool      `json:"tools,omitempty"`
 	ToolChoice         *ToolChoice `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool       `json:"parallel_tool_calls,omitempty"`
+
+	// ── 标准生成参数 ──
+	Temperature         *float64   `json:"temperature,omitempty"`
+	TopP                *float64   `json:"top_p,omitempty"`
+	N                   *int       `json:"n,omitempty"`
+	Stop                *StopParam `json:"stop,omitempty"`
+	MaxTokens           *int       `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int       `json:"max_completion_tokens,omitempty"`
+	PresencePenalty     *float64   `json:"presence_penalty,omitempty"`
+	FrequencyPenalty    *float64   `json:"frequency_penalty,omitempty"`
+	LogitBias           map[int]int `json:"logit_bias,omitempty"`
+	Seed                *int       `json:"seed,omitempty"`
+
+	// ── 扩展参数 ──
+	ResponseFormat  *ResponseFormat  `json:"response_format,omitempty"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+	StreamOptions   *StreamOptions   `json:"stream_options,omitempty"`
+	User            string           `json:"user,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	Store           *bool            `json:"store,omitempty"`
+}
+
+// StopParam 接受 string 或 []string。
+// OpenAI 协议: stop 可以是单个字符串或最多 4 个字符串的数组。
+type StopParam struct {
+	Values []string
+}
+
+// UnmarshalJSON 同时接受 string 和 []string 两种形态。
+func (s *StopParam) UnmarshalJSON(data []byte) error {
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		s.Values = []string{single}
+		return nil
+	}
+	var multi []string
+	if err := json.Unmarshal(data, &multi); err == nil {
+		s.Values = multi
+		return nil
+	}
+	return fmt.Errorf("stop must be a string or array of strings")
+}
+
+// ResponseFormat 对齐 OpenAI response_format 参数。
+type ResponseFormat struct {
+	Type       string          `json:"type"` // "text" | "json_object" | "json_schema"
+	JSONSchema json.RawMessage `json:"json_schema,omitempty"`
+}
+
+// StreamOptions 对齐 OpenAI stream_options 参数。
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 // Tool 对齐 OpenAI 的 tools[*] 项。
@@ -317,6 +369,28 @@ type ResponsesAPIRequest struct {
 	Input        json.RawMessage `json:"input"`
 	Instructions json.RawMessage `json:"instructions"`
 	Stream       bool            `json:"stream"`
+
+	// 标准生成参数
+	Temperature     *float64 `json:"temperature,omitempty"`
+	TopP            *float64 `json:"top_p,omitempty"`
+	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
+
+	// 扩展参数
+	Text      *ResponseFormatText `json:"text,omitempty"`
+	Reasoning *ReasoningConfig    `json:"reasoning,omitempty"`
+	Store     *bool               `json:"store,omitempty"`
+	User      string              `json:"user,omitempty"`
+	Metadata  map[string]string   `json:"metadata,omitempty"`
+}
+
+// ResponseFormatText 对应 Responses API 的 text.query.format。
+type ResponseFormatText struct {
+	Format *ResponseFormat `json:"format,omitempty"`
+}
+
+// ReasoningConfig 对应 Responses API 的 reasoning 参数。
+type ReasoningConfig struct {
+	Effort string `json:"effort,omitempty"` // "low" | "medium" | "high"
 }
 
 type responseInputMessage struct {
@@ -333,6 +407,25 @@ func (r ResponsesAPIRequest) ToAPIRequest() (APIRequest, error) {
 	apiRequest := APIRequest{
 		Model:  r.Model,
 		Stream: r.Stream,
+	}
+
+	// 透传 Responses 参数到 APIRequest
+	apiRequest.Temperature = r.Temperature
+	apiRequest.TopP = r.TopP
+	apiRequest.MaxTokens = r.MaxOutputTokens
+	apiRequest.MaxCompletionTokens = r.MaxOutputTokens
+	apiRequest.Store = r.Store
+	apiRequest.User = r.User
+	apiRequest.Metadata = r.Metadata
+
+	// reasoning.effort → reasoning_effort
+	if r.Reasoning != nil {
+		apiRequest.ReasoningEffort = r.Reasoning.Effort
+	}
+
+	// text.query.format → response_format
+	if r.Text != nil && r.Text.Format != nil {
+		apiRequest.ResponseFormat = r.Text.Format
 	}
 
 	if instruction := rawText(r.Instructions); instruction != "" {
@@ -502,4 +595,25 @@ type ImageVariationRequest struct {
 	Images         []ImageEditSource `json:"images,omitempty"`
 	// Stream 非 OpenAI 官方字段,启用时按 SSE 流式返回。
 	Stream bool `json:"stream,omitempty"`
+}
+
+// TranscriptionsRequest 对齐 OpenAI 官方 /v1/audio/transcriptions 请求。
+// multipart/form-data 形态。
+type TranscriptionsRequest struct {
+	File           string  `json:"file"`                      // 文件路径(框架处理)
+	Model          string  `json:"model"`                     // 模型名(whisper-1 / gpt-4o-transcribe)
+	Language       string  `json:"language,omitempty"`        // 语言 ISO 代码
+	Prompt         string  `json:"prompt,omitempty"`          // 提示文本
+	ResponseFormat string  `json:"response_format,omitempty"` // json / text / verbose_json / srt / vtt
+	Temperature    float64 `json:"temperature,omitempty"`     // 采样温度
+}
+
+// TranslationsRequest 对齐 OpenAI 官方 /v1/audio/translations 请求。
+// 与 TranscriptionsRequest 同结构,但语义上翻译为英文。
+type TranslationsRequest struct {
+	File           string  `json:"file"`
+	Model          string  `json:"model"`
+	Prompt         string  `json:"prompt,omitempty"`
+	ResponseFormat string  `json:"response_format,omitempty"` // json / text / verbose_json / srt / vtt
+	Temperature    float64 `json:"temperature,omitempty"`
 }

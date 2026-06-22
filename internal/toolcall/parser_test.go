@@ -190,7 +190,7 @@ func TestFixLoneBackslashesRegex(t *testing.T) {
 
 func TestRobustJSONRepairsWindowsPath(t *testing.T) {
 	// Go json 接受 \f 解析为 form-feed 字符(0x0C),所以最终 path 会损失 "f" 字母
-	// —— 这是 chatgptproxy 同源行为:仅修复 *真正* 会被 Go json 拒绝的 \s 等。
+	// —— 这是  同源行为:仅修复 *真正* 会被 Go json 拒绝的 \s 等。
 	in := `{"filePath":"G:\src\file.py","ok":true}`
 	v, ok := robustJSON(in)
 	if !ok {

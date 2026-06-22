@@ -2,7 +2,7 @@
 
 [English README](https://github.com/aurora-develop/aurora/blob/main/README_EN.md)
 
-Aurora 将 ChatGPT Web 后端能力转换为类 OpenAI API，支持聊天、Responses、文件问答、图片生成、TTS、模型列表，以及通过 `refresh_token` / `session_token` 获取可用的 ChatGPT `access_token`。
+Aurora 将 ChatGPT Web 后端能力转换为类 OpenAI API，支持聊天、Responses、文件问答、图片生成、图片变体、语音转文字、文字转语音、模型列表，以及通过 `refresh_token` / `session_token` 获取可用的 ChatGPT `access_token`。
 
 ## 接口文档
 
@@ -10,11 +10,14 @@ Aurora 将 ChatGPT Web 后端能力转换为类 OpenAI API，支持聊天、Resp
 
 ## 功能
 
-- OpenAI 风格的 `/v1/chat/completions`，支持流式和非流式返回。
-- OpenAI 风格的 `/v1/responses`，支持字符串输入、消息数组、`instructions` 和流式事件。
+- OpenAI 风格的 `/v1/chat/completions`，支持流式和非流式返回，支持 `temperature`/`top_p`/`max_tokens`/`stop`/`reasoning_effort`/`response_format`/`stream_options.include_usage` 等参数。
+- OpenAI 风格的 `/v1/responses`，支持字符串输入、消息数组、`instructions`、流式事件，以及 `reasoning.effort`/`text.query.format`/`temperature` 等参数。
 - `/v1/files` 文件上传，上传后可在聊天或 Responses 请求中携带 `file_id` 做文件问答。
-- `/v1/images/generations` 图片生成，模型列表包含 `gpt-image-2`，支持返回 URL 或 `b64_json`。
-- `/v1/audio/speech` 语音合成，兼容常见 OpenAI TTS voice 和输出格式。
+- `/v1/images/generations` 图片生成，模型列表包含 `gpt-image-2`，支持 SSE 流式返回，支持 URL 或 `b64_json`。
+- `/v1/images/edits` 改图 + `/v1/images/variations` 图生图（变体）。
+- `/v1/audio/speech` 语音合成（TTS），兼容常见 OpenAI voice 和输出格式。
+- `/v1/audio/transcriptions` 语音转文字，支持 mp3/wav/m4a/ogg/flac/webm 格式。
+- `/v1/audio/translations` 音频翻译为英文。
 - `/v1/models` 模型列表接口。
 - `/auth/refresh`：传入 OpenAI `refresh_token` 获取 `access_token`。
 - `/auth/session`：传入 ChatGPT `session_token` 获取新的 `session_token` 和 `access_token`。

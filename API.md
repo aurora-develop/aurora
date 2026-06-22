@@ -352,6 +352,72 @@ curl --location 'http://你的服务器ip:8080/v1/audio/speech' \
 
 支持的 voice 映射包括 `alloy`、`ash`、`coral`、`echo`、`fable`、`onyx`、`nova`、`sage`、`shimmer`。支持的 `response_format` 包括 `mp3`、`opus`、`aac`、`flac`、`wav`、`pcm`，其中部分格式会由上游以 AAC 形式返回。
 
+## 语音转文字 (Audio Transcriptions)
+
+将音频文件转写为文字。与 OpenAI 官方 `/v1/audio/transcriptions` 兼容。
+
+### 请求
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/audio/transcriptions' \
+--header 'Authorization: Bearer access_token' \
+--form 'file=@"/path/to/audio.mp3"' \
+--form 'model="whisper-1"' \
+--form 'language="zh"' \
+--form 'response_format="json"'
+```
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `file` | file | 必填 | 音频文件(mp3 / wav / m4a / ogg / flac 等,上限 50MB) |
+| `model` | string | `whisper-1` | 模型名 |
+| `language` | string | 可选 | 语言 ISO 代码,如 `zh`、`en` |
+| `prompt` | string | 可选 | 提示文本(最大 1000 字符) |
+| `response_format` | string | `json` | 输出格式:`json` / `text` / `verbose_json` |
+| `temperature` | float | 可选 | 采样温度 |
+
+### 响应
+
+`response_format=json`(默认):
+```json
+{
+  "text": "转写后的文字内容"
+}
+```
+
+`response_format=text`:
+```
+plain text content
+```
+
+`response_format=verbose_json`:
+```json
+{
+  "task": "transcribe",
+  "language": "zh",
+  "duration": 0,
+  "text": "转写后的文字内容",
+  "segments": [],
+  "words": []
+}
+```
+
+> **注意:**`srt` 和 `vtt` 格式暂不支持(ChatGPT 后端不返回时间戳信息)。
+
+## 音频翻译 (Audio Translations)
+
+将音频文件翻译为英文。与 OpenAI 官方 `/v1/audio/translations` 兼容。
+
+```bash
+curl --location 'http://你的服务器ip:8080/v1/audio/translations' \
+--header 'Authorization: Bearer access_token' \
+--form 'file=@"/path/to/audio.mp3"' \
+--form 'model="whisper-1"' \
+--form 'response_format="json"'
+```
+
+参数与 Transcriptions 相同，但不接受 `language` 参数。
+
 ## 原始 ChatGPT Conversation 透传
 
 ```bash

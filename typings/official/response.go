@@ -10,6 +10,14 @@ type ChatCompletionChunk struct {
 	Choices        []Choices              `json:"choices"`
 	ConversationID string                 `json:"conversation_id,omitempty"`
 	Sentinel       map[string]interface{} `json:"sentinel,omitempty"`
+	Usage          *StreamUsage           `json:"usage,omitempty"`
+}
+
+// StreamUsage 是流式结束时的 usage 信息(仅当 stream_options.include_usage=true)。
+type StreamUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 func (chunk *ChatCompletionChunk) String() string {
@@ -363,4 +371,40 @@ func NewImageVariationResponse(data []ImageGenerationData) ImageVariationRespons
 		Created: 0,
 		Data:    data,
 	}
+}
+
+// ── Audio Transcriptions / Translations ──
+
+// TranscriptionResponse 对齐 OpenAI 官方 /v1/audio/transcriptions JSON 响应。
+type TranscriptionResponse struct {
+	Text string `json:"text"`
+}
+
+// VerboseTranscriptionResponse 对齐 /v1/audio/transcriptions?response_format=verbose_json。
+type VerboseTranscriptionResponse struct {
+	Task     string                 `json:"task"`
+	Language string                 `json:"language"`
+	Duration float64                `json:"duration"`
+	Text     string                 `json:"text"`
+	Segments []TranscriptionSegment `json:"segments"`
+	Words    []TranscriptionWord    `json:"words"`
+}
+
+type TranscriptionSegment struct {
+	ID               int     `json:"id"`
+	Seek             int     `json:"seek"`
+	Start            float64 `json:"start"`
+	End              float64 `json:"end"`
+	Text             string  `json:"text"`
+	Tokens           []int   `json:"tokens"`
+	Temperature      float64 `json:"temperature"`
+	AvgLogprob       float64 `json:"avg_logprob"`
+	CompressionRatio float64 `json:"compression_ratio"`
+	NoSpeechProb     float64 `json:"no_speech_prob"`
+}
+
+type TranscriptionWord struct {
+	Word  string  `json:"word"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
 }

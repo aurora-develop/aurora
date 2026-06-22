@@ -52,17 +52,17 @@ type ChatGPTRequest struct {
 func NewChatGPTRequest() ChatGPTRequest {
 	disable_history := os.Getenv("ENABLE_HISTORY") != "true"
 	return ChatGPTRequest{
-		Action:                     "next",
-		ParentMessageID:            "client-created-root",
-		Model:                      "auto",
-		HistoryAndTrainingDisabled: disable_history,
-		TimezoneOffsetMin:          420,
-		Timezone:                   "America/Los_Angeles",
-		ConversationMode:           map[string]string{"kind": "primary_assistant"},
-		SystemHints:                []string{},
-		EnableMessageFollowups:     true,
-		SupportsBuffering:          true,
-		SupportedEncodings:         []string{"v1"},
+		Action:                           "next",
+		ParentMessageID:                  "client-created-root",
+		Model:                            "auto",
+		HistoryAndTrainingDisabled:       disable_history,
+		TimezoneOffsetMin:                420,
+		Timezone:                         "America/Los_Angeles",
+		ConversationMode:                 map[string]string{"kind": "primary_assistant"},
+		SystemHints:                      []string{},
+		EnableMessageFollowups:           true,
+		SupportsBuffering:                true,
+		SupportedEncodings:               []string{"v1"},
 		ParagenCotSummaryDisplayOverride: "allow",
 		ForceParallelSwitch:              "auto",
 		ThinkingEffort:                   "standard",
@@ -107,7 +107,7 @@ func (c *ChatGPTRequest) AddAssistantMessage(input string) {
 // AddToolMessage 追加一个 role=tool 的消息,把客户端执行工具的结果回传给上游。
 // toolName 形如 "bash";result 是工具返回的字符串(可能含换行)。
 func (c *ChatGPTRequest) AddToolMessage(toolName, result string) {
-	// 包成 "Tool (Resultado da ferramenta bash): ..." 文本格式以兼容 chatgptproxy 协议
+	// 包成 "Tool (Resultado da ferramenta bash): ..." 文本格式以兼容  协议
 	text := "Tool (Resultado da ferramenta " + toolName + "): " + result
 	c.AddMessage("tool", text)
 }

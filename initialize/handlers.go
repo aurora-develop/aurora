@@ -415,6 +415,23 @@ func (h *Handler) nightmare(c *gin.Context) {
 		output_tokens := util.CountToken(full_response)
 		c.JSON(200, officialtypes.NewChatCompletionWithMetadata(full_response, input_tokens, output_tokens, reqModel, conversationID, sentinel))
 	} else {
+		if original_request.StreamOptions != nil && original_request.StreamOptions.IncludeUsage {
+			output_tokens := util.CountToken(full_response)
+			usageChunk := officialtypes.ChatCompletionChunk{
+				ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+				Object:  "chat.completion.chunk",
+				Created: 0,
+				Model:   reqModel,
+				Choices: []officialtypes.Choices{},
+				Usage: &officialtypes.StreamUsage{
+					PromptTokens:     input_tokens,
+					CompletionTokens: output_tokens,
+					TotalTokens:      input_tokens + output_tokens,
+				},
+			}
+			c.Writer.WriteString("data: " + usageChunk.String() + "\n\n")
+			c.Writer.Flush()
+		}
 		writeChatCompletionStreamDone(c, stopSent, reqModel, conversationID)
 	}
 }
@@ -2013,6 +2030,169 @@ func (h *Handler) tts(c *gin.Context) {
 	c.Data(200, ttsTypeMap[format], data)
 }
 
+// ── Audio Transcriptions ──
+
+// transcriptionsSupportedFormats lists supported response_format values.
+var transcriptionsSupportedFormats = map[string]string{
+	"json":         "application/json",
+	"text":         "text/plain",
+	"verbose_json": "application/json",
+}
+
+func (h *Handler) transcriptions(c *gin.Context) {
+	h.handleTranscription(c, false)
+}
+
+func (h *Handler) translations(c *gin.Context) {
+	h.handleTranscription(c, true)
+}
+
+// handleTranscription handles /v1/audio/transcriptions and /v1/audio/translations.
+func (h *Handler) handleTranscription(c *gin.Context, isTranslation bool) {
+	contentType := strings.Split(c.GetHeader("Content-Type"), ";")[0]
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	if !strings.HasPrefix(contentType, "multipart/form-data") {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Request must be multipart/form-data",
+			"type":    "invalid_request_error",
+			"param":   "Content-Type",
+			"code":    "invalid_content_type",
+		}})
+		return
+	}
+
+	if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Failed to parse multipart form: " + err.Error(),
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    "parse_error",
+		}})
+		return
+	}
+
+	model := strings.TrimSpace(c.Request.FormValue("model"))
+	language := strings.TrimSpace(c.Request.FormValue("language"))
+	prompt := c.Request.FormValue("prompt")
+	responseFormat := strings.TrimSpace(c.Request.FormValue("response_format"))
+
+	if model == "" {
+		model = "whisper-1"
+	}
+	if responseFormat == "" {
+		responseFormat = "json"
+	}
+
+	respContentType, formatOK := transcriptionsSupportedFormats[responseFormat]
+	if !formatOK {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": fmt.Sprintf("Unsupported response_format: %s. Supported values: json, text, verbose_json", responseFormat),
+			"type":    "invalid_request_error",
+			"param":   "response_format",
+			"code":    "invalid_response_format",
+		}})
+		return
+	}
+
+	if len(prompt) > 1000 {
+		prompt = prompt[:1000]
+	}
+
+	formFile, fileHeader, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Missing required multipart field: file",
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "missing_required_parameter",
+		}})
+		return
+	}
+	defer formFile.Close()
+
+	audioData, err := io.ReadAll(formFile)
+	if err != nil {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "file_read_error",
+		}})
+		return
+	}
+	if len(audioData) == 0 {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Uploaded audio file is empty",
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "empty_file",
+		}})
+		return
+	}
+
+	proxyUrl := h.proxy.GetProxyIP()
+	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "authorization_error",
+			"param":   "Authorization",
+			"code":    status,
+		}})
+		return
+	}
+	if secret == nil || secret.Token == "" {
+		c.JSON(400, gin.H{"error": gin.H{
+			"message": "Audio transcription requires a logged-in ChatGPT access token.",
+			"type":    "invalid_request_error",
+			"param":   "file",
+			"code":    "missing_access_token",
+		}})
+		return
+	}
+	if secret.IsFree {
+		c.JSON(403, gin.H{"error": "Audio transcription does not support free/noauth accounts. Use a ChatGPT access token."})
+		return
+	}
+
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "audio/mpeg"
+	}
+
+	client := bogdanfinn.NewStdClient()
+	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+
+	text, status, err := chatgpt.TranscribeAudio(client, secret, proxyUrl, audioData, fileHeader.Filename, mimeType, language)
+	if err != nil {
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "transcription_error",
+			"param":   nil,
+			"code":    "transcription_error",
+		}})
+		return
+	}
+
+	switch responseFormat {
+	case "json":
+		c.JSON(200, officialtypes.TranscriptionResponse{Text: text})
+	case "text":
+		c.Data(200, "text/plain; charset=utf-8", []byte(text))
+	case "verbose_json":
+		c.JSON(200, officialtypes.VerboseTranscriptionResponse{
+			Task:     "transcribe",
+			Language: language,
+			Duration: 0,
+			Text:     text,
+			Segments: []officialtypes.TranscriptionSegment{},
+			Words:    []officialtypes.TranscriptionWord{},
+		})
+	default:
+		c.Data(200, respContentType, []byte(text))
+	}
+}
+
 func (h *Handler) chatgptConversation(c *gin.Context) {
 	var original_request chatgpt_types.ChatGPTRequest
 	err := c.BindJSON(&original_request)
@@ -2200,7 +2380,7 @@ func (h *Handler) handleToolCalling(c *gin.Context, originalRequest *officialtyp
 }
 
 // looksLikeSandboxRefusal 检测模型是否"声称"自己处于隔离环境/无法访问工具。
-// 触发的关键词组和 chatgptproxy 的 _DEGRADED_MARKERS 一致。
+// 触发的关键词组和  的 _DEGRADED_MARKERS 一致。
 func looksLikeSandboxRefusal(text string) bool {
 	if text == "" {
 		return false

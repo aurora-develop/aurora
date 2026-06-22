@@ -1,4 +1,4 @@
-// Package toolcall 实现了 chatgptproxy 的工具调用文本协议解析与生成:
+// Package toolcall 实现了  的工具调用文本协议解析与生成:
 //
 //   - 模型无法原生调用工具,所以在 system prompt 中教导它输出
 //     <tool_call>{"name": "X", "arguments": {...}}</tool_call>
@@ -6,7 +6,7 @@
 //   - RobustJSON 修复模型常见的 JSON 错误(Windows 路径反斜杠、未闭合括号)
 //   - RecoverFromText 是兜底:模型有时绕过 <tool_call> 直接输出 JSON
 //
-// 设计取舍:对齐 chatgptproxy 行为以保证 aurora 客户端能复用相同的 prompt 模板。
+// 设计取舍:对齐  行为以保证 aurora 客户端能复用相同的 prompt 模板。
 package toolcall
 
 import (
@@ -359,7 +359,7 @@ func marshalArguments(v any) string {
 	}
 }
 
-// generateCallID 分配 call_xxx 风格的 ID,与 Python chatgptproxy 保持一致
+// generateCallID 分配 call_xxx 风格的 ID,与 Python  保持一致
 // (24 个 hex 字符的随机后缀)。
 func generateCallID() string {
 	return "call_" + newCallIDSuffix()

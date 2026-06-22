@@ -101,7 +101,7 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 		}
 	}
 	if !strings.Contains(toolMsg, "Resultado da ferramenta bash") {
-		t.Fatalf("tool message missing chatgptproxy prefix: %q", toolMsg)
+		t.Fatalf("tool message missing  prefix: %q", toolMsg)
 	}
 	if !strings.Contains(toolMsg, "file1.py") {
 		t.Fatalf("tool message missing content: %q", toolMsg)
@@ -143,10 +143,10 @@ func TestConvertAPIRequestSerializesHistoryToolCalls(t *testing.T) {
 func TestConvertAPIRequestForcedToolChoice(t *testing.T) {
 	choice := &official.ToolChoice{Type: "function", Function: &official.ToolChoiceFunction{Name: "bash"}}
 	req := official.APIRequest{
-		Model:     "gpt-5",
-		Tools:     []official.Tool{{Type: "function", Function: official.ToolFunction{Name: "bash"}}},
+		Model:      "gpt-5",
+		Tools:      []official.Tool{{Type: "function", Function: official.ToolFunction{Name: "bash"}}},
 		ToolChoice: choice,
-		Messages:  []official.APIMessage{official.NewTextMessage("user", "x")},
+		Messages:   []official.APIMessage{official.NewTextMessage("user", "x")},
 	}
 	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
 	text, _ := out.Messages[0].Content.Parts[0].(string)
@@ -159,10 +159,10 @@ func TestConvertAPIRequestToolChoiceNoneStripsProtocol(t *testing.T) {
 	// tool_choice=none + tools:仍要教模型协议(否则它不知道 "none" 是什么意思),
 	// 但要追加 "DISABLED tool calling" 警告
 	req := official.APIRequest{
-		Model: "gpt-5",
-		Tools: []official.Tool{{Type: "function", Function: official.ToolFunction{Name: "bash"}}},
+		Model:      "gpt-5",
+		Tools:      []official.Tool{{Type: "function", Function: official.ToolFunction{Name: "bash"}}},
 		ToolChoice: &official.ToolChoice{Type: "none"},
-		Messages:  []official.APIMessage{official.NewTextMessage("user", "just answer in text")},
+		Messages:   []official.APIMessage{official.NewTextMessage("user", "just answer in text")},
 	}
 	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
 	text, _ := out.Messages[0].Content.Parts[0].(string)

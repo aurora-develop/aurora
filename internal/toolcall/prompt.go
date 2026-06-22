@@ -11,7 +11,7 @@ import (
 
 // BuildInstructions 生成 system prompt 块,教导模型按 <tool_call>{...}</tool_call>
 // 协议输出工具调用。tools 为空时返回 ""。
-// 协议文本与 chatgptproxy 保持一致,但使用英语(目标用户以英文/中文为主)。
+// 协议文本与  保持一致,但使用英语(目标用户以英文/中文为主)。
 func BuildInstructions(tools []official.Tool, toolChoice *official.ToolChoice) string {
 	if len(tools) == 0 {
 		return ""

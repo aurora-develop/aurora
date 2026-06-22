@@ -1,29 +1,30 @@
 # AURORA
 
-Supports the use of GPT-3.5 through access calls.
+Aurora converts the ChatGPT Web backend into an OpenAI-style API, supporting chat, Responses, file-based Q&A, image generation, image variations, speech-to-text, text-to-speech, model listings, and obtaining a valid ChatGPT `access_token` via `refresh_token` / `session_token`.
 
-# Communication Group
-https://t.me/aurora_develop
+## API Documentation
+
+For full endpoints, authentication, token exchange, and curl examples, see: [API.md](API.md)
+
+## Features
+
+- OpenAI-style `/v1/chat/completions` with streaming and non-streaming support, including parameters such as `temperature`/`top_p`/`max_tokens`/`stop`/`reasoning_effort`/`response_format`/`stream_options.include_usage`.
+- OpenAI-style `/v1/responses` with string input, message arrays, `instructions`, streaming events, and parameters such as `reasoning.effort`/`text.query.format`/`temperature`.
+- `/v1/files` for file uploads; after uploading, you can include `file_id` in chat or Responses requests for file-based Q&A.
+- `/v1/images/generations` for image generation; the model list includes `gpt-image-2`, supports SSE streaming, and can return either URLs or `b64_json`.
+- `/v1/images/edits` for image editing and `/v1/images/variations` for image-to-image generation (variations).
+- `/v1/audio/speech` for text-to-speech (TTS), compatible with common OpenAI voices and output formats.
+- `/v1/audio/transcriptions` for speech-to-text, supporting mp3/wav/m4a/ogg/flac/webm formats.
+- `/v1/audio/translations` for audio translation into English.
+- `/v1/models` for model listing.
+- `/auth/refresh`: pass an OpenAI `refresh_token` to obtain an `access_token`.
+- `/auth/session`: pass a ChatGPT `session_token` to obtain a new `session_token` and `access_token`.
+- `/backend-api/conversation` for direct proxying of raw ChatGPT conversation requests.
+- Support for `access_tokens.txt` account pool, `free_tokens.txt` free UUID pool, automatic free account generation, proxy pool, and TLS.
 
 ## Deployment
 
-### Deployment on Render
-[![Deploy](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-
-### Deployment on Koyeb
-Choose United States as the region.
-
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=aurora&ports=8080;http;/&image=ghcr.io/aurora-develop/aurora)
-
-### Deployment on Railway
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/jcl2Es?referralCode=XXqY_5)
-
-### Deployment on Zeabur
-Go in and change the image name to aurora plus any letter or number.
-
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/JF3EFW)
-
-### Compilation Deployment
+### Build from source
 
 ```bash
 git clone https://github.com/aurora-develop/aurora
@@ -33,8 +34,7 @@ chmod +x ./aurora
 ./aurora
 ```
 
-### Docker Deployment
-You need to install Docker and Docker Compose.
+### Docker
 
 ```bash
 docker run -d \
@@ -43,141 +43,65 @@ docker run -d \
   ghcr.io/aurora-develop/aurora:latest
 ```
 
-## Docker Compose Deployment
-Create a new directory, for example, aurora-app, and enter that directory:
+### Docker Compose
+
 ```bash
 mkdir aurora
 cd aurora
-```
-In this directory, download the docker-compose.yml file from the repository:
-
-```bash
+# Place the docker-compose.yml from the repository into the current directory, then run:
 docker-compose up -d
 ```
 
-## Usage
+## Configuration
 
-```bash
-curl --location 'http://your-server-ip:8080/v1/chat/completions' \
---header 'Content-Type: application/json' \
---data '{
-     "model": "gpt-3.5-turbo",
-     "messages": [{"role": "user", "content": "Say this is a test!"}],
-     "stream": true
-   }'
+No additional configuration is required by default. You can configure via `.env`, system environment variables, or environment variables with the same name on your deployment platform:
+
+```env
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8080
+FREE_ACCOUNTS=true
+FREE_ACCOUNTS_NUM=1024
+Authorization=your_authorization
+TLS_CERT=path_to_your_tls_cert
+TLS_KEY=path_to_your_tls_key
+PROXY_URL=your_proxy_url
 ```
 
-## Advanced Settings
+Details:
 
-Default settings do not need to be changed unless you have specific needs.
+- `SERVER_HOST` / `SERVER_PORT`: Service listening address and port.
+- `Authorization`: Service access key. When configured, requests must include `Authorization: Bearer your_authorization` in the header.
+- `FREE_ACCOUNTS`: Whether to automatically generate free UUID accounts; disabled by default.
+- `FREE_ACCOUNTS_NUM`: Number of automatically generated free UUID accounts; default is 1024.
+- `TLS_CERT` / `TLS_KEY`: When both are configured, HTTPS is enabled.
+- `PROXY_URL`: Proxy pool address.
 
-### Environment Variables
-```
-BASE_URL="https://auroraxf.glitch.me/api" Proxy gateway.
-Authorization=your_authorization User authentication key.
-TLS_CERT=path_to_your_tls_cert Path to your TLS (Transport Layer Security) certificate.
-TLS_KEY=path_to_your_tls_key Path to your TLS (Transport Layer Security) key.
-PROXY_URL=your_proxy_url Add a proxy pool.
-```
+Local account files:
 
-## Acknowledgements
+- `access_tokens.txt`: One ChatGPT `access_token` per line, used for features that require a logged-in account.
+- `free_tokens.txt`: One UUID device ID per line, serving as a free account pool.
 
-Thanks to all the great developers for their PR support, thank you.
+## Notes
+
+- Image, TTS, and file features depend on a logged-in access token and are unavailable with free UUID accounts.
+- `STREAM_MODE=false` forcibly disables streaming for Chat Completions.
+- This project is a ChatGPT Web capability conversion service. The endpoint shapes are designed to be compatible with the OpenAI API as much as possible, but it is not an official OpenAI service.
+
+## Acknowledgments
+
+Thanks to all the contributors for their PR support.
 
 ## Reference Projects
 
-https://github.com/xqdoo00o/ChatGPT-to-API
-
-## Tool Calling (Function Calling)
-
-ChatGPT Web does **not** natively support OpenAI-style function calling. Aurora
-emulates it via a text protocol inspired by [chatgptproxy](https://github.com/acruz6421-bot/chatgptproxy):
-
-- The system prompt is augmented with `<tool_call>{"name": "...", "arguments": {...}}</tool_call>`
-  instructions describing the available tools.
-- Streaming responses are parsed live to extract `<tool_call>` blocks.
-- The response is converted to standard OpenAI format with `tool_calls[]` populated.
-
-### Enabling
-
-Send a standard OpenAI-format request that includes a `tools` field. Aurora detects
-the field and switches to tool-calling mode automatically.
-
-```bash
-curl --location 'http://your-server-ip:8080/v1/chat/completions' \
---header 'Content-Type: application/json' \
---data '{
-  "model": "auto",
-  "messages": [{"role": "user", "content": "List the files in the current directory."}],
-  "tools": [{
-    "type": "function",
-    "function": {
-      "name": "bash",
-      "description": "Run a shell command",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "command": {"type": "string", "description": "Shell command to execute"}
-        },
-        "required": ["command"]
-      }
-    }
-  }]
-}'
-```
-
-When the model wants to call a tool, Aurora returns:
-
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "index": 0,
-        "id": "call_xxxxxxxx",
-        "type": "function",
-        "function": {
-          "name": "bash",
-          "arguments": "{\"command\":\"ls -la\"}"
-        }
-      }]
-    },
-    "finish_reason": "tool_calls"
-  }]
-}
-```
-
-Run the tool on your side, then send a follow-up request with the result:
-
-```json
-{
-  "messages": [
-    {"role": "user", "content": "List the files"},
-    {"role": "assistant", "tool_calls": [{"id": "call_xxxxxxxx", "type": "function", "function": {"name": "bash", "arguments": "{\"command\":\"ls -la\"}"}}]},
-    {"role": "tool", "tool_call_id": "call_xxxxxxxx", "name": "bash", "content": "file1.py\nfile2.py"}
-  ],
-  "tools": [...]
-}
-```
-
-The model will produce its final text answer on the next turn.
-
-### Configuration
-
-| Variable | Default | Effect |
-|---|---|---|
-| `TOOL_CALLING_ENABLED` | `true` | Set to `false` to disable the emulation. Requests with `tools` will be passed through as plain chat. |
-| `REFUSAL_RETRIES` | `3` | Max retries when the model falls into the "isolated sandbox" refusal loop. Each retry appends a stronger prompt to force a `<tool_call>` emission. |
-| `DEBUG_TOOL_LOG` | _(empty)_ | Path to a file where each tool-parse attempt is logged (raw text + extracted calls). Set this for debugging only. |
-
-### Limitations
-
-- **Streaming**: tool-calling mode forces `stream=false` internally so that sandbox-rejection retries can buffer the full response. The returned `ChatCompletion` is non-streamed.
-- **No tool execution**: Aurora does **not** execute tools on your behalf. Your client must run the tool and feed the result back via `role: tool` messages.
-- **Tool schema**: Aurora only injects `name`, `description`, and `parameters` into the system prompt. Other OpenAI fields (`strict`, `cache_control`, etc.) are ignored.
+- [ChatGPT-to-API](https://github.com/xqdoo00o/ChatGPT-to-API)
+- [chat2api](https://github.com/aurorax-neo/chat2api)
 
 ## License
 
 MIT License
+
+## Friendly Links
+
+- [linux.do](https://linux.do/)
+- [xiaozhou26](https://github.com/xiaozhou26)
+- [aurorax-neo](https://github.com/aurorax-neo)
