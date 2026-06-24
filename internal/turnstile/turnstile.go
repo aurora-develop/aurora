@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aurora/internal/browserfp"
 )
 
 const (
@@ -1008,6 +1010,7 @@ func (s *turnstileSolver) buildWindow() map[string]any {
 }
 
 func deriveBrowserHints(ua, platform, vendor string) browserHints {
+	fp := browserfp.Get()
 	hints := browserHints{
 		sendClientHints: true,
 		versionMajor:    "147",
@@ -1016,8 +1019,8 @@ func deriveBrowserHints(ua, platform, vendor string) browserHints {
 		platformVersion: "10.0.0",
 		architecture:    "x86_64",
 		vendor:          vendor,
-		webGLVendor:     "Google Inc. (NVIDIA)",
-		webGLRenderer:   "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+		webGLVendor:     fp.WebGLUnmaskedVendor,
+		webGLRenderer:   fp.WebGLUnmaskedRenderer,
 	}
 	if strings.TrimSpace(hints.vendor) == "" {
 		hints.vendor = "Google Inc."
@@ -1025,8 +1028,8 @@ func deriveBrowserHints(ua, platform, vendor string) browserHints {
 	if strings.EqualFold(strings.TrimSpace(platform), "Win32") {
 		hints.platformName = "Windows"
 		hints.platformVersion = "10.0.0"
-		hints.webGLVendor = "Google Inc. (NVIDIA)"
-		hints.webGLRenderer = "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+		hints.webGLVendor = fp.WebGLUnmaskedVendor
+		hints.webGLRenderer = fp.WebGLUnmaskedRenderer
 	}
 	if version := findUserAgentVersion(ua, `Chrome/([0-9]+(?:\.[0-9]+)*)`); version != "" {
 		hints.versionFull = version
