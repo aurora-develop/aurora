@@ -25,3 +25,4 @@ chatgpt-turnstile-reversed/
 *.py
 *.exe
 docs/
+*.js

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"aurora/internal/browserfp"
 	"aurora/internal/fingerprint"
 	"aurora/util"
 )
@@ -68,23 +69,24 @@ type Config struct {
 	FixedRandom *float64
 }
 
-// NewConfig 用默认 Windows / en-US / Chrome UA 配置构造(对齐 conversation.txt 2026-06 抓包)。
-// userAgent 为空时使用 util.FixedUserAgent (与新版 SDK 抓包一致,与 chatgpt 包 UA 严格同步)。
+// NewConfig 构造默认配置。指纹随机化由 fingerprint.Build25 内部完成。
+// userAgent 为空时使用 util.FixedUserAgent。
 func NewConfig(userAgent string) *Config {
 	if userAgent == "" {
 		userAgent = util.FixedUserAgent
 	}
+	fp := browserfp.Get()
 	return &Config{
 		DeviceID:            randomUUID(),
 		UserAgent:           userAgent,
-		Language:            "en-US",
-		Languages:           "en-US,en",
+		Language:            fp.Language,
+		Languages:           browserfp.LanguageJoin(fp.Language),
 		Timezone:            "America/Los_Angeles",
-		ScreenWidth:         1920,
-		ScreenHeight:        1080,
-		HardwareConcurrency: 16,
+		ScreenWidth:         fp.ScreenWidth,
+		ScreenHeight:        fp.ScreenHeight,
+		HardwareConcurrency: fp.HardwareConcurrency,
 		SentinelSV:          "20260423af3c",
-		BuildID:             "prod-2e2e6a5279d822603df0be74f1018da3099d7573",
+		BuildID:             fp.BuildID,
 	}
 }
 
@@ -165,13 +167,13 @@ func (c *Config) buildConfig(rng *mathRand, attempt *int, elapsedMs *int64) []an
 	// 把 c 的字段映射成 fingerprint.Options;rng 注入保持 deterministic
 	opts := fingerprint.Options{
 		UserAgent:           c.UserAgent,
-		Platform:            "Win32", // Config 暂时没存 platform,固定 Win32 跟 [17] 一致
+		Platform:            "Win32",
 		ScreenWidth:         c.ScreenWidth,
 		ScreenHeight:        c.ScreenHeight,
 		HardwareConcurrency: c.HardwareConcurrency,
 		JSHeapSizeLimit:     4294967296,
 		BuildID:             c.BuildID,
-		Timezone:            c.Timezone, // IANA 名,空则 fingerprint fallback 用 local
+		Timezone:            c.Timezone,
 		Rand:                rng,
 	}
 	// 如果 Languages 是 "en-US,en" 字符串形式,拆成 []string

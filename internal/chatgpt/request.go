@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"aurora/conversion/response/chatgpt"
 	"aurora/httpclient"
+	"aurora/internal/browserfp"
 	"aurora/internal/fingerprint"
 	"aurora/internal/prooftoken"
 	"aurora/internal/so"
@@ -611,15 +612,16 @@ func buildSentinelReqToken(state *ChatClientState) string {
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	fp := browserfp.Get()
 
 	opts := fingerprint.Options{
 		UserAgent:           ua,
-		ScreenWidth:         1920,
-		ScreenHeight:        1080,
-		HardwareConcurrency: 16,
-		JSHeapSizeLimit:     4294967296,
-		BuildID:             "prod-2e2e6a5279d822603df0be74f1018da3099d7573",
-		Languages:           []string{"en-SG"},
+		ScreenWidth:         fp.ScreenWidth,
+		ScreenHeight:        fp.ScreenHeight,
+		HardwareConcurrency: fp.HardwareConcurrency,
+		JSHeapSizeLimit:     fp.JSHeapSizeLimit,
+		BuildID:             fp.BuildID,
+		Languages:           strings.Split(browserfp.LanguageJoin(fp.Language), ","),
 		Rand:                rng,
 	}
 
@@ -3150,7 +3152,7 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("Oai-Device-Id", deviceID)
 	header.Set("Oai-Session-Id", sessionID)
 	// 对齐 2026-06-24 chatgpt.com 浏览器抓包的 build / version
-	header.Set("Oai-Client-Version", "prod-2e2e6a5279d822603df0be74f1018da3099d7573")
+	header.Set("Oai-Client-Version", browserfp.Get().BuildID)
 	header.Set("Oai-Client-Build-Number", "7764928")
 	return header
 }

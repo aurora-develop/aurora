@@ -14,6 +14,7 @@
 package so
 
 import (
+	"aurora/internal/browserfp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -139,6 +140,7 @@ type soSolver struct {
 	done     bool
 	resolved string
 	rejected string
+	profile  *browserfp.Profile
 }
 
 func newSOSolver() *soSolver { return &soSolver{regs: map[string]any{}} }
@@ -151,6 +153,7 @@ type regMapRef struct{ s *soSolver }
 // collector=false 时设 success/error,期待 VM 通过 reg 3/4 退出。
 func (s *soSolver) run(reqToken, dx string, collector bool) (string, error) {
 	s.regs = map[string]any{}
+	s.profile = browserfp.Get()
 	s.window = s.buildWindow()
 	s.done = false
 	s.resolved = ""
@@ -542,7 +545,9 @@ func (s *soSolver) initRuntime() {
 // ─── 浏览器 mock(简化版;字段对齐 turnstile/buildWindow,够 collector 字节码用)─
 
 func (s *soSolver) buildWindow() map[string]any {
+	fp := s.profile
 	ua := defaultUA
+
 	body := mkElement("body")
 	head := mkElement("head")
 	html := mkElement("html")
@@ -581,8 +586,8 @@ func (s *soSolver) buildWindow() map[string]any {
 		"cookieEnabled":       true,
 		"webdriver":           false,
 		"doNotTrack":          nil,
-		"hardwareConcurrency": 8,
-		"deviceMemory":        8,
+		"hardwareConcurrency": fp.HardwareConcurrency,
+		"deviceMemory":        fp.DeviceMemory,
 		"maxTouchPoints":      0,
 		"platform":            "Win32",
 		"vendor":              "Google Inc.",
@@ -605,8 +610,8 @@ func (s *soSolver) buildWindow() map[string]any {
 		"plugins":             "[object PluginArray]",
 		"connection": map[string]any{
 			"effectiveType": "4g",
-			"rtt":           50,
-			"downlink":      10,
+			"rtt":           fp.NetworkRTT,
+			"downlink":      fp.NetworkDownlink,
 			"saveData":      false,
 		},
 	}
@@ -627,9 +632,14 @@ func (s *soSolver) buildWindow() map[string]any {
 		"documentElement": html,
 		"currentScript":   sdk,
 		"scripts":         scripts,
-		"createElement":   func(tag any) any { return mkElement(toStr(tag)) },
-		"getElementById":  func() any { return nil },
-		"querySelector":   func() any { return nil },
+		"createElement": func(tag any) any {
+			if toStr(tag) == "canvas" {
+				return mkElement("canvas")
+			}
+			return mkElement(toStr(tag))
+		},
+		"getElementById": func() any { return nil },
+		"querySelector":  func() any { return nil },
 	}
 
 	location := doc["location"].(map[string]any)
@@ -643,7 +653,7 @@ func (s *soSolver) buildWindow() map[string]any {
 		},
 		"timeOrigin": float64(start.UnixMilli()) - perfBase,
 		"memory": map[string]any{
-			"jsHeapSizeLimit": int64(4294967296),
+			"jsHeapSizeLimit": fp.JSHeapSizeLimit,
 		},
 	}
 
@@ -653,8 +663,14 @@ func (s *soSolver) buildWindow() map[string]any {
 		"location":    location,
 		"performance": perf,
 		"screen": map[string]any{
-			"width": 1440, "height": 900, "availWidth": 1440, "availHeight": 860,
-			"availLeft": 0, "availTop": 0, "colorDepth": 24, "pixelDepth": 24,
+			"width":       fp.ScreenWidth,
+			"height":      fp.ScreenHeight,
+			"availWidth":  fp.ScreenWidth,
+			"availHeight": fp.ScreenAvailHeight,
+			"availLeft":   0,
+			"availTop":    0,
+			"colorDepth":  fp.ScreenColorDepth,
+			"pixelDepth":  fp.ScreenColorDepth,
 		},
 		"localStorage":    newStorageProxy(),
 		"sessionStorage":  newStorageProxy(),
