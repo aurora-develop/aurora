@@ -671,6 +671,7 @@ func (s *soSolver) buildWindow() map[string]any {
 			"availTop":    0,
 			"colorDepth":  fp.ScreenColorDepth,
 			"pixelDepth":  fp.ScreenColorDepth,
+				"devicePixelRatio": fp.DevicePixelRatio,
 		},
 		"localStorage":    newStorageProxy(),
 		"sessionStorage":  newStorageProxy(),

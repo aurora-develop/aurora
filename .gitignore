@@ -14,11 +14,12 @@ tools/authenticator/.proxies.txt.swp
 /logs/
 /target/
 /bin/
-.claude
+.claude/
 .gocache
 .atomcode
 CLAUDE.md
 MIGRATION_PLAN.md
+his.md
 _scratch/
 OpenSentinel/
 chatgpt-turnstile-reversed/

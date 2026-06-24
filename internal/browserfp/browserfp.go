@@ -60,7 +60,7 @@ var Languages = []Language{
 }
 
 // Platforms 浏览器 navigator.platform 值。
-var Platforms = []string{"Win32", "MacIntel", "Linux x86_64"}
+var Platforms = []string{"Win32", "Win32", "MacIntel", "Linux x86_64", "Linux armv8l", "Linux i686"}
 
 // DocumentKeys document 上 own-enumerable 属性名池。
 var DocumentKeys = []string{
@@ -134,6 +134,7 @@ type Profile struct {
 	NetworkDownlink       float64
 	NetworkRTT            int
 	TimezoneOffset        int
+	DevicePixelRatio      float64
 }
 
 // ─── 全局单例 ──────────────────────────────────────────────────────────────
@@ -182,6 +183,8 @@ func Generate(rng *rand.Rand) *Profile {
 
 		NetworkDownlink: networkDownlinks[rng.Intn(len(networkDownlinks))],
 		NetworkRTT:      networkRTTs[rng.Intn(len(networkRTTs))],
+
+			DevicePixelRatio: devicePixelRatios[rng.Intn(len(devicePixelRatios))],
 
 		TimezoneOffset: (rng.Intn(23) - 12) * 60,
 	}

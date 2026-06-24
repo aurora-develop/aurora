@@ -950,7 +950,11 @@ func (s *turnstileSolver) buildWindow() map[string]any {
 	window["pageXOffset"] = float64(0)
 	window["scrollY"] = float64(0)
 	window["pageYOffset"] = float64(0)
-	window["devicePixelRatio"] = 1.0000000149011612
+	dpr := 1.0
+	if fp := browserfp.Get(); fp != nil && fp.DevicePixelRatio > 0 {
+		dpr = fp.DevicePixelRatio
+	}
+	window["devicePixelRatio"] = dpr
 	window["hardwareConcurrency"] = float64(hardwareConcurrency)
 	window["isSecureContext"] = true
 	window["crossOriginIsolated"] = false
