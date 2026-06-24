@@ -26,3 +26,5 @@ chatgpt-turnstile-reversed/
 *.exe
 docs/
 *.js
+.superpowers/
+*.html
