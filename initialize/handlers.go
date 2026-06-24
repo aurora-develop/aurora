@@ -76,7 +76,7 @@ func (h *Handler) initTurnStileWithRetryState(client **bogdanfinn.TlsClient, sec
 	}
 }
 
-func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, secret **tokens.Secret, translatedRequest chatgpt_types.ChatGPTRequest, proxyUrl string, stream bool, state *chatgpt.ChatClientState) (*http.Response, *websocket.Conn, int, error) {
+func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, secret **tokens.Secret, translatedRequest chatgpt_types.ChatGPTRequest, proxyUrl string, stream bool, state *chatgpt.ChatClientState) (*http.Response, *websocket.Conn, *chatgpt.TurnStile, int, error) {
 	if state != nil {
 		state.ApplyToRequest(&translatedRequest)
 	}
@@ -92,7 +92,7 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 	// 在无 sentinel 上下文签发,服务器识别为低可信客户端 → mini 池。
 	turnStile, status, err := h.initTurnStileWithRetryState(client, secret, proxyUrl, state)
 	if err != nil {
-		return nil, nil, status, err
+		return nil, nil, nil, status, err
 	}
 
 	// 对齐浏览器 2026-06: sentinel 流程完成后调用 /conversation/init
@@ -103,7 +103,7 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 	if stream {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, *secret, state, proxyUrl)
 		if err != nil {
-			return nil, nil, http.StatusInternalServerError, err
+			return nil, nil, nil, http.StatusInternalServerError, err
 		}
 	}
 
@@ -113,7 +113,7 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 		if wsConn != nil {
 			wsConn.Close()
 		}
-		return nil, nil, http.StatusInternalServerError, err
+		return nil, nil, nil, http.StatusInternalServerError, err
 	}
 
 	response, err := chatgpt.POSTconversationPreparedWithState(*client, translatedRequest, *secret, turnStile, proxyUrl, conduitToken, turnTraceID, state)
@@ -121,9 +121,9 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 		if wsConn != nil {
 			wsConn.Close()
 		}
-		return nil, nil, http.StatusInternalServerError, err
+		return nil, nil, nil, http.StatusInternalServerError, err
 	}
-	return response, wsConn, http.StatusOK, nil
+	return response, wsConn, turnStile, http.StatusOK, nil
 }
 
 func (h *Handler) refresh(c *gin.Context) {
@@ -331,7 +331,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 
-	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
+	response, wsConn, turnStile, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
 	if err != nil {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
@@ -353,6 +353,8 @@ func (h *Handler) nightmare(c *gin.Context) {
 	var conversationID string
 	var sentinel []map[string]interface{}
 	var stopSent bool
+	// sentinel ping 已发标志 (session_observer_background_submit, seq 0)
+	pingSent := false
 
 	if os.Getenv("STREAM_MODE") == "false" {
 		original_request.Stream = false
@@ -377,6 +379,22 @@ func (h *Handler) nightmare(c *gin.Context) {
 		if result.ConversationID != "" {
 			conversationID = result.ConversationID
 			h.sessions.Register(conversationID, clientState)
+			// 对齐浏览器:第一次拿到 conversation_id 后发送 sentinel ping
+			// (session_observer_background_submit, seq 0)。fire-and-forget。
+			if !pingSent && turnStile != nil {
+				pingSent = true
+				lastMsgID := result.ParentMessageID
+				// 快照当前值,避免 goroutine 与主循环并发改写指针产生竞态
+				pingClient := client
+				pingSecret := secret
+				pingTurnStile := turnStile
+				go func() {
+					perr := chatgpt.POSTSentinelPing(pingClient, pingSecret, pingTurnStile, conversationID, lastMsgID, clientState)
+					if os.Getenv("DEBUG_SENTINEL") != "" {
+						fmt.Printf("[sentinel-ping] conv=%s lastMsg=%s err=%v\n", conversationID, lastMsgID, perr)
+					}
+				}()
+			}
 		}
 		sentinel = append(sentinel, result.Sentinel...)
 		if result.StopSent {
@@ -395,7 +413,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		response, wsConn, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
+		response, wsConn, _, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
 		if err != nil {
 			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),
@@ -507,7 +525,7 @@ func (h *Handler) responses(c *gin.Context) {
 		reqModel = "auto"
 	}
 
-	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
+	response, wsConn, _, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 	if err != nil {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
@@ -553,7 +571,7 @@ func (h *Handler) responses(c *gin.Context) {
 		translated_request.ConversationID = continue_info.ConversationID
 		translated_request.ParentMessageID = continue_info.ParentID
 
-		response, wsConn, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
+		response, wsConn, _, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 		if err != nil {
 			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),
@@ -1990,7 +2008,7 @@ func (h *Handler) tts(c *gin.Context) {
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
 
-	response, wsConn, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
+	response, wsConn, _, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 	if err != nil {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
@@ -2313,7 +2331,7 @@ func (h *Handler) handleToolCalling(c *gin.Context, originalRequest *officialtyp
 			translated.AddMessage("user", retrySuffix)
 		}
 
-		response, wsConn, status, err := h.postConversationGptClientOrder(client, secret, translated, *proxyUrl, false, *clientState)
+		response, wsConn, _, status, err := h.postConversationGptClientOrder(client, secret, translated, *proxyUrl, false, *clientState)
 		if err != nil {
 			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),

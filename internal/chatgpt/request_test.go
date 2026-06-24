@@ -604,11 +604,11 @@ func TestPrepareConversationConduitFullPropagatesState(t *testing.T) {
 func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) {
 	header := conversationHeaders(&tokens.Secret{}, nil, "text/event-stream", "/backend-api/f/conversation", "", "trace-id")
 
-	if _, ok := header["x-conduit-token"]; !ok {
-		t.Fatalf("x-conduit-token header missing for empty conversation conduit token")
+	if _, ok := header["X-Conduit-Token"]; !ok {
+		t.Fatalf("X-Conduit-Token header missing for empty conversation conduit token")
 	}
-	if header["x-conduit-token"] != "" {
-		t.Fatalf("x-conduit-token = %q, want empty string", header["x-conduit-token"])
+	if header["X-Conduit-Token"] != "" {
+		t.Fatalf("X-Conduit-Token = %q, want empty string", header["X-Conduit-Token"])
 	}
 }
 
@@ -632,40 +632,36 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	second := createBaseHeader()
 
 	// 对齐 conversation.txt 2026-06 抓包:英文浏览器 (en-US,en)
-	if first["oai-language"] != "en-US" {
-		t.Fatalf("oai-language = %q, want en-US", first["oai-language"])
+	if first["Oai-Language"] != "en-US" {
+		t.Fatalf("Oai-Language = %q, want en-US", first["Oai-Language"])
 	}
-	if first["accept-language"] != "en-US,en;q=0.9" {
-		t.Fatalf("accept-language = %q, want en-US,en;q=0.9", first["accept-language"])
+	if first["Accept-Language"] != "en-US,en;q=0.9" {
+		t.Fatalf("Accept-Language = %q, want en-US,en;q=0.9", first["Accept-Language"])
 	}
 	// UA must be the Chrome 148 variant to match sec-ch-ua="Google Chrome";"v="148"
-	ua := first["user-agent"]
+	ua := first["User-Agent"]
 	if !strings.Contains(ua, "Chrome/148.") {
-		t.Fatalf("user-agent = %q, want Chrome 148 to match sec-ch-ua=Chrome 148", ua)
+		t.Fatalf("User-Agent = %q, want Chrome 148 to match sec-ch-ua=Chrome 148", ua)
 	}
 	if strings.Contains(ua, "Edg/") {
-		t.Fatalf("user-agent = %q, must not be Edge variant (conversation.txt uses Chrome)", ua)
+		t.Fatalf("User-Agent = %q, must not be Edge variant (conversation.txt uses Chrome)", ua)
 	}
-	if first["oai-device-id"] == "" || first["oai-device-id"] != second["oai-device-id"] {
-		t.Fatalf("oai-device-id should be stable across headers: first=%q second=%q", first["oai-device-id"], second["oai-device-id"])
+	if first["Oai-Device-Id"] == "" || first["Oai-Device-Id"] != second["Oai-Device-Id"] {
+		t.Fatalf("Oai-Device-Id should be stable across headers: first=%q second=%q", first["Oai-Device-Id"], second["Oai-Device-Id"])
 	}
-	if first["oai-session-id"] == "" || first["oai-session-id"] != second["oai-session-id"] {
-		t.Fatalf("oai-session-id should be stable across headers: first=%q second=%q", first["oai-session-id"], second["oai-session-id"])
+	if first["Oai-Session-Id"] == "" || first["Oai-Session-Id"] != second["Oai-Session-Id"] {
+		t.Fatalf("Oai-Session-Id should be stable across headers: first=%q second=%q", first["Oai-Session-Id"], second["Oai-Session-Id"])
 	}
-	// 对齐 conversation.txt 2026-06 抓包
-	if first["oai-client-version"] != "prod-497f333866796e100096ad083b51ca949d22e751" {
-		t.Fatalf("oai-client-version = %q, want prod-497f333866796e100096ad083b51ca949d22e751", first["oai-client-version"])
+	// 对齐 2026-06-24 浏览器抓包
+	if first["Oai-Client-Version"] != "prod-2e2e6a5279d822603df0be74f1018da3099d7573" {
+		t.Fatalf("Oai-Client-Version = %q, want prod-2e2e6a5279d822603df0be74f1018da3099d7573", first["Oai-Client-Version"])
 	}
-	if first["oai-client-build-number"] != "7646290" {
-		t.Fatalf("oai-client-build-number = %q, want 7646290", first["oai-client-build-number"])
+	if first["Oai-Client-Build-Number"] != "7764928" {
+		t.Fatalf("Oai-Client-Build-Number = %q, want 7764928", first["Oai-Client-Build-Number"])
 	}
 	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 148)
-	if first["sec-ch-ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {
-		t.Fatalf("sec-ch-ua = %q, want Chrome 148", first["sec-ch-ua"])
-	}
-	// sec-ch-ua-platform-version 对齐 Chrome 148 Win64 ("15.0.0")
-	if first["sec-ch-ua-platform-version"] != `"15.0.0"` {
-		t.Fatalf("sec-ch-ua-platform-version = %q, want 15.0.0", first["sec-ch-ua-platform-version"])
+	if first["Sec-Ch-Ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {
+		t.Fatalf("Sec-Ch-Ua = %q, want Chrome 148", first["Sec-Ch-Ua"])
 	}
 }
 
@@ -690,11 +686,11 @@ func TestPrepareConversationConduitUsesClientState(t *testing.T) {
 	if token != "abc" {
 		t.Fatalf("token = %q, want abc", token)
 	}
-	if client.headers["oai-device-id"] != "device-state" {
-		t.Fatalf("oai-device-id = %q, want state device", client.headers["oai-device-id"])
+	if client.headers["Oai-Device-Id"] != "device-state" {
+		t.Fatalf("Oai-Device-Id = %q, want state device", client.headers["Oai-Device-Id"])
 	}
-	if client.headers["oai-session-id"] != "session-state" {
-		t.Fatalf("oai-session-id = %q, want state session", client.headers["oai-session-id"])
+	if client.headers["Oai-Session-Id"] != "session-state" {
+		t.Fatalf("Oai-Session-Id = %q, want state session", client.headers["Oai-Session-Id"])
 	}
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {

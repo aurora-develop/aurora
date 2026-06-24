@@ -559,7 +559,7 @@ func (s *turnstileSolver) initRuntime() {
 }
 
 func (s *turnstileSolver) buildWindow() map[string]any {
-	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
 	lang := "en-US"
 	languagesJoin := "en-US,en"
 	width := 1920
@@ -1017,8 +1017,8 @@ func deriveBrowserHints(ua, platform, vendor string) browserHints {
 	fp := browserfp.Get()
 	hints := browserHints{
 		sendClientHints: true,
-		versionMajor:    "147",
-		versionFull:     "147.0.0.0",
+		versionMajor:    "148",
+		versionFull:     "148.0.0.0",
 		platformName:    "Windows",
 		platformVersion: "10.0.0",
 		architecture:    "x86_64",

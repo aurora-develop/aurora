@@ -378,9 +378,12 @@ type sentinelExtraSignals struct {
 	ChatRequirementsTokenPresent string `json:"chat_requirements_token_present"`
 }
 
-func buildSentinelExtraData(conversationID, lastMessageID string, prepareToken string, chatRequirementsToken string, soTokenPresent bool, turnstileTokenPresent bool, proofTokenPresent bool) string {
+func buildSentinelExtraData(conversationID, lastMessageID string, prepareToken string, chatRequirementsToken string, soTokenPresent bool, turnstileTokenPresent bool, proofTokenPresent bool, pingSource string, sequenceNumber int) string {
+	if pingSource == "" {
+		pingSource = "session_observer_background_submit"
+	}
 	signals := sentinelExtraSignals{
-		PingSource:                  "session_observer_background_submit",
+		PingSource:                  pingSource,
 		SOTokenPresent:              boolToStr(soTokenPresent),
 		TurnstileTokenPresent:       boolToStr(turnstileTokenPresent),
 		ProofTokenPresent:           boolToStr(proofTokenPresent),
@@ -389,7 +392,7 @@ func buildSentinelExtraData(conversationID, lastMessageID string, prepareToken s
 	}
 	data := sentinelExtraData{
 		Version:        1,
-		SequenceNumber: 0,
+		SequenceNumber: sequenceNumber,
 		Signals:        signals,
 	}
 	if conversationID != "" {
@@ -399,7 +402,7 @@ func buildSentinelExtraData(conversationID, lastMessageID string, prepareToken s
 		data.LastMessageID = lastMessageID
 	}
 	payload, _ := json.Marshal(data)
-	return base64.RawStdEncoding.EncodeToString(payload)
+	return base64.StdEncoding.EncodeToString(payload)
 }
 
 func boolToStr(b bool) string {
@@ -414,9 +417,21 @@ type pingSentinelResponse struct {
 	Status string `json:"status"`
 }
 
-// POSTSentinelPing 调用 /sentinel/ping 端点 — 对齐浏览器端在 prepare 与 finalize 之间
-// 发送的心跳/风控汇报请求。携带所有已计算的 sentinel token + Extra-Data。
+// POSTSentinelPing 调用 /sentinel/ping 端点 — 对齐浏览器端在对话进行中
+// 发送的风控汇报请求。携带所有已计算的 sentinel token + Extra-Data。
+//
+// 对齐 2026-06-24 抓包: ping 在对话上下文中发送,携带 conversation_id 与 last_message_id。
+// 两种 ping_source:
+//   - "session_observer_background_submit" (seq 0): 后台 SO token 提交
+//   - "conversation_heartbeat" (seq 1): 对话心跳
+//
+// conversationID 不带 "WEB:" 前缀 (函数内补)。
 func POSTSentinelPing(client httpclient.AuroraHttpClient, secret *tokens.Secret, ts *TurnStile, conversationID, lastMessageID string, state *ChatClientState) error {
+	return POSTSentinelPingWithSource(client, secret, ts, conversationID, lastMessageID, state, "session_observer_background_submit", 0)
+}
+
+// POSTSentinelPingWithSource 支持 ping_source 和 sequence_number 自定义。
+func POSTSentinelPingWithSource(client httpclient.AuroraHttpClient, secret *tokens.Secret, ts *TurnStile, conversationID, lastMessageID string, state *ChatClientState, pingSource string, sequenceNumber int) error {
 	apiUrl, targetPath := sentinelURL(secret, "/sentinel/ping")
 	header := sentinelHeaderWithState(secret, targetPath, state)
 	// 注入所有 sentinel token header
@@ -446,6 +461,8 @@ func POSTSentinelPing(client httpclient.AuroraHttpClient, secret *tokens.Secret,
 			ts.ensureSOToken(soDeviceIDFor(secret)) != "",
 			ts.TurnstileToken != "",
 			ts.ProofOfWorkToken != "",
+			pingSource,
+			sequenceNumber,
 		)
 		header.Set("Openai-Sentinel-Extra-Data", extraData)
 	}
@@ -3127,7 +3144,7 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 		header.Set("Referer", "https://chatgpt.com/")
 	}
 	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步, 对齐 2026-06-24 浏览器抓包)
-	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not.A)Brand";v="99"`)
+	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
 	header.Set("Sec-Ch-Ua-Mobile", "?0")
 	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
 	header.Set("Priority", "u=1, i")
@@ -3152,12 +3169,16 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header.Set("Oai-Device-Id", deviceID)
 	header.Set("Oai-Session-Id", sessionID)
 	// 对齐 2026-06-24 chatgpt.com 浏览器抓包的 build / version
-	header.Set("Oai-Client-Version", browserfp.Get().BuildID)
+	if fp := browserfp.Get(); fp != nil {
+		header.Set("Oai-Client-Version", fp.BuildID)
+	} else {
+		header.Set("Oai-Client-Version", browserfp.DefaultBuildID)
+	}
 	header.Set("Oai-Client-Build-Number", "7764928")
 	return header
 }
 
-// defaultUserAgent 返回全局统一的 User-Agent (Chrome 147 Windows)。
+// defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。
 // 一律走 util.FixedUserAgent,不再随机 —
 //  1. 网络 header 用途: 防止与 sec-ch-ua-* 失配触发 Cloudflare 风控;
 //  2. fingerprint/PoW 用途: 内部算 token 用的 UA 必须跟实际请求一致,
