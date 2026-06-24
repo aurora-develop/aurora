@@ -2,6 +2,7 @@ package main
 
 import (
 	"aurora/initialize"
+	"aurora/internal/browserfp"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 func main() {
 	gin.SetMode(gin.ReleaseMode)
 	_ = godotenv.Load(".env")
+	browserfp.Init()
 	router := initialize.RegisterRouter()
 
 	host := os.Getenv("SERVER_HOST")
