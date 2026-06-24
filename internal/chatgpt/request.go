@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"aurora/conversion/response/chatgpt"
 	"aurora/httpclient"
+	"aurora/internal/fingerprint"
 	"aurora/internal/prooftoken"
 	"aurora/internal/so"
 	"aurora/internal/tokens"
@@ -596,6 +597,7 @@ type sentinelReqResponse struct {
 //
 // 对齐 2026-06-24 浏览器抓包: /sentinel/req 使用与 prepare **完全相同** 的
 // 25 元素 Build25 格式,唯一区别是 [3] nonce=2 (prepare=1)。
+// 直接复用 fingerprint.Build25(),不手写重复数组。
 func buildSentinelReqToken(state *ChatClientState) string {
 	ua := defaultUserAgent()
 	deviceID := oaiDeviceID
@@ -610,28 +612,20 @@ func buildSentinelReqToken(state *ChatClientState) string {
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	// 25 元素 Build25 格式 (与 prepare 相同), nonce=2
-	config := []any{
-		1920 + 1080,            // [0] screen sum
-		time.Now().Format("Mon Jan 02 2006 15:04:05") + " GMT+0800 (Singapore Standard Time)", // [1] Date
-		int64(4294967296),       // [2] jsHeapSizeLimit
-		2,                       // [3] nonce (2 for req, prepare uses 1)
-		ua,                      // [4] UA
-		"https://chatgpt.com/backend-api/sentinel/sdk.js", // [5] SDK script URL
-		"prod-2e2e6a5279d822603df0be74f1018da3099d7573",  // [6] buildID
-		"en-SG",                 // [7] language
-		"en-SG",                 // [8] languages
-		rng.Float64(),           // [9] Math.random()
-		"canShare−function canShare() { [native code] }", // [10] navigator probe
-		"location",               // [11] document key
-		"innerHeight",            // [12] window key
-		float64(int64(rng.Float64()*49000)+1000) + rng.Float64(), // [13] perfNow
-		deviceID,                // [14] device_id
-		"",                      // [15] location.search
-		16,                      // [16] hwConcurrency
-		float64(time.Now().UnixMilli()), // [17] timeOrigin (approximate)
-		0, 0, 0, 0, 0, 0, 0,    // [18-24] window probes
+	opts := fingerprint.Options{
+		UserAgent:           ua,
+		ScreenWidth:         1920,
+		ScreenHeight:        1080,
+		HardwareConcurrency: 16,
+		JSHeapSizeLimit:     4294967296,
+		BuildID:             "prod-2e2e6a5279d822603df0be74f1018da3099d7573",
+		Languages:           []string{"en-SG"},
+		Rand:                rng,
 	}
+
+	config := fingerprint.Build25(opts)
+	config[3] = 2      // nonce: req 用 2 (prepare 用 1)
+	config[14] = deviceID
 
 	encoded := prooftoken.EncodeConfig(config)
 	return "gAAAAAC" + encoded + "~S"
