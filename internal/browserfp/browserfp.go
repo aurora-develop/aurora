@@ -104,6 +104,14 @@ var NavigatorProbes = []string{
 	"credentials−[object CredentialsContainer]",
 }
 
+// ScriptURLs sentinel SDK 脚本 URL 池。
+// 浏览器中 hPt(Array.from(document.scripts).map(e=>e?.src).filter(e=>e))
+// 会随机选一个 script URL。
+var ScriptURLs = []string{
+	"https://chatgpt.com/backend-api/sentinel/sdk.js",
+	"https://chatgpt.com/sentinel/20260423af3c/sdk.js",
+}
+
 // DefaultBuildID 当前 chatgpt.com 的 data-build 属性。
 const DefaultBuildID = "prod-2e2e6a5279d822603df0be74f1018da3099d7573"
 

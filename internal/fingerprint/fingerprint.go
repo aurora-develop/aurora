@@ -55,14 +55,14 @@ func DefaultOptions() Options {
 //	[2]  jsHeapSizeLimit                     number
 //	[3]  nonce (caller 覆盖)
 //	[4]  navigator.userAgent                 string
-//	[5]  SDK 脚本 URL                         string (NOT null!)
+//	[5]  script URL (hPt 随机选)             string
 //	[6]  buildID (data-build 属性)           string
 //	[7]  navigator.language                  string
 //	[8]  navigator.languages (逗号分隔)       string
 //	[9]  Math.random() / elapsedMs (caller 覆盖)
-//	[10] "X in navigator" 探测              string
-//	[11] document 随机 key                  string
-//	[12] window 随机 key                    string
+//	[10] navigator probe (hPt 随机选)        string
+//	[11] document key (hPt 随机选)           string
+//	[12] window key (hPt 随机选)             string
 //	[13] performance.now()                   number
 //	[14] device_id (caller 覆盖)             string
 //	[15] location.search joined              string
@@ -146,8 +146,10 @@ func Build25(opts Options) []any {
 	}
 
 	timeOrigin := float64(time.Now().UnixMilli()) - perfNow
+	// [5] script URL: hPt 随机选一个 (对齐新版 SDK 行为)
+	scriptURL := browserfp.ScriptURLs[r.Intn(len(browserfp.ScriptURLs))]
+	// [18-24] window 属性探测 (对齐新版 SDK: ai, createPRNG, cache, data, solana, dump, InstallTrigger)
 	windowProbes := [7]int{0, 0, 0, 0, 0, 0, 0}
-	sdkScript := "https://chatgpt.com/backend-api/sentinel/sdk.js"
 
 	config := []any{
 		screenSum,       // [0]
@@ -155,26 +157,26 @@ func Build25(opts Options) []any {
 		jsHeap,          // [2]
 		0,               // [3] nonce (caller 覆盖)
 		ua,              // [4]
-		sdkScript,       // [5]
+		scriptURL,       // [5] hPt 随机选 script URL
 		buildID,         // [6]
 		primaryLang,     // [7]
 		langsStr,        // [8]
 		r4,              // [9] (caller 覆盖)
-		navigatorProbe,  // [10]
-		docKey,          // [11]
-		winKey,          // [12]
+		navigatorProbe,  // [10] hPt 随机选 navigator 属性
+		docKey,          // [11] hPt 随机选 document key
+		winKey,          // [12] hPt 随机选 window key
 		perfNow,         // [13]
 		deviceID,        // [14] (caller 覆盖)
 		searchJoined,    // [15]
 		hwConc,          // [16]
 		timeOrigin,      // [17]
-		windowProbes[0], // [18]
-		windowProbes[1], // [19]
-		windowProbes[2], // [20]
-		windowProbes[3], // [21]
-		windowProbes[4], // [22]
-		windowProbes[5], // [23]
-		windowProbes[6], // [24]
+		windowProbes[0], // [18] ai in window
+		windowProbes[1], // [19] createPRNG in window
+		windowProbes[2], // [20] cache in window
+		windowProbes[3], // [21] data in window
+		windowProbes[4], // [22] solana in window
+		windowProbes[5], // [23] dump in window
+		windowProbes[6], // [24] InstallTrigger in window
 	}
 	_ = platform
 	return config

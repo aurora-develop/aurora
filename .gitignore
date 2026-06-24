@@ -5,8 +5,6 @@ tools/authenticator/authenticated_accounts.txt
 tools/authenticator/access_tokens.txt
 *.txt
 aurora
-chatgpttoapi
-chatgpt2api
 tools/authenticator/.proxies.txt.swp
 .env
 *.har
@@ -21,11 +19,10 @@ CLAUDE.md
 MIGRATION_PLAN.md
 his.md
 _scratch/
-OpenSentinel/
-chatgpt-turnstile-reversed/
 *.py
 *.exe
 docs/
 *.js
 .superpowers/
 *.html
+_third_party/
