@@ -7,8 +7,8 @@
 package fingerprint
 
 import (
-	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -49,18 +49,18 @@ func pickNavigatorProbe(r *rand.Rand) string {
 }
 
 // Build25 生成 25 元素 fingerprint 数组(顺序/类型严格按浏览器真实)。
-// 对齐新版 SDK 抓包 (conversation.txt 2026-06 样本):
+// 对齐 2026-06-24 chatgpt.com 浏览器 sentinel/chat-requirements/prepare 抓包:
 //
-//	[0]  String(screen.w + screen.h)         string
-//	[1]  Date.toString()                     string (PDT/EST 等带时区名)
-//	[2]  String(jsHeapSizeLimit)             string
-//	[3]  Math.random() / nonce (int)         number
-//	[4]  Math.random()                       number
-//	[5]  navigator.userAgent                 string
-//	[6]  currentScript.src                   string
-//	[7]  documentElement[data-build]         string
-//	[8]  navigator.language                  string
-//	[9]  Math.random() / elapsedMs (int)     number
+//	[0]  screen.w + screen.h                 number
+//	[1]  Date.toString()                     string (带时区名)
+//	[2]  jsHeapSizeLimit                     number
+//	[3]  nonce (requirements=1, PoW=iteration) number
+//	[4]  navigator.userAgent                 string ← 浏览器把 UA 放这里!
+//	[5]  SDK 脚本 URL                         string (NOT null!)
+//	[6]  buildID (data-build 属性)           string
+//	[7]  navigator.language                  string
+//	[8]  navigator.languages (逗号分隔)       string
+//	[9]  Math.random() / elapsedMs           number ← Math.random() 在这!
 //	[10] "X in navigator" 探测              string ("name−[object Name]")
 //	[11] document 随机 key (Object.keys)    string
 //	[12] window 随机 key (getOwnPropertyNames) string
@@ -71,7 +71,8 @@ func pickNavigatorProbe(r *rand.Rand) string {
 //	[17] performance.timeOrigin              number
 //	[18-24] "X in window" 检查               number (7 个, 默认 0)
 //
-// nonce/elapsed 由调用方注入 [3]/[9](requirements 阶段也是 nonce)。
+// nonce/elapsed 由调用方注入 [3]/[9]。requirements 阶段 [9]=Math.random(),
+// PoW 阶段 [3]=nonce(iteration), [9]=elapsedMs。
 func Build25(opts Options) []any {
 	r := opts.Rand
 	if r == nil {
@@ -102,8 +103,8 @@ func Build25(opts Options) []any {
 		h = 1080
 	}
 
-	// [0] String(screen.w + screen.h) — 注意:字符串!
-	screenSum := fmt.Sprintf("%d", w+h)
+	// [0] screen.w + screen.h — 对齐浏览器: NUMBER, 不是字符串!
+	screenSum := w + h
 
 	// [1] new Date().toString() — 浏览器格式:
 	//   "Fri Jun 19 2026 04:38:41 GMT-0700 (Pacific Daylight Time)"
@@ -117,33 +118,24 @@ func Build25(opts Options) []any {
 		dateStr = jsDateToString(time.Now())
 	}
 
-	// [2] String(jsHeapSizeLimit) — 字符串!
+	// [2] jsHeapSizeLimit — 对齐浏览器: NUMBER (int64), 不是字符串!
 	jsHeap := opts.JSHeapSizeLimit
 	if jsHeap == 0 {
 		jsHeap = 4294967296
 	}
-	jsHeapStr := fmt.Sprintf("%d", jsHeap)
 
 	// [4] Math.random()
 	r4 := r.Float64()
 
-	// [6] <script src> 随机挑
-	scriptSrc := opts.RandomScript
-	if scriptSrc == "" && len(CommonScripts) > 0 {
-		scriptSrc = CommonScripts[r.Intn(len(CommonScripts))]
-	}
-
-	// [7] c/<build>/_/ 匹配
 	buildID := opts.BuildID
 	if buildID == "" {
-		// 优先从 scriptSrc 里匹配 c/<id>/_/ 模式
-		matched := extractBuildIDFromScript(scriptSrc)
-		if matched != "" {
-			buildID = matched
-		} else if CommonBuildIDs != "" {
+		if CommonBuildIDs != "" {
 			buildID = CommonBuildIDs
 		}
 	}
+
+	// [8] navigator.languages — 浏览器逗号分隔格式, e.g. "zh-CN,zh"
+	langsStr := strings.Join(langs, ",")
 
 	// [10] "X in navigator" 探测:真值格式 "name−[object Name]"
 	navigatorProbe := pickNavigatorProbe(r)
@@ -181,28 +173,27 @@ func Build25(opts Options) []any {
 	// [17] performance.timeOrigin — Unix ms 时间戳
 	timeOrigin := float64(time.Now().UnixMilli()) - perfNow
 
-	// [18-24] 7 个 "X in window" 探测(对齐 conversation.txt 2026-06 抓包):
-	//   Number("X" in window) 返回 0/1;真值 Chrome 上 cache/data 至少一项为 1。
-	// 默认全 0 偏保守,改用 envFlags() 给的 4 项 + 后 3 项沿用 0;首项给 cache=1 增加真实性。
-	env := envFlags(Options{
-		HasAI:             boolPtr(true),
-		HasInstallTrigger: boolPtr(false),
-		HasSolana:         boolPtr(false),
-		HasTextEncoder:    boolPtr(true),
-	})
-	windowProbes := [7]int{env[0], env[1], env[2], env[3], 0, 0, 0}
+	// [18-24] 7 个 "X in window" 探测(对齐 2026-06-24 chatgpt.com 浏览器抓包):
+	//   浏览器全部返回 0 (Number("X" in window) → 0)。
+	//   真浏览器 Chrome 上其他探测可能为 1,但 sentinel SDK 只检查这 7 个,
+	//   且实测全部为 0。
+	windowProbes := [7]int{0, 0, 0, 0, 0, 0, 0}
+
+	// [5] currentScript.src — 浏览器始终传 SDK 脚本 URL，不是 null
+	// 对齐 2026-06-24 chatgpt.com 抓包
+	sdkScript := "https://chatgpt.com/backend-api/sentinel/sdk.js"
 
 	config := []any{
-		screenSum,        // [0]  string: screen.w+h
+		screenSum,        // [0]  number: screen.w+h
 		dateStr,          // [1]  string: Date.toString()
-		jsHeapStr,        // [2]  string: jsHeapSizeLimit
+		jsHeap,           // [2]  number: jsHeapSizeLimit
 		0,                // [3]  nonce (caller 覆盖)
-		r4,               // [4]  Math.random()
-		ua,               // [5]  navigator.userAgent
-		scriptSrc,        // [6]  <script src> 随机
-		buildID,          // [7]  c/<build>/_/ build id
-		primaryLang,      // [8]  navigator.language
-		0,                // [9]  elapsed ms (caller 覆盖)
+		ua,               // [4]  navigator.userAgent
+		sdkScript,        // [5]  SDK script URL (NOT null!)
+		buildID,          // [6]  build id
+		primaryLang,      // [7]  navigator.language
+		langsStr,         // [8]  navigator.languages (逗号分隔)
+		r4,               // [9]  Math.random() / elapsed (caller 覆盖)
 		navigatorProbe,   // [10] "X in navigator" 探测
 		docKey,           // [11] Object.keys(document)
 		winKey,           // [12] window 随机键
@@ -211,17 +202,14 @@ func Build25(opts Options) []any {
 		searchJoined,     // [15] URLSearchParams keys
 		hwConc,           // [16] hardwareConcurrency
 		timeOrigin,       // [17] performance.timeOrigin
-		windowProbes[0],  // [18] "X in window" 探测 (1/7)
-		windowProbes[1],  // [19] "X in window" 探测 (2/7)
-		windowProbes[2],  // [20] "X in window" 探测 (3/7)
-		windowProbes[3],  // [21] "X in window" 探测 (4/7)
-		windowProbes[4],  // [22] "X in window" 探测 (5/7)
-		windowProbes[5],  // [23] "X in window" 探测 (6/7)
-		windowProbes[6],  // [24] "X in window" 探测 (7/7)
+		windowProbes[0],  // [18]
+		windowProbes[1],  // [19]
+		windowProbes[2],  // [20]
+		windowProbes[3],  // [21]
+		windowProbes[4],  // [22]
+		windowProbes[5],  // [23]
+		windowProbes[6],  // [24]
 	}
 	_ = platform // 新版 SDK 不再用 platform 字段
 	return config
 }
-
-// boolPtr 是 *bool 简写(给 envFlags() 用)。
-func boolPtr(b bool) *bool { return &b }

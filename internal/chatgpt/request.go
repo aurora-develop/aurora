@@ -13,6 +13,7 @@ import (
 	"aurora/util"
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +33,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
+	fhttp "github.com/bogdanfinn/fhttp"
+	"github.com/bogdanfinn/websocket"
 	"github.com/joho/godotenv"
 )
 
@@ -117,17 +119,21 @@ func GetDpl(client httpclient.AuroraHttpClient, proxy string) {
 }
 
 type TurnStile struct {
-	TurnStileToken   string
-	ProofOfWorkToken string
-	TurnstileToken   string
-	SOToken          string
-	soSession        *so.Session
-	soSnapshotDX     string
-	soChatToken      string
-	soFlow           string
-	soOnce           sync.Once
-	soResult         string
-	soErr            error
+	TurnStileToken              string
+	ProofOfWorkToken            string
+	TurnstileToken              string
+	ChatRequirementsPrepareToken string // prepare 接口返回的 prepare_token, 在 sentinel/ping 时注入
+	ChatRequirementsToken       string // finalize 接口返回的 chat-requirements token (sentinel/ping 复用)
+	SentinelReqToken            string // /sentinel/req 返回的 token
+	SentinelReqPersona          string // /sentinel/req 返回的 persona
+	SOToken                     string
+	soSession                   *so.Session
+	soSnapshotDX                string
+	soChatToken                 string
+	soFlow                      string
+	soOnce                      sync.Once
+	soResult                    string
+	soErr                       error
 }
 
 type ProofWork struct {
@@ -224,6 +230,7 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 		ua = state.UserAgent
 	}
 	requirementsToken := prooftoken.NewConfig(ua).RequirementsToken()
+
 	prepare, status, err := POSTSentinelPrepareWithState(client, secret, requirementsToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -263,6 +270,22 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 		}
 	}
 
+	// 构建 TurnStile (先于 finalize)
+	ts := &TurnStile{
+		ProofOfWorkToken:            proofToken,
+		TurnstileToken:              turnstileToken,
+		ChatRequirementsPrepareToken: prepare.PrepareToken,
+	}
+
+	// so 段
+	if prepare.So.Required && prepare.So.CollectorDX != "" && prepare.So.SnapshotDX != "" && prepare.Token != "" {
+		ts.soSession = so.NewSession(requirementsToken, prepare.So.CollectorDX)
+		ts.soSnapshotDX = prepare.So.SnapshotDX
+		ts.soChatToken = prepare.Token
+		ts.soFlow = stateFlow(state, ua)
+		ts.soSession.Start()
+	}
+
 	finalize, status, err := POSTSentinelFinalizeWithState(client, secret, prepare.PrepareToken, proofToken, turnstileToken, state)
 	if err != nil {
 		if secret.IsFree && status == http.StatusUnauthorized && retry < 2 {
@@ -276,21 +299,8 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, secret *tokens.Se
 		return nil, status, fmt.Errorf("sentinel finalize token is missing")
 	}
 
-	ts := &TurnStile{
-		TurnStileToken:   finalize.Token,
-		ProofOfWorkToken: proofToken,
-		TurnstileToken:   turnstileToken,
-	}
-
-	// so 段:对齐 out.js se()/Et() 行为——仅在服务端要求时启动 collector(fire-and-forget,
-	// 不阻塞当前 prepare)。Snapshot 由 ensureSOToken() 在首次发请求时同步触发。
-	if prepare.So.Required && prepare.So.CollectorDX != "" && prepare.So.SnapshotDX != "" && prepare.Token != "" {
-		ts.soSession = so.NewSession(requirementsToken, prepare.So.CollectorDX)
-		ts.soSnapshotDX = prepare.So.SnapshotDX
-		ts.soChatToken = prepare.Token
-		ts.soFlow = stateFlow(state, ua)
-		ts.soSession.Start()
-	}
+	ts.TurnStileToken = finalize.Token
+	ts.ChatRequirementsToken = finalize.Token
 
 	return ts, status, nil
 }
@@ -345,6 +355,107 @@ func (ts *TurnStile) ensureSOToken(deviceID string) string {
 	}
 	ts.SOToken = tok
 	return ts.SOToken
+}
+
+// sentinelExtraData 对齐 chatgpt.com JS 中 rHn() 编码的 OpenAI-Sentinel-Extra-Data header。
+// base64(JSON) 格式,携带 conversation ID / 消息 ID 和 token 存在信号。
+type sentinelExtraData struct {
+	Version        int                     `json:"v"`
+	SequenceNumber int                     `json:"sequence_number"`
+	Signals        sentinelExtraSignals     `json:"signals"`
+	ConversationID string                  `json:"conversation_id,omitempty"`
+	LastMessageID  string                  `json:"last_message_id,omitempty"`
+}
+
+type sentinelExtraSignals struct {
+	PingSource                  string `json:"ping_source"`
+	SOTokenPresent              string `json:"so_token_present"`
+	TurnstileTokenPresent       string `json:"turnstile_token_present"`
+	ProofTokenPresent           string `json:"proof_token_present"`
+	PrepareTokenPresent         string `json:"prepare_token_present"`
+	ChatRequirementsTokenPresent string `json:"chat_requirements_token_present"`
+}
+
+func buildSentinelExtraData(conversationID, lastMessageID string, prepareToken string, chatRequirementsToken string, soTokenPresent bool, turnstileTokenPresent bool, proofTokenPresent bool) string {
+	signals := sentinelExtraSignals{
+		PingSource:                  "session_observer_background_submit",
+		SOTokenPresent:              boolToStr(soTokenPresent),
+		TurnstileTokenPresent:       boolToStr(turnstileTokenPresent),
+		ProofTokenPresent:           boolToStr(proofTokenPresent),
+		PrepareTokenPresent:         boolToStr(prepareToken != ""),
+		ChatRequirementsTokenPresent: boolToStr(chatRequirementsToken != ""),
+	}
+	data := sentinelExtraData{
+		Version:        1,
+		SequenceNumber: 0,
+		Signals:        signals,
+	}
+	if conversationID != "" {
+		data.ConversationID = "WEB:" + conversationID
+	}
+	if lastMessageID != "" {
+		data.LastMessageID = lastMessageID
+	}
+	payload, _ := json.Marshal(data)
+	return base64.RawStdEncoding.EncodeToString(payload)
+}
+
+func boolToStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// pingSentinelResponse 是 POST /backend-api/sentinel/ping 的响应。
+type pingSentinelResponse struct {
+	Status string `json:"status"`
+}
+
+// POSTSentinelPing 调用 /sentinel/ping 端点 — 对齐浏览器端在 prepare 与 finalize 之间
+// 发送的心跳/风控汇报请求。携带所有已计算的 sentinel token + Extra-Data。
+func POSTSentinelPing(client httpclient.AuroraHttpClient, secret *tokens.Secret, ts *TurnStile, conversationID, lastMessageID string, state *ChatClientState) error {
+	apiUrl, targetPath := sentinelURL(secret, "/sentinel/ping")
+	header := sentinelHeaderWithState(secret, targetPath, state)
+	// 注入所有 sentinel token header
+	if ts != nil {
+		if ts.ChatRequirementsPrepareToken != "" {
+			header.Set("Openai-Sentinel-Chat-Requirements-Prepare-Token", ts.ChatRequirementsPrepareToken)
+		}
+		if ts.ChatRequirementsToken != "" {
+			header.Set("Openai-Sentinel-Chat-Requirements-Token", ts.ChatRequirementsToken)
+		} else if ts.TurnStileToken != "" {
+			header.Set("Openai-Sentinel-Chat-Requirements-Token", ts.TurnStileToken)
+		}
+		if ts.TurnstileToken != "" {
+			header.Set("Openai-Sentinel-Turnstile-Token", ts.TurnstileToken)
+		}
+		if ts.ProofOfWorkToken != "" {
+			header.Set("Openai-Sentinel-Proof-Token", ts.ProofOfWorkToken)
+		}
+		if soToken := ts.ensureSOToken(soDeviceIDFor(secret)); soToken != "" {
+			header.Set("Openai-Sentinel-So-Token", soToken)
+		}
+		extraData := buildSentinelExtraData(
+			conversationID,
+			lastMessageID,
+			ts.ChatRequirementsPrepareToken,
+			ts.ChatRequirementsToken,
+			ts.ensureSOToken(soDeviceIDFor(secret)) != "",
+			ts.TurnstileToken != "",
+			ts.ProofOfWorkToken != "",
+		)
+		header.Set("Openai-Sentinel-Extra-Data", extraData)
+	}
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, nil)
+	if err != nil {
+		return fmt.Errorf("sentinel ping failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("sentinel ping failed: %s", readResponseSnippet(response.Body, 500))
+	}
+	return nil
 }
 
 func POSTSentinelPrepare(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken string) (*ChatRequire, int, error) {
@@ -406,6 +517,64 @@ func POSTSentinelFinalizeWithState(client httpclient.AuroraHttpClient, secret *t
 	return &result, response.StatusCode, nil
 }
 
+// conversationInitResponse 是 POST /conversation/init 的响应。
+// 对齐浏览器 2026-06 chatgpt.com 抓包。
+type conversationInitResponse struct {
+	Type              string `json:"type"`
+	BannerInfo        any    `json:"banner_info"`
+	DefaultModelSlug  string `json:"default_model_slug"`
+	AtlasModeEnabled  any    `json:"atlas_mode_enabled"`
+}
+
+// POSTConversationInit 调用 /conversation/init 端点 — 对齐浏览器行为:
+// 在 sentinel 流程完成后调用,获取对话元数据(default_model_slug, limits 等)。
+// 浏览器在页面加载时调用此 API 以建立会话上下文。
+func POSTConversationInit(client httpclient.AuroraHttpClient, secret *tokens.Secret, state *ChatClientState) (*conversationInitResponse, error) {
+	// free 用户走 backend-anon,paid 走 backend-api
+	var apiUrl string
+	if secret != nil && secret.IsFree {
+		apiUrl = strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + "/conversation/init"
+	} else {
+		apiUrl = BaseURL + "/conversation/init"
+	}
+	targetPath := "/backend-api/conversation/init"
+	header := createBaseHeaderForState(state)
+	header.Set("Accept", "*/*")
+	header.Set("Content-Type", "application/json")
+	header.Set("X-Openai-Target-Path", targetPath)
+	header.Set("X-Openai-Target-Route", targetPath)
+	if secret != nil && secret.IsFree && secret.Token != "" {
+		header.Set("Oai-Device-Id", secret.Token)
+	}
+	if secret != nil && !secret.IsFree && secret.Token != "" {
+		header.Set("Authorization", "Bearer "+secret.Token)
+	}
+	setTeamAccountHeader(header, secret)
+	payload := map[string]any{
+		"requested_default_model": nil,
+		"conversation_id":         nil,
+		"timezone_offset_min":     -480,
+		"conversation_origin":     nil,
+	}
+	bodyJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Request(http.MethodPost, apiUrl, header, nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("conversation init failed: %s", readResponseSnippet(response.Body, 500))
+	}
+	var result conversationInitResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func sentinelURL(secret *tokens.Secret, path string) (string, string) {
 	if secret != nil && secret.IsFree {
 		return strings.Replace(BaseURL, "backend-api", "backend-anon", 1) + path, "/backend-anon" + path
@@ -423,23 +592,82 @@ type sentinelReqResponse struct {
 	Persona   string `json:"persona,omitempty"`
 }
 
-// POSTSentinelReq 调用 /sentinel/req 端点 (对齐 conversation.txt 抓包的第 3 步)。
+// buildSentinelReqToken 为 /sentinel/req 端点生成指纹 token。
 //
-// 请求格式(对齐 sdk.deob.pretty.js OpenSentinel/client.js):
+// 对齐 2026-06-24 浏览器抓包: /sentinel/req 使用与 prepare **完全相同** 的
+// 25 元素 Build25 格式,唯一区别是 [3] nonce=2 (prepare=1)。
+func buildSentinelReqToken(state *ChatClientState) string {
+	ua := defaultUserAgent()
+	deviceID := oaiDeviceID
+	if state != nil {
+		if state.UserAgent != "" {
+			ua = state.UserAgent
+		}
+		if state.DeviceID != "" {
+			deviceID = state.DeviceID
+		}
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// 25 元素 Build25 格式 (与 prepare 相同), nonce=2
+	config := []any{
+		1920 + 1080,            // [0] screen sum
+		time.Now().Format("Mon Jan 02 2006 15:04:05") + " GMT+0800 (Singapore Standard Time)", // [1] Date
+		int64(4294967296),       // [2] jsHeapSizeLimit
+		2,                       // [3] nonce (2 for req, prepare uses 1)
+		ua,                      // [4] UA
+		"https://chatgpt.com/backend-api/sentinel/sdk.js", // [5] SDK script URL
+		"prod-2e2e6a5279d822603df0be74f1018da3099d7573",  // [6] buildID
+		"en-SG",                 // [7] language
+		"en-SG",                 // [8] languages
+		rng.Float64(),           // [9] Math.random()
+		"canShare−function canShare() { [native code] }", // [10] navigator probe
+		"location",               // [11] document key
+		"innerHeight",            // [12] window key
+		float64(int64(rng.Float64()*49000)+1000) + rng.Float64(), // [13] perfNow
+		deviceID,                // [14] device_id
+		"",                      // [15] location.search
+		16,                      // [16] hwConcurrency
+		float64(time.Now().UnixMilli()), // [17] timeOrigin (approximate)
+		0, 0, 0, 0, 0, 0, 0,    // [18-24] window probes
+	}
+
+	encoded := prooftoken.EncodeConfig(config)
+	return "gAAAAAC" + encoded + "~S"
+}
+
+// randomReactSuffix 生成类似 React container suffix 的随机字符串。
+func randomReactSuffix() string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, 11)
+	for i := range b {
+		b[i] = letters[rng.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+// randomWindowKey 返回随机 window 属性名。
+func randomWindowKey() string {
+	keys := []string{"onseeking", "onfocus", "onblur", "requestIdleCallback", "webkitRequestAnimationFrame", "__oai_so_bc", "__oai_so_ly"}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return keys[rng.Intn(len(keys))]
+}
+
+// POSTSentinelReq 调用 /sentinel/req 端点 (对齐 2026-06-24 浏览器抓包)。
 //
-//	POST /backend-api/sentinel/req
-//	Content-Type: text/plain;charset=UTF-8
-//	body: {"p":<requirementsToken>,"id":<deviceID>,"flow":"conversation"}
-//
-// 响应:服务端下发 flow token,可作为后续 prepare/finalize 的辅助 token。
-// 失败返回 (nil, status, err)。
+// /sentinel/req 使用与 /chat-requirements/prepare **相同** 的 25 元素指纹格式,
+// 仅 [3] nonce 不同 (prepare=1, req=2)。
 func POSTSentinelReq(client httpclient.AuroraHttpClient, secret *tokens.Secret, requirementsToken, deviceID, flow string, state *ChatClientState) (*sentinelReqResponse, int, error) {
 	if flow == "" {
 		flow = "conversation"
 	}
+	// 使用与 prepare 相同的指纹格式,但 nonce=2
+	reqToken := buildSentinelReqToken(state)
 	apiUrl, targetPath := sentinelURL(secret, "/sentinel/req")
 	bodyJSON, err := json.Marshal(map[string]string{
-		"p":    requirementsToken,
+		"p":    reqToken,
 		"id":   deviceID,
 		"flow": flow,
 	})
@@ -568,21 +796,18 @@ func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, a
 		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
 	}
 	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") || strings.HasSuffix(targetPath, "/f/conversation/prepare") {
-		// /f/conversation 与 /f/conversation/prepare 都必须携带 X-Conduit-Token 头。
-		// 真实流程:none 状态时送空字符串(服务端会签发新 token),
-		// sent/success/conversation 状态时送上一步返回的 token。
-		// 不再发送字面量 "no-token" —— 那是旧客户端占位,真实浏览器从不发送。
 		header.Set("X-Conduit-Token", conduitToken)
 	}
-	// /f/conversation(主请求)专属头:心跳/遥测,sentinel token 之外的反作弊画像。
-	// prepare 阶段不发这两头。
 	if strings.HasSuffix(targetPath, "/f/conversation") && !strings.HasSuffix(targetPath, "/prepare") {
-		header.Set("Oai-Echo-Logs", "0,3352,1,4100,0,6435,1,6501,0,6506,1,9918,0,11782,1,11804")
+		header.Set("Oai-Echo-Logs", "0,943,1,65876,0,68124,1,68930")
 		header.Set("Oai-Telemetry", "[1,null]")
 	}
 	if chatToken != nil {
 		if chatToken.TurnStileToken != "" {
 			header.Set("Openai-Sentinel-Chat-Requirements-Token", chatToken.TurnStileToken)
+		}
+		if chatToken.ChatRequirementsPrepareToken != "" {
+			header.Set("Openai-Sentinel-Chat-Requirements-Prepare-Token", chatToken.ChatRequirementsPrepareToken)
 		}
 		if chatToken.ProofOfWorkToken != "" {
 			header.Set("Openai-Sentinel-Proof-Token", chatToken.ProofOfWorkToken)
@@ -673,14 +898,14 @@ func DialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secr
 	}
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
-		Proxy:            http.ProxyFromEnvironment,
+		Proxy:            fhttp.ProxyFromEnvironment,
 	}
 	if proxyFunc, err := websocketProxyFunc(proxy); err != nil {
 		return nil, err
 	} else if proxyFunc != nil {
 		dialer.Proxy = proxyFunc
 	}
-	header := http.Header{}
+	header := fhttp.Header{}
 	ua := defaultUserAgent()
 	if state != nil && state.UserAgent != "" {
 		ua = state.UserAgent
@@ -707,15 +932,15 @@ func DialChatWebsocketWithStateAndProxy(client httpclient.AuroraHttpClient, secr
 	return conn, nil
 }
 
-func websocketProxyFunc(proxy string) (func(*http.Request) (*url.URL, error), error) {
+func websocketProxyFunc(proxy string) (func(*fhttp.Request) (*url.URL, error), error) {
 	if proxy == "" {
-		return http.ProxyFromEnvironment, nil
+		return fhttp.ProxyFromEnvironment, nil
 	}
 	proxyURL, err := url.Parse(proxy)
 	if err != nil {
 		return nil, err
 	}
-	return http.ProxyURL(proxyURL), nil
+	return fhttp.ProxyURL(proxyURL), nil
 }
 
 func parseChatWebsocketFrames(raw []byte) []map[string]interface{} {
@@ -998,6 +1223,41 @@ func PrepareConversationConduitFull(client httpclient.AuroraHttpClient, message 
 	}
 	// Step 3: success —— 用户按回车,后端在这一步给出模型路由决策
 	token3, err := getConduitTokenWithState(client, message, secret, nil, turnTraceID, state, PrepareStateSuccess, token2)
+	if err != nil {
+		return "", fmt.Errorf("prepare(success) failed: %w", err)
+	}
+	return token3, nil
+}
+
+// PrepareConversationConduitFullWithSentinel 与 PrepareConversationConduitFull 相同,
+// 但在三态 prepare 的每一步都携带已获取的 sentinel token 头。
+// 对齐浏览器行为:sentinel 流程(prepare→ping→finalize)在 prepare 流程之前完成,
+// conduit token 在 sentinel 上下文中签发,服务器据此判定客户端可信度与模型路由。
+//
+// 浏览器真实顺序:
+//  1. /sentinel/req          → oai-sc cookie (会话级)
+//  2. /chat-requirements/prepare → challenge
+//  3. /sentinel/ping         → 风控汇报
+//  4. /chat-requirements/finalize → chat-requirements token
+//  5. /f/conversation/prepare (none→sent→success) → conduit tokens (带 sentinel 头)
+//  6. /f/conversation        → 主请求
+func PrepareConversationConduitFullWithSentinel(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, secret *tokens.Secret, proxy string, turnTraceID string, state *ChatClientState, turnStile *TurnStile) (string, error) {
+	if proxy != "" {
+		client.SetProxy(proxy)
+	}
+	ensureBootstrapped(client, secret)
+	// Step 1: none
+	token1, err := getConduitTokenWithState(client, message, secret, turnStile, turnTraceID, state, PrepareStateNone, "")
+	if err != nil {
+		return "", fmt.Errorf("prepare(none) failed: %w", err)
+	}
+	// Step 2: sent
+	token2, err := getConduitTokenWithState(client, message, secret, turnStile, turnTraceID, state, PrepareStateSent, token1)
+	if err != nil {
+		return "", fmt.Errorf("prepare(sent) failed: %w", err)
+	}
+	// Step 3: success
+	token3, err := getConduitTokenWithState(client, message, secret, turnStile, turnTraceID, state, PrepareStateSuccess, token2)
 	if err != nil {
 		return "", fmt.Errorf("prepare(success) failed: %w", err)
 	}
@@ -2859,7 +3119,7 @@ func createBaseHeader() httpclient.AuroraHeaders {
 
 func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	header := make(httpclient.AuroraHeaders)
-	// 对齐 conversation.txt 2026-06 抓包:Chrome 148 Win64 英文浏览器
+	// 对齐 2026-06-24 chatgpt.com 浏览器抓包:Chrome 147 Win64
 	header.Set("Accept", "*/*")
 	header.Set("Accept-Language", "en-US,en;q=0.9")
 	header.Set("Oai-Language", "en-US")
@@ -2870,18 +3130,10 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	} else {
 		header.Set("Referer", "https://chatgpt.com/")
 	}
-	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步)
-	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
-	header.Set("Sec-Ch-Ua-Arch", `"x86"`)
-	header.Set("Sec-Ch-Ua-Bitness", `"64"`)
-	header.Set("Sec-Ch-Ua-Full-Version", `"148.0.7778.98"`)
-	header.Set("Sec-Ch-Ua-Full-Version-List", `"Chromium";v="148.0.7778.98", "Google Chrome";v="148.0.7778.98", "Not/A)Brand";v="99.0.0.0"`)
+	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步, 对齐 2026-06-24 浏览器抓包)
+	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not.A)Brand";v="99"`)
 	header.Set("Sec-Ch-Ua-Mobile", "?0")
-	header.Set("Sec-Ch-Ua-Model", `""`)
 	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-	// Sec-Ch-Ua-Platform-Version 报 "10.0.0" (Windows 10) — 与 UA 报 Windows NT 10.0 保持一致,
-	// 否则 UA/platform-version 交叉对不上会被 Cloudflare 标记。
-	header.Set("Sec-Ch-Ua-Platform-Version", `"15.0.0"`)
 	header.Set("Priority", "u=1, i")
 	header.Set("Sec-Fetch-Dest", "empty")
 	header.Set("Sec-Fetch-Mode", "cors")
@@ -2903,13 +3155,13 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	}
 	header.Set("Oai-Device-Id", deviceID)
 	header.Set("Oai-Session-Id", sessionID)
-	// 对齐 conversation.txt 2026-06 抓包的 build / version
-	header.Set("Oai-Client-Version", "prod-497f333866796e100096ad083b51ca949d22e751")
-	header.Set("Oai-Client-Build-Number", "7646290")
+	// 对齐 2026-06-24 chatgpt.com 浏览器抓包的 build / version
+	header.Set("Oai-Client-Version", "prod-2e2e6a5279d822603df0be74f1018da3099d7573")
+	header.Set("Oai-Client-Build-Number", "7764928")
 	return header
 }
 
-// defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。
+// defaultUserAgent 返回全局统一的 User-Agent (Chrome 147 Windows)。
 // 一律走 util.FixedUserAgent,不再随机 —
 //  1. 网络 header 用途: 防止与 sec-ch-ua-* 失配触发 Cloudflare 风控;
 //  2. fingerprint/PoW 用途: 内部算 token 用的 UA 必须跟实际请求一致,

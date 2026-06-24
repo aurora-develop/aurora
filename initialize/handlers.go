@@ -25,7 +25,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
+	"github.com/bogdanfinn/websocket"
 )
 
 type Handler struct {
@@ -81,33 +81,39 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 		state.ApplyToRequest(&translatedRequest)
 	}
 	turnTraceID := uuid.NewString()
-	secretTokenBefore := ""
-	if *secret != nil {
-		secretTokenBefore = (*secret).Token
-	}
-	conduitToken, err := chatgpt.PrepareConversationConduitFull(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
-	if err != nil {
-		return nil, nil, http.StatusInternalServerError, err
-	}
 
+	// 对齐浏览器顺序: sentinel 流程必须在 prepare 流程之前完成。
+	// 浏览器先调用 /sentinel/req → /chat-requirements/prepare → /sentinel/ping →
+	// /chat-requirements/finalize 获取 sentinel token,
+	// 然后才走 /f/conversation/prepare (none→sent→success) 获取 conduit token。
+	// conduit token 在 sentinel 上下文中签发,服务器据此判定客户端可信度与模型路由。
+	//
+	// 旧顺序 (prepare → sentinel → conversation) 导致 conduit token
+	// 在无 sentinel 上下文签发,服务器识别为低可信客户端 → mini 池。
 	turnStile, status, err := h.initTurnStileWithRetryState(client, secret, proxyUrl, state)
 	if err != nil {
 		return nil, nil, status, err
 	}
-	if *secret != nil && (*secret).Token != secretTokenBefore {
-		// 重新走完整三态,因为 secret 切换后必须重新建立 conduit 信任链
-		conduitToken, err = chatgpt.PrepareConversationConduitFull(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state)
-		if err != nil {
-			return nil, nil, http.StatusInternalServerError, err
-		}
-	}
 
+	// 对齐浏览器 2026-06: sentinel 流程完成后调用 /conversation/init
+	chatgpt.POSTConversationInit(*client, *secret, state)
+
+	// 对齐浏览器: WebSocket 在 sentinel 后、prepare 前连接,给服务端时间注册
 	var wsConn *websocket.Conn
 	if stream {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, *secret, state, proxyUrl)
 		if err != nil {
 			return nil, nil, http.StatusInternalServerError, err
 		}
+	}
+
+	// 三态 prepare 携带 sentinel token 头
+	conduitToken, err := chatgpt.PrepareConversationConduitFullWithSentinel(*client, translatedRequest, *secret, proxyUrl, turnTraceID, state, turnStile)
+	if err != nil {
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		return nil, nil, http.StatusInternalServerError, err
 	}
 
 	response, err := chatgpt.POSTconversationPreparedWithState(*client, translatedRequest, *secret, turnStile, proxyUrl, conduitToken, turnTraceID, state)

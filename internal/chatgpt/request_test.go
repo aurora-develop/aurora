@@ -16,7 +16,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	fhttp "github.com/bogdanfinn/fhttp"
+	"github.com/bogdanfinn/websocket"
 )
 
 type fakeAuroraClient struct {
@@ -750,7 +751,7 @@ func TestWebsocketProxyFuncUsesExplicitProxy(t *testing.T) {
 		t.Fatalf("websocketProxyFunc returned error: %v", err)
 	}
 	reqURL, _ := url.Parse("wss://example.test/ws")
-	req := &http.Request{URL: reqURL}
+	req := &fhttp.Request{URL: reqURL}
 	proxyURL, err := proxyFunc(req)
 	if err != nil {
 		t.Fatalf("proxy func returned error: %v", err)

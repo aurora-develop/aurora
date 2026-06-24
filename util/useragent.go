@@ -23,7 +23,7 @@ type userAgentSpec struct {
 var userAgentSpecs = []userAgentSpec{
 	{
 		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36",
-		MinVersion: 146,
+		MinVersion: 148,
 		MaxVersion: 148,
 		Family:     "Chrome-Win",
 	},

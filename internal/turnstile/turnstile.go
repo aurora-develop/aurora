@@ -557,24 +557,24 @@ func (s *turnstileSolver) initRuntime() {
 }
 
 func (s *turnstileSolver) buildWindow() map[string]any {
-	ua := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 	lang := "en-US"
 	languagesJoin := "en-US,en"
-	width := 1512
-	height := 982
+	width := 1920
+	height := 1080
 	innerWidth := width
 	innerHeight := height - 86
-	outerWidth := 160
-	outerHeight := 28
-	screenX := -25600
-	screenY := -25600
-	hardwareConcurrency := 8
-	heapLimit := int64(4294705152)
+	outerWidth := 1280
+	outerHeight := 720
+	screenX := 0
+	screenY := 0
+	hardwareConcurrency := 16
+	heapLimit := int64(4294967296)
 	deviceID := "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
 	timeOrigin := float64(time.Now().Add(-10 * time.Second).UnixMilli())
 	performanceNow := 9270.4
 	vendor := "Google Inc."
-	platform := "MacIntel"
+	platform := "Win32"
 	documentProbe := "__reactContainer$b63yiita51i"
 	windowProbe := "__oai_cached_session"
 	if s.profile.ScreenSum > 0 {
@@ -1010,14 +1010,14 @@ func (s *turnstileSolver) buildWindow() map[string]any {
 func deriveBrowserHints(ua, platform, vendor string) browserHints {
 	hints := browserHints{
 		sendClientHints: true,
-		versionMajor:    "135",
-		versionFull:     "135.0.0.0",
-		platformName:    "macOS",
-		platformVersion: "15.3.1",
-		architecture:    "x86",
+		versionMajor:    "147",
+		versionFull:     "147.0.0.0",
+		platformName:    "Windows",
+		platformVersion: "10.0.0",
+		architecture:    "x86_64",
 		vendor:          vendor,
-		webGLVendor:     "Google Inc. (Apple)",
-		webGLRenderer:   "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+		webGLVendor:     "Google Inc. (NVIDIA)",
+		webGLRenderer:   "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
 	}
 	if strings.TrimSpace(hints.vendor) == "" {
 		hints.vendor = "Google Inc."

@@ -40,7 +40,7 @@ type ChatGPTRequest struct {
 	SupportedEncodings               []string               `json:"supported_encodings,omitempty"`
 	ClientContextualInfo             map[string]interface{} `json:"client_contextual_info,omitempty"`
 	Suggestions                      []interface{}          `json:"suggestions,omitempty"`
-	HistoryAndTrainingDisabled       bool                   `json:"history_and_training_disabled"`
+	HistoryAndTrainingDisabled       bool                   `json:"history_and_training_disabled,omitempty"`
 	ParagenCotSummaryDisplayOverride string                 `json:"paragen_cot_summary_display_override"`
 	ForceParallelSwitch              string                 `json:"force_parallel_switch"`
 	ThinkingEffort                   string                 `json:"thinking_effort"`

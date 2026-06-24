@@ -50,6 +50,9 @@ func (s *ChatClientState) ApplyToRequest(request *chatgpt_types.ChatGPTRequest) 
 	if request.ConversationID == "" && s.ConversationID != "" {
 		request.ConversationID = s.ConversationID
 	}
+	// 对齐浏览器: /f/conversation 主请求必须携带 client_prepare_state=success,
+	// 告知服务端客户端已完成三态 prepare 流程。缺此字段会被路由到 mini 池。
+	request.ClientPrepareState = "success"
 	ensureClientContextualInfo(request)
 	request.ClientContextualInfo["time_since_loaded"] = s.TimeSinceLoadedSeconds()
 }

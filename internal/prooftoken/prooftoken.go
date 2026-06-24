@@ -84,7 +84,7 @@ func NewConfig(userAgent string) *Config {
 		ScreenHeight:        1080,
 		HardwareConcurrency: 16,
 		SentinelSV:          "20260423af3c",
-		BuildID:             "prod-497f333866796e100096ad083b51ca949d22e751",
+		BuildID:             "prod-2e2e6a5279d822603df0be74f1018da3099d7573",
 	}
 }
 
@@ -157,10 +157,10 @@ func (c *Config) envFlags() [4]int {
 	return [4]int{0, 0, 0, 0}
 }
 
-// buildConfig 构造 25 元素 fingerprint config (但 [3]/[9] 是占位, 由调用方设置)。
+// buildConfig 构造 25 元素 fingerprint config (覆盖 [3]/[9]/[14])。
 //
-// 走 internal/fingerprint.Build25 拿到真实浏览器形态(对齐 deob_js/out.js 真值样本
-// + conversation.txt 2026-06 抓包),然后只覆盖 PoW 的 [3] nonce 和 [9] elapsed 字段。
+// 走 internal/fingerprint.Build25 拿到真实浏览器形态(对齐 2026-06-24 chatgpt.com 抓包),
+// 然后覆盖 PoW 的 [3] nonce、[9] elapsed, 以及 [14] device_id。
 func (c *Config) buildConfig(rng *mathRand, attempt *int, elapsedMs *int64) []any {
 	// 把 c 的字段映射成 fingerprint.Options;rng 注入保持 deterministic
 	opts := fingerprint.Options{
@@ -200,6 +200,11 @@ func (c *Config) buildConfig(rng *mathRand, attempt *int, elapsedMs *int64) []an
 		// 跟 SDK 行为一致(SDK 也不传)。
 		config[9] = c.rngFloat(rng)
 	}
+	// [14] device_id — 浏览器 SDK 用 localStorage 中存储的 device_id,
+	// 必须是非空 UUID, 否则服务器识别为空设备 → mini 池。
+	if c.DeviceID != "" {
+		config[14] = c.DeviceID
+	}
 	return config
 }
 
@@ -236,9 +241,9 @@ func splitLangList(s string) []string {
 // 一次性拼一份带时间戳的 config 让服务端验设备形态。
 func (c *Config) GenerateRequirementsToken() string {
 	rng := mathRandNew(time.Now().UnixNano())
-	startTime := time.Now()
-	elapsed := time.Since(startTime).Milliseconds()
-	config := c.buildConfig(rng, nil, &elapsed)
+	// 对齐浏览器: requirements 阶段 [9] = Math.random(), 不是 elapsed
+	// (elapsed 只在 PoW 迭代阶段使用)
+	config := c.buildConfig(rng, nil, nil)
 	config[3] = 1
 	encoded := EncodeConfig(config)
 	return PrefixRequirements + encoded + Suffix
