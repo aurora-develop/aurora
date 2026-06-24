@@ -9,6 +9,7 @@ For full endpoints, authentication, token exchange, and curl examples, see: [API
 ## Features
 
 - OpenAI-style `/v1/chat/completions` with streaming and non-streaming support, including parameters such as `temperature`/`top_p`/`max_tokens`/`stop`/`reasoning_effort`/`response_format`/`stream_options.include_usage`.
+- Tool Calling emulation — ChatGPT Web does not natively support function calling. Aurora emulates it via a `<tool_call>` text protocol, supporting `tools`/`tool_choice` fields, automatically injecting the calling convention into the system prompt and parsing `<tool_call>` blocks in model output into standard OpenAI-format `tool_calls`.
 - OpenAI-style `/v1/responses` with string input, message arrays, `instructions`, streaming events, and parameters such as `reasoning.effort`/`text.query.format`/`temperature`.
 - `/v1/files` for file uploads; after uploading, you can include `file_id` in chat or Responses requests for file-based Q&A.
 - `/v1/images/generations` for image generation; the model list includes `gpt-image-2`, supports SSE streaming, and can return either URLs or `b64_json`.
@@ -57,24 +58,60 @@ docker-compose up -d
 No additional configuration is required by default. You can configure via `.env`, system environment variables, or environment variables with the same name on your deployment platform:
 
 ```env
+# Server listen
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
+PORT=8080
+
+# Authentication
+Authorization=your_authorization
+
+# Free accounts
 FREE_ACCOUNTS=true
 FREE_ACCOUNTS_NUM=1024
-Authorization=your_authorization
+
+# HTTPS
 TLS_CERT=path_to_your_tls_cert
 TLS_KEY=path_to_your_tls_key
+
+# Proxy
 PROXY_URL=your_proxy_url
+http_proxy=
+
+# Reverse proxy for specific endpoints (optional)
+API_REVERSE_PROXY=
+FILES_REVERSE_PROXY=
+
+# Custom BASE_URL (default https://chatgpt.com/backend-api)
+BASE_URL=
+
+# Stream mode (set to false to force non-streaming Chat Completions)
+STREAM_MODE=true
+
+# Preserve conversation history context (set to true to enable)
+ENABLE_HISTORY=false
+
+# Tool calling emulation
+TOOL_CALLING_ENABLED=true
+REFUSAL_RETRIES=3
+# DEBUG_TOOL_LOG=tool_debug.log
 ```
 
 Details:
 
-- `SERVER_HOST` / `SERVER_PORT`: Service listening address and port.
+- `SERVER_HOST` / `SERVER_PORT`: Service listening address and port. `PORT` is a fallback for `SERVER_PORT`.
 - `Authorization`: Service access key. When configured, requests must include `Authorization: Bearer your_authorization` in the header.
 - `FREE_ACCOUNTS`: Whether to automatically generate free UUID accounts; disabled by default.
 - `FREE_ACCOUNTS_NUM`: Number of automatically generated free UUID accounts; default is 1024.
 - `TLS_CERT` / `TLS_KEY`: When both are configured, HTTPS is enabled.
-- `PROXY_URL`: Proxy pool address.
+- `PROXY_URL`: Proxy pool address. `http_proxy` is the fallback proxy address.
+- `API_REVERSE_PROXY` / `FILES_REVERSE_PROXY`: Configure separate forward proxies for `/backend-api/*` and `/files` endpoints respectively; falls back to the default proxy when not set.
+- `BASE_URL`: Custom upstream ChatGPT API base URL, defaults to `https://chatgpt.com/backend-api`.
+- `STREAM_MODE`: Set to `false` to force non-streaming Chat Completions; defaults to `true`.
+- `ENABLE_HISTORY`: Set to `true` to preserve conversation history context in requests.
+- `TOOL_CALLING_ENABLED`: Set to `false` to ignore the `tools` field in requests and disable tool calling emulation.
+- `REFUSAL_RETRIES`: Maximum retry attempts when the model enters a "sandbox refusal" loop; defaults to `3`.
+- `DEBUG_TOOL_LOG`: Set to a file path to write detailed trace logs for each tool call parsing (for debugging).
 
 Local account files:
 
