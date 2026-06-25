@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogdanfinn/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/bogdanfinn/websocket"
 )
 
 type Handler struct {
@@ -46,6 +46,21 @@ func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, 
 
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
 	return &Handler{proxy: proxy, token: token, sessions: NewSessionManager()}
+}
+
+// maxContinueCount 返回 max_tokens 触发时自动 continue 的最大轮数。
+// 通过 MAX_CONTINUE_COUNT 环境变量配置；未设置或无效时默认 3 轮。
+// 设置为 0 可关闭自动 continue（遇到 max_tokens 立即停止）。
+func maxContinueCount() int {
+	v := os.Getenv("MAX_CONTINUE_COUNT")
+	if v == "" {
+		return 3
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 3
+	}
+	return n
 }
 
 // initTurnStileWithRetry 初始化 turnstile，当 paid token 返回 401 时自动禁用并轮询下一个
@@ -350,6 +365,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		return
 	}
 	var full_response string
+	var full_thinking string
 	var conversationID string
 	var sentinel []map[string]interface{}
 	var stopSent bool
@@ -365,7 +381,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		c.Writer.Header().Set("Connection", "keep-alive")
 		c.Writer.Header().Set("X-Accel-Buffering", "no")
 	}
-	for i := 3; i > 0; i-- {
+	for i := maxContinueCount(); i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel, chatgpt.HandlerDetailedOptions{
 			Websocket:        wsConn,
@@ -376,6 +392,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		wsConn = nil
 		continue_info = result.Continue
 		full_response += result.Text
+		full_thinking += result.ThinkingText
 		if result.ConversationID != "" {
 			conversationID = result.ConversationID
 			h.sessions.Register(conversationID, clientState)
@@ -437,7 +454,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	}
 	if !original_request.Stream {
 		output_tokens := util.CountToken(full_response)
-		c.JSON(200, officialtypes.NewChatCompletionWithMetadata(full_response, input_tokens, output_tokens, reqModel, conversationID, sentinel))
+		c.JSON(200, officialtypes.NewChatCompletionWithMetadataAndReasoning(full_response, full_thinking, input_tokens, output_tokens, reqModel, conversationID, sentinel))
 	} else {
 		if original_request.StreamOptions != nil && original_request.StreamOptions.IncludeUsage {
 			output_tokens := util.CountToken(full_response)
@@ -545,7 +562,7 @@ func (h *Handler) responses(c *gin.Context) {
 	}
 
 	var full_response string
-	for i := 3; i > 0; i-- {
+	for i := maxContinueCount(); i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
 		var response_part string
 		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, false, reqModel, chatgpt.HandlerDetailedOptions{
@@ -2393,7 +2410,7 @@ func (h *Handler) handleToolCalling(c *gin.Context, originalRequest *officialtyp
 	// 输出 OpenAI 格式响应
 	if len(lastToolCalls) > 0 {
 		c.JSON(200, officialtypes.NewChatCompletionWithToolCalls(
-			lastText, lastToolCalls,
+			lastText, "", lastToolCalls,
 			*inputTokens, util.CountToken(lastText),
 			*reqModel, lastConversationID, lastSentinel,
 		))

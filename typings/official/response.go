@@ -32,9 +32,10 @@ type Choices struct {
 }
 
 type Delta struct {
-	Content   string          `json:"content,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	Role             string          `json:"role,omitempty"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // ToolCallDelta 是 OpenAI 协议里 delta.tool_calls 元素的最小形态:
@@ -78,6 +79,28 @@ func NewChatCompletionChunk(text string, model string) ChatCompletionChunk {
 				Index: 0,
 				Delta: Delta{
 					Content: text,
+				},
+				FinishReason: nil,
+			},
+		},
+	}
+}
+
+// NewReasoningChunk 生成流式 reasoning_content 增量，对齐 OpenAI o1/o3-mini 系列模型。
+func NewReasoningChunk(text string, model string) ChatCompletionChunk {
+	if model == "" {
+		model = "auto"
+	}
+	return ChatCompletionChunk{
+		ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:  "chat.completion.chunk",
+		Created: 0,
+		Model:   model,
+		Choices: []Choices{
+			{
+				Index: 0,
+				Delta: Delta{
+					ReasoningContent: text,
 				},
 				FinishReason: nil,
 			},
@@ -144,9 +167,10 @@ type ChatCompletion struct {
 	Sentinel       []map[string]interface{} `json:"sentinel,omitempty"`
 }
 type Msg struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 type Choice struct {
 	Index        int         `json:"index"`
@@ -164,13 +188,18 @@ func NewChatCompletion(full_test string, input_tokens, output_tokens int, model 
 }
 
 func NewChatCompletionWithMetadata(full_test string, input_tokens, output_tokens int, model string, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
-	return NewChatCompletionWithToolCalls(full_test, nil, input_tokens, output_tokens, model, conversationID, sentinel)
+	return NewChatCompletionWithMetadataAndReasoning(full_test, "", input_tokens, output_tokens, model, conversationID, sentinel)
 }
 
-// NewChatCompletionWithToolCalls 构造非流式响应,可同时携带文本与 tool_calls。
+// NewChatCompletionWithMetadataAndReasoning 构造非流式响应,可同时返回 reasoning_content。
+func NewChatCompletionWithMetadataAndReasoning(full_test string, reasoningContent string, input_tokens, output_tokens int, model string, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
+	return NewChatCompletionWithToolCalls(full_test, reasoningContent, nil, input_tokens, output_tokens, model, conversationID, sentinel)
+}
+
+// NewChatCompletionWithToolCalls 构造非流式响应,可同时携带 reasoning_content、文本与 tool_calls。
 // 当 toolCalls 非空时,Content 设为 nil(对齐 OpenAI:有 tool_calls 时 content 可为 null);
 // finish_reason 自动设为 "tool_calls"。
-func NewChatCompletionWithToolCalls(fullText string, toolCalls []ToolCall, inputTokens, outputTokens int, model, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
+func NewChatCompletionWithToolCalls(fullText string, reasoningContent string, toolCalls []ToolCall, inputTokens, outputTokens int, model, conversationID string, sentinel []map[string]interface{}) ChatCompletion {
 	if model == "" {
 		model = "auto"
 	}
@@ -197,9 +226,10 @@ func NewChatCompletionWithToolCalls(fullText string, toolCalls []ToolCall, input
 		Choices: []Choice{
 			{
 				Message: Msg{
-					Content:   derefString(contentPtr),
-					Role:      "assistant",
-					ToolCalls: toolCalls,
+					Content:          derefString(contentPtr),
+					ReasoningContent: reasoningContent,
+					Role:             "assistant",
+					ToolCalls:        toolCalls,
 				},
 				Index:        0,
 				FinishReason: finishReason,

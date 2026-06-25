@@ -1586,6 +1586,27 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 
 	if patchPath, ok := raw["p"].(string); ok {
 		patchOperation, _ := raw["o"].(string)
+		// 处理批量 patch: {"p": "", "o": "patch", "v": [{"p": "...", "o": "append", "v": "..."}, ...]}
+		// 新版 ChatGPT Web 会在最后把多个 patch 打包成一条 SSE 发出。
+		if patchPath == "" && patchOperation == "patch" {
+			if batch, ok := raw["v"].([]interface{}); ok {
+				applied := false
+				for _, item := range batch {
+					op, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					subPath, _ := op["p"].(string)
+					subOp, _ := op["o"].(string)
+					if applyConversationPatch(state, subPath, subOp, op["v"]) {
+						applied = true
+					}
+				}
+				if applied {
+					return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
+				}
+			}
+		}
 		if applyConversationPatch(state, patchPath, patchOperation, raw["v"]) {
 			return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
 		}
@@ -2673,6 +2694,14 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 			"kind":  "analysis",
 			"delta": delta,
 		}})
+		if stream {
+			reasoningChunk := official_types.NewReasoningChunk(delta, model)
+			if convId != "" {
+				reasoningChunk.ConversationID = convId
+			}
+			c.Writer.WriteString("data: " + reasoningChunk.String() + "\n\n")
+			c.Writer.Flush()
+		}
 	}
 	finalizeArtifacts := func() {
 		emitSentinels(materializeArtifactEvents(client, secret, convId, artifactState.Finalize(), artifactConfig))
@@ -2718,6 +2747,19 @@ readLoop:
 			}
 			// Parse the line as JSON
 			streamEvent, ok := parseConversationEvent(line, &patchState, model)
+			if os.Getenv("DEBUG_SSE") != "" {
+				debugText := streamEvent.text
+				debugSrc := "chunk"
+				if streamEvent.response.Message.ID != "" {
+					debugText = firstStringPart(streamEvent.response.Message.Content.Parts)
+					debugSrc = "response"
+				}
+				raw := strings.TrimSpace(line)
+				if len(raw) > 200 {
+					raw = raw[:200] + "..."
+				}
+				fmt.Printf("[sse-in] src=%s channel=%q textLen=%d finish=%q parsed=%v raw=%q\n", debugSrc, streamEvent.channel, len(debugText), streamEvent.finishReason, ok, raw)
+			}
 			if !ok {
 				currentEvent = ""
 				continue

@@ -831,6 +831,34 @@ func TestHandlerSeparatesAnalysisAndFinalChannels(t *testing.T) {
 	}
 }
 
+func TestHandlerAppliesBatchPatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-batch"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-batch"}`,
+		`data: {"p":"/message/author/role","o":"replace","v":"assistant"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"hello "}`,
+		`data: {"p":"","o":"patch","v":[{"p":"/message/content/parts/0","o":"append","v":"world"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	result := HandlerDetailedWithOptions(c, response, nil, nil, "request-id", chatGPTRequestForTest(), false, "auto", HandlerDetailedOptions{})
+
+	if result.Text != "hello world" {
+		t.Fatalf("text = %q, want hello world", result.Text)
+	}
+	if result.ConversationID != "conv-batch" {
+		t.Fatalf("conversation id = %q, want conv-batch", result.ConversationID)
+	}
+	if result.ParentMessageID != "msg-batch" {
+		t.Fatalf("parent message id = %q, want msg-batch", result.ParentMessageID)
+	}
+}
+
 func TestHandlerTTSParsesPatchStream(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"p":"/conversation_id","o":"replace","v":"conv-tts"}`,

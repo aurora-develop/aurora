@@ -33,6 +33,7 @@ func RegisterRouter() *gin.Engine {
 	router.POST("/auth/session", handler.session)
 	router.POST("/auth/refresh", handler.refresh)
 	router.OPTIONS("/v1/chat/completions", optionsHandler)
+	router.OPTIONS("/v1/models", optionsHandler)
 	router.OPTIONS("/v1/responses", optionsHandler)
 	router.OPTIONS("/v1/images/generations", optionsHandler)
 	router.OPTIONS("/v1/images/edits", optionsHandler)
