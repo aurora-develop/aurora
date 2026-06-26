@@ -172,9 +172,11 @@ func Generate(rng *rand.Rand) *Profile {
 		sh = 600
 	}
 
+	vendorIdx := rng.Intn(len(webglUnmaskedVendors))
+
 	return &Profile{
-		WebGLUnmaskedRenderer: webglUnmaskedRenderers[rng.Intn(len(webglUnmaskedRenderers))],
-		WebGLUnmaskedVendor:   webglUnmaskedVendors[rng.Intn(len(webglUnmaskedVendors))],
+		WebGLUnmaskedVendor:   webglUnmaskedVendors[vendorIdx],
+		WebGLUnmaskedRenderer: webglUnmaskedRenderersMap[vendorIdx][rng.Intn(len(webglUnmaskedRenderersMap[vendorIdx]))],
 
 		Language: lang.Code,
 		BuildID:  DefaultBuildID,
