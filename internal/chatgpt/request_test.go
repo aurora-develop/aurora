@@ -652,12 +652,12 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	if first["Oai-Session-Id"] == "" || first["Oai-Session-Id"] != second["Oai-Session-Id"] {
 		t.Fatalf("Oai-Session-Id should be stable across headers: first=%q second=%q", first["Oai-Session-Id"], second["Oai-Session-Id"])
 	}
-	// 对齐 2026-06-24 浏览器抓包
-	if first["Oai-Client-Version"] != "prod-2e2e6a5279d822603df0be74f1018da3099d7573" {
-		t.Fatalf("Oai-Client-Version = %q, want prod-2e2e6a5279d822603df0be74f1018da3099d7573", first["Oai-Client-Version"])
+	// 对齐 2026-06-26 浏览器抓包
+	if first["Oai-Client-Version"] != "prod-dbbd612ddb47498515c3eecf8579bcafa0066e07" {
+		t.Fatalf("Oai-Client-Version = %q, want prod-dbbd612ddb47498515c3eecf8579bcafa0066e07", first["Oai-Client-Version"])
 	}
-	if first["Oai-Client-Build-Number"] != "7764928" {
-		t.Fatalf("Oai-Client-Build-Number = %q, want 7764928", first["Oai-Client-Build-Number"])
+	if first["Oai-Client-Build-Number"] != "7823760" {
+		t.Fatalf("Oai-Client-Build-Number = %q, want 7823760", first["Oai-Client-Build-Number"])
 	}
 	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 148)
 	if first["Sec-Ch-Ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {

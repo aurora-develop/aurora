@@ -3216,7 +3216,7 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	} else {
 		header.Set("Oai-Client-Version", browserfp.DefaultBuildID)
 	}
-	header.Set("Oai-Client-Build-Number", "7764928")
+	header.Set("Oai-Client-Build-Number", "7823760")
 	return header
 }
 

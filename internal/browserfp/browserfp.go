@@ -113,7 +113,7 @@ var ScriptURLs = []string{
 }
 
 // DefaultBuildID 当前 chatgpt.com 的 data-build 属性。
-const DefaultBuildID = "prod-2e2e6a5279d822603df0be74f1018da3099d7573"
+const DefaultBuildID = "prod-dbbd612ddb47498515c3eecf8579bcafa0066e07"
 
 // VendorForPlatform 返回给定平台的 navigator.vendor 值。
 func VendorForPlatform(platform string) string {

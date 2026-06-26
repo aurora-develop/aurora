@@ -113,9 +113,11 @@ func (h *Handler) postConversationGptClientOrder(client **bogdanfinn.TlsClient, 
 	// 对齐浏览器 2026-06: sentinel 流程完成后调用 /conversation/init
 	chatgpt.POSTConversationInit(*client, *secret, state)
 
-	// 对齐浏览器: WebSocket 在 sentinel 后、prepare 前连接,给服务端时间注册
+	// 对齐浏览器: paid 用户走 WebSocket, free/anon 用户走 HTTP SSE 流。
+	// /celsius/ws/user 端点需要 Authorization, free 账号没有 access token 会返回 401。
+	// 浏览器无登录模式下也确实不建立 WebSocket 连接。
 	var wsConn *websocket.Conn
-	if stream {
+	if stream && !(*secret).IsFree {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, *secret, state, proxyUrl)
 		if err != nil {
 			return nil, nil, nil, http.StatusInternalServerError, err

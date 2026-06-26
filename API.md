@@ -442,5 +442,6 @@ curl --location 'http://你的服务器ip:8080/backend-api/conversation' \
 
 - 插件模型和 `gpt-4-plugins` 已移除，不再支持 ChatGPT Plugins。
 - 图片、TTS、文件能力依赖登录态 access token，免费 UUID 账号不可用。
+- **免费 UUID 账号（`FREE_ACCOUNTS=true`）不支持流式输出**。ChatGPT 无登录模式的流式对话走 WebSocket（`/celsius/ws/user`），该端点需要 `Authorization` header，免费账号没有 access token 会返回 401。客户端传 `stream: true` 时会自动降级为非流式返回。
 - `STREAM_MODE=false` 时会强制关闭 Chat Completions 流式返回。
 - 本项目是 ChatGPT Web 能力转换服务，接口形状尽量兼容 OpenAI API，但并非 OpenAI 官方服务。

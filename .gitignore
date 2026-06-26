@@ -20,6 +20,7 @@ MIGRATION_PLAN.md
 his.md
 _scratch/
 *.py
+*.json
 *.exe
 docs/
 *.js
