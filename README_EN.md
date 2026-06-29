@@ -41,15 +41,20 @@ chmod +x ./aurora
 docker run -d \
   --name aurora \
   -p 8080:8080 \
+  -v $(pwd)/access_tokens.txt:/access_tokens.txt:ro \
   ghcr.io/aurora-develop/aurora:latest
 ```
+
+> Prepare `access_tokens.txt` in the current directory (one access_token per line) and mount it into the container via `-v`. The same applies to other files: `-v $(pwd)/free_tokens.txt:/free_tokens.txt:ro`, `-v $(pwd)/proxies.txt:/proxies.txt:ro`.
 
 ### Docker Compose
 
 ```bash
 mkdir aurora
 cd aurora
-# Place the docker-compose.yml from the repository into the current directory, then run:
+# 1. Prepare access_tokens.txt (one token per line)
+# 2. Place the docker-compose.yml from the repository into the current directory
+# 3. docker-compose.yml already includes a ./access_tokens.txt mount; uncomment free_tokens.txt or proxies.txt as needed
 docker-compose up -d
 ```
 

@@ -43,15 +43,20 @@ chmod +x ./aurora
 docker run -d \
   --name aurora \
   -p 8080:8080 \
+  -v $(pwd)/access_tokens.txt:/access_tokens.txt:ro \
   ghcr.io/aurora-develop/aurora:latest
 ```
+
+> 准备 `access_tokens.txt` 到当前目录（一行一个 access_token），通过 `-v` 挂载进容器。其他文件同理：`-v $(pwd)/free_tokens.txt:/free_tokens.txt:ro`、`-v $(pwd)/proxies.txt:/proxies.txt:ro`。
 
 ### Docker Compose 部署
 
 ```bash
 mkdir aurora
 cd aurora
-# 将仓库中的 docker-compose.yml 放到当前目录后执行：
+# 1. 准备好 access_tokens.txt（每行一个 token）
+# 2. 将仓库中的 docker-compose.yml 放到当前目录
+# 3. docker-compose.yml 已包含 ./access_tokens.txt 的挂载，按需取消注释 free_tokens.txt 或 proxies.txt
 docker-compose up -d
 ```
 
