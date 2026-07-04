@@ -480,7 +480,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 		return
 	}
 
-	stream := requestStreamFlag(c, imageRequest.Stream)
+	stream := httpstream.RequestStreamFlag(c, imageRequest.Stream)
 	if stream {
 		httpstream.WriteImageStreamHeader(c)
 	}
@@ -588,30 +588,6 @@ type imageStreamCompleted struct {
 	Data    []officialtypes.ImageGenerationData `json:"data"`
 }
 
-// requestStreamFlag 解析 stream 参数,支持 JSON body 的 stream 字段或 ?stream=true 查询参数。
-// multipart/form-data 也支持 stream 字段(字符串 "true"/"1")。
-func requestStreamFlag(c *gin.Context, jsonStream bool) bool {
-	if jsonStream {
-		return true
-	}
-	if v := strings.ToLower(strings.TrimSpace(c.Query("stream"))); v == "true" || v == "1" || v == "yes" {
-		return true
-	}
-	if v := strings.ToLower(strings.TrimSpace(c.PostForm("stream"))); v == "true" || v == "1" || v == "yes" {
-		return true
-	}
-	return false
-}
-
-// isStreamTrue 把任意形式的 stream 字段值转换为 bool。
-func isStreamTrue(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "true", "1", "yes", "on":
-		return true
-	}
-	return false
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // /v1/images/edits 与 /v1/images/variations
 //
@@ -654,7 +630,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 				n = v
 			}
 		}
-		stream = isStreamTrue(streamVal)
+		stream = httpstream.IsStreamTrue(streamVal)
 	}
 
 	if contentType == "application/json" {
@@ -824,7 +800,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		responseFormat = "b64_json"
 	}
 	// query 参数 ?stream=true 优先级最低
-	stream = requestStreamFlag(c, stream)
+	stream = httpstream.RequestStreamFlag(c, stream)
 
 	proxyUrl := h.proxy.GetProxyIP()
 	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
