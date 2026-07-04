@@ -356,7 +356,13 @@ func CollectResponsesAPIParts(raw interface{}) (string, []string) {
 				textParts = append(textParts, m)
 			case map[string]interface{}:
 				partType := strings.ToLower(strings.TrimSpace(stringFromAny(m["type"])))
-				if partType == "input_image" || partType == "image" || partType == "image_url" {
+				switch partType {
+				case "input_text", "text", "output_text":
+					if s := stringFromAny(m["text"]); s != "" {
+						textParts = append(textParts, s)
+					}
+					continue
+				case "input_image", "image", "image_url":
 					switch u := m["image_url"].(type) {
 					case string:
 						imageURLs = append(imageURLs, u)
