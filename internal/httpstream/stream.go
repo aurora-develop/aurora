@@ -56,9 +56,16 @@ func WriteDone(c *gin.Context) bool {
 func WriteChatCompletionDone(c *gin.Context, stopSent bool, model string, conversationID string) {
 	if !stopSent {
 		chunk := map[string]interface{}{
-			"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-			"object":  "chat.completion.chunk",
-			"choices": []interface{}{},
+			"id":              "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+			"object":          "chat.completion.chunk",
+			"conversation_id": conversationID,
+			"choices": []interface{}{
+				map[string]interface{}{
+					"index":         0,
+					"delta":         map[string]interface{}{},
+					"finish_reason": "stop",
+				},
+			},
 		}
 		data, _ := json.Marshal(chunk)
 		c.Writer.WriteString("data: " + string(data) + "\n\n")
