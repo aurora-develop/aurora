@@ -7,6 +7,7 @@ import (
 	"aurora/internal/apierrors"
 	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
+	"aurora/internal/conversationflow"
 	"aurora/internal/httpstream"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
@@ -301,8 +302,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	uid := uuid.NewString()
 	client := bogdanfinn.NewStdClient()
 
-	// 工具调用模式判定:客户端声明了 tools 且未被显式禁用。
-	// 启用时强制 stream=false(sandbox 重试需要缓冲);走独立 handleToolCalling 路径。
+	// 工具调用模式判定
 	toolsEnabled := toolCallingEnabled(original_request.Tools)
 	if toolsEnabled && os.Getenv("STREAM_MODE") != "false" {
 		original_request.Stream = false
@@ -311,7 +311,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 	// Convert the chat request to a ChatGPT request
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
 
-	// 按 conversationID 复用 ChatClientState，保持 DeviceID/SessionID 一致
+	// 按 conversationID 复用 ChatClientState
 	var clientState *chatgpt.ChatClientState
 	if translated_request.ConversationID != "" {
 		clientState = h.sessions.Get(translated_request.ConversationID)
@@ -322,143 +322,48 @@ func (h *Handler) nightmare(c *gin.Context) {
 	clientState.ConversationID = translated_request.ConversationID
 	clientState.ParentMessageID = translated_request.ParentMessageID
 
-	// Use the model from the original request, default to "auto"
 	reqModel := original_request.Model
 	if reqModel == "" {
 		reqModel = "auto"
 	}
 
-	// 工具调用提前分支:不进入原 continue loop
+	// 工具调用提前分支
 	if toolsEnabled {
 		h.handleToolCalling(c, &original_request, &client, &secret, &clientState, &reqModel, &uid, &proxyUrl, &input_tokens)
 		return
 	}
 
-	response, wsConn, turnStile, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
-	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "request_conversion_error",
-			"param":   "model",
-			"code":    "request_conversion_error",
-		}})
-		return
+	// 使用 conversationflow 编排器执行完整 conversation 流程
+	orchestrator := conversationflow.FlowOrchestrator{
+		Proxy:    h.proxy,
+		Token:    h.token,
+		Sessions: h.sessions,
 	}
-	defer response.Body.Close()
-	if chatgpt.Handle_request_error(c, response) {
-		if wsConn != nil {
-			wsConn.Close()
-			wsConn = nil
-		}
-		return
-	}
-	var full_response string
-	var full_thinking string
-	var conversationID string
-	var sentinel []map[string]interface{}
-	var stopSent bool
-	// sentinel ping 已发标志 (session_observer_background_submit, seq 0)
-	pingSent := false
+	result := orchestrator.ExecuteConversation(c, conversationflow.ExecuteRequest{
+		TranslatedRequest: translated_request,
+		OriginalRequest:   original_request,
+		Stream:            original_request.Stream,
+		ReqModel:          reqModel,
+		UID:               uid,
+		InputTokens:       input_tokens,
+		ToolsEnabled:      toolsEnabled,
+	})
 
-	if os.Getenv("STREAM_MODE") == "false" {
-		original_request.Stream = false
-	}
-	if original_request.Stream {
-		httpstream.WriteSSEHeader(c)
-	}
-	for i := maxContinueCount(); i > 0; i-- {
-		var continue_info *chatgpt.ContinueInfo
-		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, original_request.Stream, reqModel, chatgpt.HandlerDetailedOptions{
-			Websocket:        wsConn,
-			ClientState:      clientState,
-			ArtifactDelivery: original_request.ArtifactDelivery,
-			ProxyURL:         proxyUrl,
-		})
-		wsConn = nil
-		continue_info = result.Continue
-		full_response += result.Text
-		full_thinking += result.ThinkingText
-		if result.ConversationID != "" {
-			conversationID = result.ConversationID
-			h.sessions.Register(conversationID, clientState)
-			// 对齐浏览器:第一次拿到 conversation_id 后发送 sentinel ping
-			// (session_observer_background_submit, seq 0)。fire-and-forget。
-			if !pingSent && turnStile != nil {
-				pingSent = true
-				lastMsgID := result.ParentMessageID
-				// 快照当前值,避免 goroutine 与主循环并发改写指针产生竞态
-				pingClient := client
-				pingSecret := secret
-				pingTurnStile := turnStile
-				go func() {
-					perr := chatgpt.POSTSentinelPing(pingClient, pingSecret, pingTurnStile, conversationID, lastMsgID, clientState)
-					if os.Getenv("DEBUG_SENTINEL") != "" {
-						fmt.Printf("[sentinel-ping] conv=%s lastMsg=%s err=%v\n", conversationID, lastMsgID, perr)
-					}
-				}()
-			}
-		}
-		sentinel = append(sentinel, result.Sentinel...)
-		if result.StopSent {
-			stopSent = true
-		}
-		parentMessageID := result.ParentMessageID
-		if continue_info != nil {
-			parentMessageID = continue_info.ParentID
-		}
-		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
-		if continue_info == nil {
-			break
-		}
-		translated_request.Messages = nil
-		translated_request.Action = "continue"
-		translated_request.ConversationID = continue_info.ConversationID
-		translated_request.ParentMessageID = continue_info.ParentID
-
-		response, wsConn, _, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, original_request.Stream, clientState)
-		if err != nil {
-			c.JSON(status, gin.H{"error": gin.H{
-				"message": err.Error(),
-				"type":    "request_conversion_error",
-				"param":   "model",
-				"code":    "request_conversion_error",
-			}})
-			return
-		}
-		defer response.Body.Close()
-		if chatgpt.Handle_request_error(c, response) {
-			if wsConn != nil {
-				wsConn.Close()
-				wsConn = nil
-			}
-			return
-		}
-	}
 	if c.Writer.Status() != 200 {
 		return
 	}
+
+	// 输出响应
+	if os.Getenv("STREAM_MODE") == "false" {
+		original_request.Stream = false
+	}
 	if !original_request.Stream {
-		output_tokens := util.CountToken(full_response)
-		c.JSON(200, officialtypes.NewChatCompletionWithMetadataAndReasoning(full_response, full_thinking, input_tokens, output_tokens, reqModel, conversationID, sentinel))
+		c.JSON(200, officialtypes.NewChatCompletionWithMetadataAndReasoning(result.Text, result.ThinkingText, result.InputTokens, result.OutputTokens, reqModel, result.ConversationID, result.Sentinel))
 	} else {
 		if original_request.StreamOptions != nil && original_request.StreamOptions.IncludeUsage {
-			output_tokens := util.CountToken(full_response)
-			usageChunk := officialtypes.ChatCompletionChunk{
-				ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-				Object:  "chat.completion.chunk",
-				Created: 0,
-				Model:   reqModel,
-				Choices: []officialtypes.Choices{},
-				Usage: &officialtypes.StreamUsage{
-					PromptTokens:     input_tokens,
-					CompletionTokens: output_tokens,
-					TotalTokens:      input_tokens + output_tokens,
-				},
-			}
-			c.Writer.WriteString("data: " + usageChunk.String() + "\n\n")
-			c.Writer.Flush()
+			httpstream.WriteUsageChunk(c, reqModel, result.InputTokens, result.OutputTokens)
 		}
-		writeChatCompletionStreamDone(c, stopSent, reqModel, conversationID)
+		httpstream.WriteChatCompletionDone(c, result.StopSent, reqModel, result.ConversationID)
 	}
 }
 
