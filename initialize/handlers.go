@@ -1059,59 +1059,6 @@ func (h *Handler) secretFromAuthorization(c *gin.Context, needsPaid bool, allowF
 	return result.Secret, 0, nil
 }
 
-func (h *Handler) accessTokenFromRefreshToken(refreshToken string, proxy string) (string, int, error) {
-	client := bogdanfinn.NewStdClient()
-	result, status, err := chatgpt.GETTokenForRefreshToken(client, refreshToken, proxy)
-	if status == 0 {
-		status = http.StatusBadRequest
-	}
-	if err != nil {
-		return "", status, err
-	}
-	if data, ok := result.(map[string]interface{}); ok {
-		if accessToken, ok := data["access_token"].(string); ok && accessToken != "" {
-			return accessToken, status, nil
-		}
-	}
-	return "", status, fmt.Errorf("refresh token response did not include access_token")
-}
-
-func isUUID(str string) bool {
-	_, err := uuid.Parse(str)
-	return err == nil
-}
-
-func teamAccountIDFromRequest(c *gin.Context) string {
-	for _, header := range []string{"ChatGPT-Account-ID", "Chatgpt-Account-Id", "Team-Account-ID", "X-ChatGPT-Account-ID"} {
-		if value := strings.TrimSpace(c.GetHeader(header)); value != "" {
-			return value
-		}
-	}
-	_, teamAccountID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
-	return teamAccountID
-}
-
-func authorizationTokenAndTeam(c *gin.Context) (string, string, bool) {
-	token, authorizationTeamID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
-	if teamID := teamAccountIDFromRequest(c); teamID != "" {
-		return token, teamID, authorizationTeamID != ""
-	}
-	return token, authorizationTeamID, authorizationTeamID != ""
-}
-
-func splitAuthorizationTokenAndTeam(authHeader string) (string, string) {
-	payload := strings.TrimSpace(authHeader)
-	if len(payload) >= len("Bearer ") && strings.EqualFold(payload[:len("Bearer ")], "Bearer ") {
-		payload = strings.TrimSpace(payload[len("Bearer "):])
-	}
-	parts := strings.SplitN(payload, ",", 2)
-	token := strings.TrimSpace(parts[0])
-	if len(parts) == 1 {
-		return token, ""
-	}
-	return token, strings.TrimSpace(parts[1])
-}
-
 func countMessagesTokens(messages []officialtypes.APIMessage) int {
 	total := 0
 	for _, message := range messages {
