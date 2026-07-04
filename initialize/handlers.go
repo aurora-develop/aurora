@@ -1271,12 +1271,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 				writeImageStreamDone(c)
 				return
 			}
-			c.JSON(upStatus, gin.H{"error": gin.H{
-				"message": "upload image failed: " + upErr.Error(),
-				"type":    "image_upload_error",
-				"param":   fmt.Sprintf("image[%d]", idx),
-				"code":    "image_upload_error",
-			}})
+			apierrors.InternalError(c, "image_upload_error", "upload image failed: "+upErr.Error(), upStatus)
 			return
 		}
 		references = append(references, chatgpt.ImageEditReference{
