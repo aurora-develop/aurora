@@ -1211,21 +1211,11 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	}
 
 	if len(imageSources) == 0 {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required image input. Provide multipart 'image'/'images' field, or JSON 'image'/'images' field with image_url.",
-			"type":    "invalid_request_error",
-			"param":   "image",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "image", "missing_required_parameter")
 		return
 	}
 	if !asVariation && prompt == "" {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required parameter: prompt",
-			"type":    "invalid_request_error",
-			"param":   "prompt",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "prompt", "missing_required_parameter")
 		return
 	}
 	if n <= 0 {
