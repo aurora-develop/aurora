@@ -1573,7 +1573,7 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 
 	if response, ok := sseparser.ResponseFromValue(raw["v"]); ok {
 		state.response = response
-		if channel := channelFromValue(raw["v"]); channel != "" {
+		if channel := sseparser.ChannelFromValue(raw["v"]); channel != "" {
 			state.channel = channel
 		}
 		return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
@@ -1687,12 +1687,12 @@ func channelFromValue(value interface{}) string {
 			}
 		}
 		if message, ok := item["message"].(map[string]interface{}); ok {
-			if channel := channelFromValue(message); channel != "" {
+			if channel := sseparser.ChannelFromValue(message); channel != "" {
 				return channel
 			}
 		}
 		if nested, ok := item["v"].(map[string]interface{}); ok {
-			if channel := channelFromValue(nested); channel != "" {
+			if channel := sseparser.ChannelFromValue(nested); channel != "" {
 				return channel
 			}
 		}
