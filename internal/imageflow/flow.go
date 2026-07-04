@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 )
@@ -195,4 +196,190 @@ func downloadHTTPURL(client httpclient.AuroraHttpClient, url string) (ImageSourc
 		filename = "image_url.png"
 	}
 	return ImageSource{Data: data, Filename: filename, ContentType: contentType}, true, nil
+}
+
+// ── Multipart / JSON 图片输入归一化 ──
+
+// NormalizeMultipartImages 把 multipart.FileHeader 列表归一化为 ImageSource。
+func NormalizeMultipartImages(rawImages []interface{}) []ImageSource {
+	out := make([]ImageSource, 0, len(rawImages))
+	for _, raw := range rawImages {
+		switch v := raw.(type) {
+		case *multipart.FileHeader:
+			if v == nil {
+				continue
+			}
+			f, err := v.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil || len(data) == 0 {
+				continue
+			}
+			ct := v.Header.Get("Content-Type")
+			if ct == "" {
+				ct = "image/png"
+			}
+			name := v.Filename
+			if name == "" {
+				name = "image.png"
+			}
+			out = append(out, ImageSource{Data: data, Filename: name, ContentType: ct})
+		case ImageSource:
+			if len(v.Data) > 0 {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// ResolveJSONImageSources 把 JSON body 中的 images/image/image_url 字段解析为 ImageSource。
+func ResolveJSONImageSources(body map[string]interface{}, client httpclient.AuroraHttpClient) ([]ImageSource, error) {
+	out := make([]ImageSource, 0, 2)
+	appendValue := func(v interface{}) error {
+		switch t := v.(type) {
+		case string:
+			item, ok, err := NormalizeImageURL(client, t)
+			if err != nil {
+				return err
+			}
+			if ok {
+				out = append(out, item)
+			}
+		case map[string]interface{}:
+			if urlVal, ok := t["image_url"]; ok {
+				if s, ok := urlVal.(string); ok {
+					item, _, err := NormalizeImageURL(client, s)
+					if err != nil {
+						return err
+					}
+					out = append(out, item)
+				}
+			} else if u, ok := t["url"]; ok {
+				if s, ok := u.(string); ok {
+					item, _, err := NormalizeImageURL(client, s)
+					if err != nil {
+						return err
+					}
+					out = append(out, item)
+				}
+			} else if b64, ok := t["b64_json"].(string); ok && b64 != "" {
+				out = append(out, ImageSource{Data: []byte(b64), Filename: "image.png", ContentType: "image/png"})
+			} else if b64, ok := t["base64"].(string); ok && b64 != "" {
+				out = append(out, ImageSource{Data: []byte(b64), Filename: "image.png", ContentType: "image/png"})
+			}
+		}
+		return nil
+	}
+
+	for _, key := range []string{"images", "image", "image_url"} {
+		val, ok := body[key]
+		if !ok || val == nil {
+			continue
+		}
+		switch arr := val.(type) {
+		case []interface{}:
+			for _, item := range arr {
+				if err := appendValue(item); err != nil {
+					return nil, err
+				}
+			}
+		case string:
+			if err := appendValue(arr); err != nil {
+				return nil, err
+			}
+		case map[string]interface{}:
+			if err := appendValue(arr); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
+// CollectResponsesAPIParts 从 Responses API 风格的 input / content / messages
+// 字段中提取 (拼接后的文本, 所有 input_image URL 列表)。
+func CollectResponsesAPIParts(raw interface{}) (string, []string) {
+	if raw == nil {
+		return "", nil
+	}
+	var textParts []string
+	var imageURLs []string
+
+	appendFromContent := func(content interface{}) {
+		switch c := content.(type) {
+		case string:
+			if strings.TrimSpace(c) != "" {
+				textParts = append(textParts, c)
+			}
+		case []interface{}:
+			for _, item := range c {
+				part, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				partType := strings.ToLower(strings.TrimSpace(stringFromAny(part["type"])))
+				switch partType {
+				case "input_text", "text", "output_text":
+					if s := stringFromAny(part["text"]); s != "" {
+						textParts = append(textParts, s)
+					}
+				case "input_image", "image", "image_url":
+					switch u := part["image_url"].(type) {
+					case string:
+						imageURLs = append(imageURLs, u)
+					case map[string]interface{}:
+						if s := stringFromAny(u["url"]); s != "" {
+							imageURLs = append(imageURLs, s)
+						}
+					}
+					if s := stringFromAny(part["url"]); s != "" {
+						imageURLs = append(imageURLs, s)
+					}
+				}
+			}
+		}
+	}
+
+	switch v := raw.(type) {
+	case string:
+		textParts = append(textParts, v)
+	case map[string]interface{}:
+		appendFromContent(v["content"])
+	case []interface{}:
+		for _, item := range v {
+			switch m := item.(type) {
+			case string:
+				textParts = append(textParts, m)
+			case map[string]interface{}:
+				partType := strings.ToLower(strings.TrimSpace(stringFromAny(m["type"])))
+				if partType == "input_image" || partType == "image" || partType == "image_url" {
+					switch u := m["image_url"].(type) {
+					case string:
+						imageURLs = append(imageURLs, u)
+					case map[string]interface{}:
+						if s := stringFromAny(u["url"]); s != "" {
+							imageURLs = append(imageURLs, s)
+						}
+					}
+					if s := stringFromAny(m["url"]); s != "" {
+						imageURLs = append(imageURLs, s)
+					}
+					continue
+				}
+				appendFromContent(m["content"])
+			}
+		}
+	}
+	return strings.Join(textParts, "\n"), imageURLs
+}
+
+func stringFromAny(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
