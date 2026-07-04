@@ -1638,12 +1638,7 @@ func (h *Handler) tts(c *gin.Context) {
 
 	response, wsConn, _, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "request_conversion_error",
-			"param":   "model",
-			"code":    "request_conversion_error",
-		}})
+		apierrors.InternalError(c, "request_conversion_error", err.Error(), "request_conversion_error")
 		return
 	}
 	defer response.Body.Close()
