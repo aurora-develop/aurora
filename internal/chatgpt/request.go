@@ -1881,30 +1881,47 @@ func imageConversationHeaders(secret *tokens.Secret, turnStile *TurnStile, condu
 }
 
 func imageConversationHeadersWithState(secret *tokens.Secret, turnStile *TurnStile, conduitToken, accept string, state *ChatClientState) httpclient.AuroraHeaders {
-	header := createBaseHeaderForState(state)
-	header.Set("Content-Type", "application/json")
-	header.Set("Accept", accept)
-	header.Set("OpenAI-Sentinel-Chat-Requirements-Token", turnStile.TurnStileToken)
-	if turnStile.ProofOfWorkToken != "" {
-		header.Set("OpenAI-Sentinel-Proof-Token", turnStile.ProofOfWorkToken)
+	conversationID := ""
+	deviceID := oaiDeviceID
+	sessionID := oaiSessionID
+	ua := ""
+	if state != nil {
+		if state.ConversationID != "" {
+			conversationID = state.ConversationID
+		}
+		if state.DeviceID != "" {
+			deviceID = state.DeviceID
+		}
+		if state.SessionID != "" {
+			sessionID = state.SessionID
+		}
+		if state.UserAgent != "" {
+			ua = state.UserAgent
+		}
 	}
-	if turnStile.TurnstileToken != "" {
-		header.Set("OpenAI-Sentinel-Turnstile-Token", turnStile.TurnstileToken)
-	}
-	if conduitToken != "" {
-		header.Set("X-Conduit-Token", conduitToken)
-	}
+
+	b := headerbuilder.New().
+		WithBaseHeaders(conversationID).
+		WithDeviceID(deviceID).
+		WithSessionID(sessionID).
+		WithUserAgent(ua).
+		WithContentType("application/json").
+		WithAccept(accept).
+		WithConduitToken(conduitToken).
+		WithAuth(secret).
+		WithCookies(secret).
+		WithTeamAccount(secret).
+		WithSentinelTokens(headerbuilder.SentinelTokens{
+			TurnStileToken:  turnStile.TurnStileToken,
+			ProofOfWorkToken: turnStile.ProofOfWorkToken,
+			TurnstileToken:  turnStile.TurnstileToken,
+		})
+
 	if accept == "text/event-stream" {
-		header.Set("X-Oai-Turn-Trace-Id", uuid.NewString())
+		b.WithTurnTraceID(uuid.NewString())
 	}
-	if secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
-	}
-	setTeamAccountHeader(header, secret)
-	return header
+
+	return b.Build()
 }
 
 func prepareImageConversation(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *TurnStile, prompt, model string, state *ChatClientState) (string, error) {
