@@ -5,6 +5,7 @@ import (
 	"aurora/httpclient"
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/apierrors"
+	"aurora/internal/audioflow"
 	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
 	"aurora/internal/conversationflow"
@@ -1508,20 +1509,14 @@ func (h *Handler) tts(c *gin.Context) {
 	}
 	defer chatgpt.RemoveConversation(client, secret, convId, proxyUrl)
 
-	format := ttsFmtMap[original_request.Format]
-	if format == "" {
-		format = "aac"
-	}
-	voice := ttsVoiceMap[original_request.Voice]
-	if voice == "" {
-		voice = "cove"
-	}
+	format := audioflow.NormalizeFormat(original_request.Format)
+	voice := audioflow.NormalizeVoice(original_request.Voice)
 	data, status, err := chatgpt.GetTTS(client, secret, msgId, convId, voice, format, proxyUrl)
 	if err != nil {
 		apierrors.InternalError(c, "synthesize_request_error", err.Error(), status)
 		return
 	}
-	c.Data(200, ttsTypeMap[format], data)
+	c.Data(200, audioflow.ContentTypeForFormat(format), data)
 }
 
 // ── Audio Transcriptions ──
