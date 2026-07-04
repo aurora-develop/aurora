@@ -151,12 +151,7 @@ func (h *Handler) refresh(c *gin.Context) {
 	var refreshToken officialtypes.OpenAIRefreshToken
 	err := c.BindJSON(&refreshToken)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be proper JSON",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    err.Error(),
-		}})
+		apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 		return
 	}
 	proxyUrl := h.proxy.GetProxyIP()
