@@ -7,6 +7,7 @@ import (
 	"aurora/internal/fingerprint"
 	"aurora/internal/prooftoken"
 	"aurora/internal/so"
+	"aurora/internal/sseparser"
 	"aurora/internal/tokens"
 	"aurora/internal/turnstile"
 	"aurora/typings"
@@ -1550,27 +1551,27 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 		return conversationStreamEvent{}, false
 	}
 
-	if chunk, ok := chatCompletionChunkFromRaw(raw, model); ok {
+	if chunk, ok := sseparser.ChunkFromRaw(raw, model); ok {
 		event := conversationStreamEvent{
 			chunk:          &chunk,
-			text:           firstChunkContent(chunk),
-			role:           firstChunkRole(chunk),
+			text:           sseparser.ChunkContent(chunk),
+			role:           sseparser.ChunkRole(chunk),
 			conversationID: chunk.ConversationID,
-			channel:        channelFromValue(raw),
-			finishReason:   firstChunkFinishReason(chunk),
+			channel:        sseparser.ChannelFromValue(raw),
+			finishReason:   sseparser.ChunkFinishReason(chunk),
 		}
 		event.isStop = event.finishReason != ""
 		return event, true
 	}
 
 	var direct chatgpt_types.ChatGPTResponse
-	if err := json.Unmarshal([]byte(line), &direct); err == nil && isUsableConversationResponse(direct) {
-		channel := channelFromValue(raw)
+	if err := json.Unmarshal([]byte(line), &direct); err == nil && sseparser.IsUsableConversationResponse(direct) {
+		channel := sseparser.ChannelFromValue(raw)
 		state.channel = firstNonEmpty(channel, state.channel)
 		return conversationStreamEvent{response: direct, messageID: direct.Message.ID, channel: state.channel}, true
 	}
 
-	if response, ok := responseFromValue(raw["v"]); ok {
+	if response, ok := sseparser.ResponseFromValue(raw["v"]); ok {
 		state.response = response
 		if channel := channelFromValue(raw["v"]); channel != "" {
 			state.channel = channel
@@ -1637,7 +1638,7 @@ func chatCompletionChunkFromRaw(raw map[string]interface{}, model string) (offic
 	if object, ok := raw["object"].(string); ok && object != "" {
 		chunk.Object = object
 	}
-	if created, ok := numberToInt64(raw["created"]); ok {
+	if created, ok := sseparser.NumberToInt64(raw["created"]); ok {
 		chunk.Created = created
 	}
 	if upstreamModel, ok := raw["model"].(string); ok && upstreamModel != "" {
@@ -1833,7 +1834,7 @@ func applyConversationPatch(state *conversationPatchState, patchPath string, ope
 			}
 			state.response.Message = response.Message
 		}
-		if channel := channelFromValue(value); channel != "" {
+		if channel := sseparser.ChannelFromValue(value); channel != "" {
 			state.channel = channel
 		}
 	case patchPath == "/message/id":
@@ -2720,7 +2721,7 @@ readLoop:
 		if eventName, ok := sseEventName(line); ok {
 			currentEvent = eventName
 		}
-		for _, line := range sseDataPayloads(line) {
+		for _, line := range sseparser.DataPayloads(line) {
 			// Check if line starts with [DONE]
 			if strings.HasPrefix(line, "[DONE]") {
 				if shouldUseWebsocketHandoff(readingWebsocket, handoffTopicID, wsConn, previous_text.Text, imgSource) {
