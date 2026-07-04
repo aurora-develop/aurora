@@ -1249,12 +1249,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	client := bogdanfinn.NewStdClient()
 	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
+		apierrors.InternalError(c, "InitTurnStile_request_error", err.Error(), status)
 		return
 	}
 
@@ -1902,12 +1897,7 @@ func (h *Handler) chatgptConversation(c *gin.Context) {
 	client := bogdanfinn.NewStdClient()
 	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
+		apierrors.InternalError(c, "InitTurnStile_request_error", err.Error(), status)
 		return
 	}
 
