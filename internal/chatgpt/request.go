@@ -726,19 +726,34 @@ func sentinelHeader(secret *tokens.Secret, targetPath string) httpclient.AuroraH
 }
 
 func sentinelHeaderWithState(secret *tokens.Secret, targetPath string, state *ChatClientState) httpclient.AuroraHeaders {
-	header := createBaseHeaderForState(state)
-	header.Set("Accept", "*/*")
-	header.Set("Content-Type", "application/json")
-	header.Set("X-Openai-Target-Path", targetPath)
-	header.Set("X-Openai-Target-Route", targetPath)
-	if secret != nil && secret.IsFree && secret.Token != "" {
-		header.Set("Oai-Device-Id", secret.Token)
+	conversationID := ""
+	deviceID := oaiDeviceID
+	sessionID := oaiSessionID
+	ua := ""
+	if state != nil {
+		if state.ConversationID != "" {
+			conversationID = state.ConversationID
+		}
+		if state.DeviceID != "" {
+			deviceID = state.DeviceID
+		}
+		if state.SessionID != "" {
+			sessionID = state.SessionID
+		}
+		if state.UserAgent != "" {
+			ua = state.UserAgent
+		}
 	}
-	if secret != nil && !secret.IsFree && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
-	setTeamAccountHeader(header, secret)
-	return header
+	b := headerbuilder.New().
+		WithBaseHeaders(conversationID).
+		WithDeviceID(deviceID).
+		WithSessionID(sessionID).
+		WithUserAgent(ua).
+		WithContentType("application/json").
+		WithTargetPath(targetPath).
+		WithAuth(secret).
+		WithTeamAccount(secret)
+	return b.Build()
 }
 
 func readResponseSnippet(body io.Reader, limit int64) string {

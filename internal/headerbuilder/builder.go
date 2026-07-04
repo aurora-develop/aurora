@@ -55,6 +55,14 @@ func (b *Builder) WithBaseHeaders(conversationID string) *Builder {
 	return b
 }
 
+// WithUserAgent 设置 User-Agent。
+func (b *Builder) WithUserAgent(ua string) *Builder {
+	if ua != "" {
+		b.header.Set("User-Agent", ua)
+	}
+	return b
+}
+
 // WithDeviceID 设置设备 ID。
 func (b *Builder) WithDeviceID(deviceID string) *Builder {
 	if deviceID != "" {
