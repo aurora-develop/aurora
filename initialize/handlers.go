@@ -1233,12 +1233,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	proxyUrl := h.proxy.GetProxyIP()
 	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil || secret.Token == "" {
