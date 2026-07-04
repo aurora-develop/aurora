@@ -817,61 +817,52 @@ func conversationHeaders(secret *tokens.Secret, chatToken *TurnStile, accept, ta
 }
 
 func conversationHeadersWithState(secret *tokens.Secret, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string, state *ChatClientState) httpclient.AuroraHeaders {
-	header := createBaseHeaderForState(state)
-	header.Set("Accept", accept)
-	header.Set("Content-Type", "application/json")
-	header.Set("X-Openai-Target-Path", targetPath)
-	header.Set("X-Openai-Target-Route", targetPath)
-	if turnTraceID != "" {
-		header.Set("X-Oai-Turn-Trace-Id", turnTraceID)
+	conversationID := ""
+	deviceID := oaiDeviceID
+	sessionID := oaiSessionID
+	ua := ""
+	if state != nil {
+		if state.ConversationID != "" {
+			conversationID = state.ConversationID
+		}
+		if state.DeviceID != "" {
+			deviceID = state.DeviceID
+		}
+		if state.SessionID != "" {
+			sessionID = state.SessionID
+		}
+		if state.UserAgent != "" {
+			ua = state.UserAgent
+		}
 	}
-	if conduitToken != "" || strings.HasSuffix(targetPath, "/f/conversation") || strings.HasSuffix(targetPath, "/f/conversation/prepare") {
-		header.Set("X-Conduit-Token", conduitToken)
-	}
-	if strings.HasSuffix(targetPath, "/f/conversation") && !strings.HasSuffix(targetPath, "/prepare") {
-		header.Set("Oai-Echo-Logs", "0,943,1,65876,0,68124,1,68930")
-		header.Set("Oai-Telemetry", "[1,null]")
-	}
+
+	b := headerbuilder.New().
+		WithBaseHeaders(conversationID).
+		WithDeviceID(deviceID).
+		WithSessionID(sessionID).
+		WithUserAgent(ua).
+		WithAccept(accept).
+		WithContentType("application/json").
+		WithTargetPath(targetPath).
+		WithTurnTraceID(turnTraceID).
+		WithConduitToken(conduitToken).
+		WithConversationHeaders(targetPath).
+		WithAuth(secret).
+		WithCookies(secret).
+		WithTeamAccount(secret)
+
 	if chatToken != nil {
-		if chatToken.TurnStileToken != "" {
-			header.Set("Openai-Sentinel-Chat-Requirements-Token", chatToken.TurnStileToken)
-		}
-		if chatToken.ChatRequirementsPrepareToken != "" {
-			header.Set("Openai-Sentinel-Chat-Requirements-Prepare-Token", chatToken.ChatRequirementsPrepareToken)
-		}
-		if chatToken.ProofOfWorkToken != "" {
-			header.Set("Openai-Sentinel-Proof-Token", chatToken.ProofOfWorkToken)
-		}
-		if chatToken.TurnstileToken != "" {
-			header.Set("Openai-Sentinel-Turnstile-Token", chatToken.TurnstileToken)
-		}
-		// openai-sentinel-so-token:对齐 out.js sessionObserverToken() 行为,需要在
-		// 首次发请求前触发 snapshot(fire-and-forget collector 必须已经起好)。
-		// deviceID 沿用 secret.Token(对应 out.js qn.getCookies()["oai-did"])。
-		if soToken := chatToken.ensureSOToken(soDeviceIDFor(secret)); soToken != "" {
-			header.Set("Openai-Sentinel-So-Token", soToken)
-		}
+		soToken := chatToken.ensureSOToken(soDeviceIDFor(secret))
+		b.WithSentinelTokens(headerbuilder.SentinelTokens{
+			TurnStileToken:               chatToken.TurnStileToken,
+			ChatRequirementsPrepareToken: chatToken.ChatRequirementsPrepareToken,
+			ProofOfWorkToken:             chatToken.ProofOfWorkToken,
+			TurnstileToken:               chatToken.TurnstileToken,
+			SOToken:                      soToken,
+		})
 	}
-	cookieStr := ""
-	if secret != nil && secret.PUID != "" {
-		cookieStr = "_puid=" + secret.PUID
-	}
-	if secret != nil && secret.IsFree && secret.Token != "" {
-		header.Set("Oai-Device-Id", secret.Token)
-		// free 用户的 oai-did 也塞进 cookie
-		if cookieStr != "" {
-			cookieStr += "; "
-		}
-		cookieStr += "oai-did=" + secret.Token
-	}
-	if cookieStr != "" {
-		header["Cookie"] = cookieStr
-	}
-	if secret != nil && !secret.IsFree && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
-	}
-	setTeamAccountHeader(header, secret)
-	return header
+
+	return b.Build()
 }
 
 type chatWebsocketURLResponse struct {
