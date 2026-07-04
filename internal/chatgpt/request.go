@@ -1616,148 +1616,6 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 	return conversationStreamEvent{}, false
 }
 
-func chatCompletionChunkFromRaw(raw map[string]interface{}, model string) (official_types.ChatCompletionChunk, bool) {
-	choices, ok := raw["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return official_types.ChatCompletionChunk{}, false
-	}
-	choice, ok := choices[0].(map[string]interface{})
-	if !ok {
-		return official_types.ChatCompletionChunk{}, false
-	}
-	delta, ok := choice["delta"].(map[string]interface{})
-	if !ok {
-		return official_types.ChatCompletionChunk{}, false
-	}
-
-	text, _ := delta["content"].(string)
-	chunk := official_types.NewChatCompletionChunk(text, model)
-	if id, ok := raw["id"].(string); ok && id != "" {
-		chunk.ID = id
-	}
-	if object, ok := raw["object"].(string); ok && object != "" {
-		chunk.Object = object
-	}
-	if created, ok := sseparser.NumberToInt64(raw["created"]); ok {
-		chunk.Created = created
-	}
-	if upstreamModel, ok := raw["model"].(string); ok && upstreamModel != "" {
-		chunk.Model = upstreamModel
-	}
-	if role, ok := delta["role"].(string); ok && role != "" {
-		chunk.Choices[0].Delta.Role = role
-	}
-	if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
-		chunk.Choices[0].FinishReason = finishReason
-	}
-	if conversationID, ok := raw["conversation_id"].(string); ok && conversationID != "" {
-		chunk.ConversationID = conversationID
-	}
-	if sentinel, ok := raw["sentinel"].(map[string]interface{}); ok {
-		chunk.Sentinel = sentinel
-	}
-	return chunk, true
-}
-
-func channelFromValue(value interface{}) string {
-	switch item := value.(type) {
-	case map[string]interface{}:
-		if channel, _ := item["channel"].(string); channel != "" {
-			return channel
-		}
-		if delta, ok := item["delta"].(map[string]interface{}); ok {
-			if channel, _ := delta["channel"].(string); channel != "" {
-				return channel
-			}
-		}
-		if choices, ok := item["choices"].([]interface{}); ok {
-			for _, choiceValue := range choices {
-				choice, ok := choiceValue.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if channel, _ := choice["channel"].(string); channel != "" {
-					return channel
-				}
-				if delta, ok := choice["delta"].(map[string]interface{}); ok {
-					if channel, _ := delta["channel"].(string); channel != "" {
-						return channel
-					}
-				}
-			}
-		}
-		if message, ok := item["message"].(map[string]interface{}); ok {
-			if channel := sseparser.ChannelFromValue(message); channel != "" {
-				return channel
-			}
-		}
-		if nested, ok := item["v"].(map[string]interface{}); ok {
-			if channel := sseparser.ChannelFromValue(nested); channel != "" {
-				return channel
-			}
-		}
-	}
-	return ""
-}
-
-func numberToInt64(value interface{}) (int64, bool) {
-	switch item := value.(type) {
-	case float64:
-		return int64(item), true
-	case int64:
-		return item, true
-	case int:
-		return int64(item), true
-	default:
-		return 0, false
-	}
-}
-
-func firstChunkContent(chunk official_types.ChatCompletionChunk) string {
-	if len(chunk.Choices) == 0 {
-		return ""
-	}
-	return chunk.Choices[0].Delta.Content
-}
-
-func firstChunkRole(chunk official_types.ChatCompletionChunk) string {
-	if len(chunk.Choices) == 0 {
-		return ""
-	}
-	return chunk.Choices[0].Delta.Role
-}
-
-func normalizeOpenAIContentDelta(currentText string, incoming string) string {
-	if incoming == "" {
-		return ""
-	}
-	if currentText == "" {
-		return incoming
-	}
-	if strings.HasPrefix(incoming, currentText) {
-		return incoming[len(currentText):]
-	}
-	return incoming
-}
-
-func firstStringPart(parts []interface{}) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	text, _ := parts[0].(string)
-	return text
-}
-
-func firstChunkFinishReason(chunk official_types.ChatCompletionChunk) string {
-	if len(chunk.Choices) == 0 || chunk.Choices[0].FinishReason == nil {
-		return ""
-	}
-	if reason, ok := chunk.Choices[0].FinishReason.(string); ok {
-		return reason
-	}
-	return fmt.Sprint(chunk.Choices[0].FinishReason)
-}
-
 func sentinelsFromResponse(response chatgpt_types.ChatGPTResponse) []map[string]interface{} {
 	var raw map[string]interface{}
 	data, err := json.Marshal(response)
@@ -2752,7 +2610,7 @@ readLoop:
 				debugText := streamEvent.text
 				debugSrc := "chunk"
 				if streamEvent.response.Message.ID != "" {
-					debugText = firstStringPart(streamEvent.response.Message.Content.Parts)
+					debugText = sseparser.FirstStringPart(streamEvent.response.Message.Content.Parts)
 					debugSrc = "response"
 				}
 				raw := strings.TrimSpace(line)
@@ -2772,7 +2630,7 @@ readLoop:
 				if streamEvent.chunk.Sentinel != nil {
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
-				deltaText := normalizeOpenAIContentDelta(previous_text.Text, streamEvent.text)
+				deltaText := sseparser.NormalizeContentDelta(previous_text.Text, streamEvent.text)
 				if streamEvent.channel != "" {
 					activeChannel = streamEvent.channel
 				}
@@ -2910,7 +2768,7 @@ readLoop:
 				assistantMessageID = original_response.Message.ID
 			}
 			if activeChannel == "analysis" {
-				thinkingDelta := normalizeOpenAIContentDelta(thinkingText, firstStringPart(original_response.Message.Content.Parts))
+				thinkingDelta := sseparser.NormalizeContentDelta(thinkingText, sseparser.FirstStringPart(original_response.Message.Content.Parts))
 				emitThinking(thinkingDelta)
 				currentEvent = ""
 				continue
