@@ -1666,12 +1666,7 @@ func (h *Handler) tts(c *gin.Context) {
 	}
 	data, status, err := chatgpt.GetTTS(client, secret, msgId, convId, voice, format, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "synthesize_request_error",
-			"param":   nil,
-			"code":    status,
-		}})
+		apierrors.InternalError(c, "synthesize_request_error", err.Error(), status)
 		return
 	}
 	c.Data(200, ttsTypeMap[format], data)
