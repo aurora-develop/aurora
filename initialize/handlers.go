@@ -4,6 +4,7 @@ import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
 	"aurora/httpclient"
 	"aurora/httpclient/bogdanfinn"
+	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
@@ -13,7 +14,6 @@ import (
 	"aurora/util"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -1852,32 +1852,16 @@ func (h *Handler) engines(c *gin.Context) {
 }
 
 func (h *Handler) secretFromAuthorization(c *gin.Context, needsPaid bool, allowFallbackPaid bool, proxy string) (*tokens.Secret, int, error) {
-	secret := h.token.GetSecret()
-	if needsPaid || allowFallbackPaid {
-		secret = h.token.GetPaidSecret()
+	resolver := authresolver.NewResolver(h.token)
+	result := resolver.Resolve(c, authresolver.ResolveRequest{
+		NeedsPaid:         needsPaid,
+		AllowFallbackPaid: allowFallbackPaid,
+		ProxyURL:          proxy,
+	})
+	if result.Error != nil {
+		return nil, result.Status, result.Error
 	}
-
-	authToken, teamAccountID, hasAuthorizationTeamID := authorizationTokenAndTeam(c)
-	if authToken != "" && os.Getenv("Authorization") != "" && authToken == os.Getenv("Authorization") {
-		authToken = ""
-	}
-	if authToken != "" {
-		if strings.HasPrefix(authToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = h.token.GenerateTempToken(authToken)
-		} else if isUUID(authToken) {
-			secret = h.token.GenerateDeviceId(authToken)
-		} else if hasAuthorizationTeamID || teamAccountID != "" {
-			accessToken, status, err := h.accessTokenFromRefreshToken(authToken, proxy)
-			if err != nil {
-				return nil, status, err
-			}
-			secret = h.token.GenerateTempToken(accessToken)
-		}
-	}
-	if needsPaid && (secret == nil || secret.Token == "" || secret.IsFree) && !allowFallbackPaid {
-		return nil, 0, nil
-	}
-	return secret.WithTeamUserID(teamAccountID), 0, nil
+	return result.Secret, 0, nil
 }
 
 func (h *Handler) accessTokenFromRefreshToken(refreshToken string, proxy string) (string, int, error) {
@@ -1894,7 +1878,7 @@ func (h *Handler) accessTokenFromRefreshToken(refreshToken string, proxy string)
 			return accessToken, status, nil
 		}
 	}
-	return "", status, errors.New("refresh token response did not include access_token")
+	return "", status, fmt.Errorf("refresh token response did not include access_token")
 }
 
 func isUUID(str string) bool {
