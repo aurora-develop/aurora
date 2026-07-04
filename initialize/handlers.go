@@ -627,13 +627,6 @@ func isStreamTrue(v string) bool {
 // /v1/images/edits 与 /v1/images/variations
 //
 
-// editImageInput 一张待编辑/变体使用的源图,支持 multipart 文件上传与 JSON 引用(image_url 字符串或对象)。
-type editImageInput struct {
-	Data        []byte
-	Filename    string
-	ContentType string
-}
-
 // imageEditImageReferenceFields 与 chatgpt2api/api/image_inputs.IMAGE_REFERENCE_FIELDS 对齐。
 var imageEditImageReferenceFields = map[string]bool{
 	"image":       true,
@@ -644,8 +637,8 @@ var imageEditImageReferenceFields = map[string]bool{
 	"image_url[]": true,
 }
 
-func normalizeImageEditImages(rawImages []interface{}) []editImageInput {
-	out := make([]editImageInput, 0, len(rawImages))
+func normalizeImageEditImages(rawImages []interface{}) []imageflow.ImageSource {
+	out := make([]imageflow.ImageSource, 0, len(rawImages))
 	for _, raw := range rawImages {
 		switch v := raw.(type) {
 		case *multipart.FileHeader:
@@ -669,8 +662,8 @@ func normalizeImageEditImages(rawImages []interface{}) []editImageInput {
 			if name == "" {
 				name = "image.png"
 			}
-			out = append(out, editImageInput{Data: data, Filename: name, ContentType: ct})
-		case editImageInput:
+			out = append(out, imageflow.ImageSource{Data: data, Filename: name, ContentType: ct})
+		case imageflow.ImageSource:
 			if len(v.Data) > 0 {
 				out = append(out, v)
 			}
@@ -681,9 +674,9 @@ func normalizeImageEditImages(rawImages []interface{}) []editImageInput {
 	return out
 }
 
-func imageEditReadJSONImage(data []byte, filename, contentType string) (editImageInput, error) {
+func imageEditReadJSONImage(data []byte, filename, contentType string) (imageflow.ImageSource, error) {
 	if len(data) == 0 {
-		return editImageInput{}, fmt.Errorf("image data is empty")
+		return imageflow.ImageSource{}, fmt.Errorf("image data is empty")
 	}
 	if filename == "" {
 		filename = "image.png"
@@ -691,14 +684,14 @@ func imageEditReadJSONImage(data []byte, filename, contentType string) (editImag
 	if contentType == "" {
 		contentType = "image/png"
 	}
-	return editImageInput{Data: data, Filename: filename, ContentType: contentType}, nil
+	return imageflow.ImageSource{Data: data, Filename: filename, ContentType: contentType}, nil
 }
 
 // imageEditDecodeDataURL 解析 data:image/...;base64,XXXX 形式的 URL。
-func imageEditDecodeDataURL(url string) (editImageInput, error) {
+func imageEditDecodeDataURL(url string) (imageflow.ImageSource, error) {
 	comma := strings.Index(url, ",")
 	if comma < 0 {
-		return editImageInput{}, fmt.Errorf("invalid data URL")
+		return imageflow.ImageSource{}, fmt.Errorf("invalid data URL")
 	}
 	header := url[:comma]
 	payload := url[comma+1:]
@@ -707,7 +700,7 @@ func imageEditDecodeDataURL(url string) (editImageInput, error) {
 		// 形如 data:image/png;base64
 		contentType = header[5:semi]
 		if !strings.HasPrefix(contentType, "image/") {
-			return editImageInput{}, fmt.Errorf("data URL must be an image, got %q", contentType)
+			return imageflow.ImageSource{}, fmt.Errorf("data URL must be an image, got %q", contentType)
 		}
 	}
 	// 简单 base64 解码;若包含 URL 编码等其他格式,退回 base64.URLEncoding
@@ -722,7 +715,7 @@ func imageEditDecodeDataURL(url string) (editImageInput, error) {
 		// 兜底再用 StdEncoding 试一次,容忍格式不严格的输入
 		raw, err = base64.StdEncoding.DecodeString(payload)
 		if err != nil {
-			return editImageInput{}, err
+			return imageflow.ImageSource{}, err
 		}
 		contentType = "image/png"
 	}
@@ -738,8 +731,8 @@ func imageEditDecodeDataURL(url string) (editImageInput, error) {
 	return imageEditReadJSONImage(raw, "image_url."+ext, contentType)
 }
 
-// imageEditDownloadHTTPURL 下载一个 https/http 图片并包装为 editImageInput。
-func imageEditDownloadHTTPURL(client httpclient.AuroraHttpClient, url string) (editImageInput, error) {
+// imageEditDownloadHTTPURL 下载一个 https/http 图片并包装为 imageflow.ImageSource。
+func imageEditDownloadHTTPURL(client httpclient.AuroraHttpClient, url string) (imageflow.ImageSource, error) {
 	if client == nil {
 		client = bogdanfinn.NewStdClient()
 	}
@@ -749,15 +742,15 @@ func imageEditDownloadHTTPURL(client httpclient.AuroraHttpClient, url string) (e
 	}
 	resp, err := client.Request(httpclient.GET, url, headers, nil, nil)
 	if err != nil {
-		return editImageInput{}, err
+		return imageflow.ImageSource{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return editImageInput{}, fmt.Errorf("download image failed: status %d", resp.StatusCode)
+		return imageflow.ImageSource{}, fmt.Errorf("download image failed: status %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return editImageInput{}, err
+		return imageflow.ImageSource{}, err
 	}
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
@@ -776,11 +769,11 @@ func imageEditDownloadHTTPURL(client httpclient.AuroraHttpClient, url string) (e
 	return imageEditReadJSONImage(data, filename, contentType)
 }
 
-// imageEditConvertURL 把字符串(image_url)解析为 editImageInput。
-func imageEditConvertURL(client httpclient.AuroraHttpClient, raw string) (editImageInput, bool, error) {
+// imageEditConvertURL 把字符串(image_url)解析为 imageflow.ImageSource。
+func imageEditConvertURL(client httpclient.AuroraHttpClient, raw string) (imageflow.ImageSource, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return editImageInput{}, false, nil
+		return imageflow.ImageSource{}, false, nil
 	}
 	if strings.HasPrefix(raw, "data:") {
 		item, err := imageEditDecodeDataURL(raw)
@@ -795,9 +788,9 @@ func imageEditConvertURL(client httpclient.AuroraHttpClient, raw string) (editIm
 	return item, true, err
 }
 
-// resolveEditImageSources 把 JSON images 数组 / image_url 字段解析为 []editImageInput。
-func resolveEditImageSources(c *gin.Context, body map[string]interface{}, client httpclient.AuroraHttpClient) ([]editImageInput, error) {
-	out := make([]editImageInput, 0, 2)
+// resolveEditImageSources 把 JSON images 数组 / image_url 字段解析为 []imageflow.ImageSource。
+func resolveEditImageSources(c *gin.Context, body map[string]interface{}, client httpclient.AuroraHttpClient) ([]imageflow.ImageSource, error) {
+	out := make([]imageflow.ImageSource, 0, 2)
 	appendValue := func(v interface{}) error {
 		switch t := v.(type) {
 		case string:
@@ -982,7 +975,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	contentType := strings.Split(c.GetHeader("Content-Type"), ";")[0]
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 
-	var imageSources []editImageInput
+	var imageSources []imageflow.ImageSource
 	var prompt, model, responseFormat string
 	var n int
 	var stream bool
@@ -1073,15 +1066,15 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		}
 
 		// Responses API 风格:从 input / content / messages 中提取 input_image 部件
-		promptFromParts, imageParts := collectResponsesAPIParts(body.Input)
+		promptFromParts, imageParts := imageflow.CollectResponsesAPIParts(body.Input)
 		if len(imageParts) == 0 {
-			if p, imgs := collectResponsesAPIParts(body.Content); len(imgs) > 0 {
+			if p, imgs := imageflow.CollectResponsesAPIParts(body.Content); len(imgs) > 0 {
 				promptFromParts = p
 				imageParts = imgs
 			}
 		}
 		if len(imageParts) == 0 {
-			if p, imgs := collectResponsesAPIParts(body.Messages); len(imgs) > 0 {
+			if p, imgs := imageflow.CollectResponsesAPIParts(body.Messages); len(imgs) > 0 {
 				promptFromParts = p
 				imageParts = imgs
 			}
@@ -1138,7 +1131,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 				}
 			}
 		}
-		imageSources = append(imageSources, normalizeImageEditImages(rawSources)...)
+		imageSources = append(imageSources, imageflow.NormalizeMultipartImages(rawSources)...)
 	}
 
 	// variations:即使客户端没传 prompt,也注入默认指令
