@@ -1332,12 +1332,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 							writeImageStreamDone(c)
 							return
 						}
-						c.JSON(500, gin.H{"error": gin.H{
-							"message": err.Error(),
-							"type":    "image_download_error",
-							"param":   nil,
-							"code":    "image_download_error",
-						}})
+						apierrors.InternalError(c, "image_download_error", err.Error(), "image_download_error")
 						return
 					}
 					item.B64JSON = base64.StdEncoding.EncodeToString(imageBytes)
