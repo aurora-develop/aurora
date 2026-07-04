@@ -599,45 +599,6 @@ type imageStreamCompleted struct {
 	Data    []officialtypes.ImageGenerationData `json:"data"`
 }
 
-func writeImageStreamHeader(c *gin.Context) {
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(200)
-}
-
-func writeImageStreamEvent(c *gin.Context, event string, payload interface{}) bool {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return false
-	}
-	if event != "" {
-		if _, err := c.Writer.WriteString("event: " + event + "\n"); err != nil {
-			return false
-		}
-	}
-	if _, err := c.Writer.WriteString("data: "); err != nil {
-		return false
-	}
-	if _, err := c.Writer.Write(data); err != nil {
-		return false
-	}
-	if _, err := c.Writer.WriteString("\n\n"); err != nil {
-		return false
-	}
-	c.Writer.Flush()
-	return true
-}
-
-func writeImageStreamDone(c *gin.Context) bool {
-	if _, err := c.Writer.WriteString("data: [DONE]\n\n"); err != nil {
-		return false
-	}
-	c.Writer.Flush()
-	return true
-}
-
 // requestStreamFlag 解析 stream 参数,支持 JSON body 的 stream 字段或 ?stream=true 查询参数。
 // multipart/form-data 也支持 stream 字段(字符串 "true"/"1")。
 func requestStreamFlag(c *gin.Context, jsonStream bool) bool {
@@ -1231,7 +1192,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	}
 
 	if stream {
-		writeImageStreamHeader(c)
+		httpstream.WriteImageStreamHeader(c)
 	}
 
 	// 1) 上传所有源图
@@ -1240,12 +1201,8 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		uploaded, upStatus, upErr := chatgpt.UploadFile(client, secret, proxyUrl, src.Filename, src.ContentType, src.Data)
 		if upErr != nil {
 			if stream {
-				writeImageStreamEvent(c, "image.generation.error", gin.H{
-					"object":  "image.generation.error",
-					"index":   idx,
-					"message": "upload image failed: " + upErr.Error(),
-				})
-				writeImageStreamDone(c)
+				httpstream.WriteImageStreamError(c, idx, len(imageSources), "upload image failed: "+upErr.Error())
+				httpstream.WriteImageStreamDone(c)
 				return
 			}
 			apierrors.InternalError(c, "image_upload_error", "upload image failed: "+upErr.Error(), upStatus)
@@ -1265,25 +1222,13 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	var data []officialtypes.ImageGenerationData
 	for i := 0; i < n; i++ {
 		if stream {
-			writeImageStreamEvent(c, "image.generation.chunk", imageStreamChunk{
-				Object:       "image.generation.chunk",
-				Index:        i,
-				Total:        n,
-				Created:      0,
-				Model:        model,
-				ProgressText: fmt.Sprintf("Generating image %d/%d ...", i+1, n),
-			})
+			httpstream.WriteImageStreamChunk(c, i, n, model)
 		}
 		imageResults, upstreamText, err := chatgpt.GeneratePictureConversationImagesWithReferences(client, secret, turnStile, prompt, model, proxyUrl, references)
 		if err != nil {
 			if stream {
-				writeImageStreamEvent(c, "image.generation.error", gin.H{
-					"object":  "image.generation.error",
-					"index":   i,
-					"total":   n,
-					"message": err.Error(),
-				})
-				writeImageStreamDone(c)
+				httpstream.WriteImageStreamError(c, i, n, err.Error())
+				httpstream.WriteImageStreamDone(c)
 				return
 			}
 			apierrors.InternalError(c, "image_generation_error", err.Error(), "image_generation_error")
@@ -1300,13 +1245,8 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 					imageBytes, err := chatgpt.DownloadImageBytes(client, imageResult.URL, secret)
 					if err != nil {
 						if stream {
-							writeImageStreamEvent(c, "image.generation.error", gin.H{
-								"object":  "image.generation.error",
-								"index":   i,
-								"total":   n,
-								"message": err.Error(),
-							})
-							writeImageStreamDone(c)
+							httpstream.WriteImageStreamError(c, i, n, err.Error())
+							httpstream.WriteImageStreamDone(c)
 							return
 						}
 						apierrors.InternalError(c, "image_download_error", err.Error(), "image_download_error")
@@ -1322,14 +1262,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 			}
 			data = append(data, item)
 			if stream {
-				writeImageStreamEvent(c, "image.generation.result", imageStreamResult{
-					Object:  "image.generation.result",
-					Index:   len(data) - 1,
-					Total:   n,
-					Created: 0,
-					Model:   model,
-					Data:    []officialtypes.ImageGenerationData{item},
-				})
+				httpstream.WriteImageStreamResult(c, len(data)-1, n, model, []officialtypes.ImageGenerationData{item})
 			}
 			if len(data) >= n {
 				break
@@ -1337,13 +1270,8 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		}
 		if len(imageResults) == 0 && upstreamText != "" {
 			if stream {
-				writeImageStreamEvent(c, "image.generation.error", gin.H{
-					"object":  "image.generation.error",
-					"index":   i,
-					"total":   n,
-					"message": "No image result found in response: " + upstreamText,
-				})
-				writeImageStreamDone(c)
+				httpstream.WriteImageStreamError(c, i, n, "No image result found in response: "+upstreamText)
+				httpstream.WriteImageStreamDone(c)
 				return
 			}
 			apierrors.InternalError(c, "image_generation_error", "No image result found in response: "+upstreamText, "image_generation_error")
@@ -1355,24 +1283,16 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 	}
 	if len(data) == 0 {
 		if stream {
-			writeImageStreamEvent(c, "image.generation.error", gin.H{
-				"object":  "image.generation.error",
-				"message": "No image result found in response",
-			})
-			writeImageStreamDone(c)
+			httpstream.WriteImageStreamError(c, 0, n, "No image result found in response")
+			httpstream.WriteImageStreamDone(c)
 			return
 		}
 		apierrors.InternalError(c, "image_generation_error", "No image result found in response", "image_generation_error")
 		return
 	}
 	if stream {
-		writeImageStreamEvent(c, "image.generation.completed", imageStreamCompleted{
-			Object:  "image.generation.completed",
-			Created: 0,
-			Model:   model,
-			Data:    data,
-		})
-		writeImageStreamDone(c)
+		httpstream.WriteImageStreamCompleted(c, model, data)
+		httpstream.WriteImageStreamDone(c)
 		return
 	}
 	if asVariation {
