@@ -4,8 +4,10 @@ import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
 	"aurora/httpclient"
 	"aurora/httpclient/bogdanfinn"
+	"aurora/internal/apierrors"
 	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
+	"aurora/internal/httpstream"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
 	"aurora/internal/toolcall"
@@ -277,38 +279,22 @@ func (h *Handler) nightmare(c *gin.Context) {
 	var original_request officialtypes.APIRequest
 	err := c.BindJSON(&original_request)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be proper JSON",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    err.Error(),
-		}})
+		apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 		return
 	}
 	if len(original_request.Messages) == 0 {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required parameter: messages",
-			"type":    "invalid_request_error",
-			"param":   "messages",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "messages", "missing_required_parameter")
 		return
 	}
 	proxyUrl := h.proxy.GetProxyIP()
 	input_tokens := countMessagesTokens(original_request.Messages)
 	secret, status, err := h.secretFromAuthorization(c, original_requestHasFiles(original_request), false, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil {
-		c.JSON(400, gin.H{"error": "Not Account Found."})
-		c.Abort()
+		apierrors.NotFoundAccount(c)
 		return
 	}
 
@@ -378,10 +364,7 @@ func (h *Handler) nightmare(c *gin.Context) {
 		original_request.Stream = false
 	}
 	if original_request.Stream {
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		httpstream.WriteSSEHeader(c)
 	}
 	for i := maxContinueCount(); i > 0; i-- {
 		var continue_info *chatgpt.ContinueInfo
@@ -483,23 +466,13 @@ func (h *Handler) responses(c *gin.Context) {
 	var responsesRequest officialtypes.ResponsesAPIRequest
 	err := c.BindJSON(&responsesRequest)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be proper JSON",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    err.Error(),
-		}})
+		apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 		return
 	}
 
 	original_request, err := responsesRequest.ToAPIRequest()
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "invalid_request_error",
-			"param":   "input",
-			"code":    "invalid_request_error",
-		}})
+		apierrors.InvalidRequest(c, err.Error(), "invalid_request_error")
 		return
 	}
 
@@ -510,17 +483,11 @@ func (h *Handler) responses(c *gin.Context) {
 	}
 	secret, status, err := h.secretFromAuthorization(c, original_requestHasFiles(original_request), false, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil {
-		c.JSON(400, gin.H{"error": "Not Account Found."})
-		c.Abort()
+		apierrors.NotFoundAccount(c)
 		return
 	}
 
@@ -633,21 +600,11 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	var imageRequest officialtypes.ImageGenerationRequest
 	err := c.BindJSON(&imageRequest)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be proper JSON",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    err.Error(),
-		}})
+		apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 		return
 	}
 	if imageRequest.Prompt == "" {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required parameter: prompt",
-			"type":    "invalid_request_error",
-			"param":   "prompt",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "prompt", "missing_required_parameter")
 		return
 	}
 	if imageRequest.N <= 0 {
@@ -1733,62 +1690,32 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 func (h *Handler) files(c *gin.Context) {
 	secret, status, err := h.secretFromAuthorization(c, true, true, h.proxy.GetProxyIP())
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil || secret.Token == "" || secret.IsFree {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Files API requires a logged-in ChatGPT access token.",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    "missing_access_token",
-		}})
+		apierrors.InvalidRequest(c, "Files API requires a logged-in ChatGPT access token.", "missing_access_token")
 		return
 	}
 
 	formFile, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required multipart field: file",
-			"type":    "invalid_request_error",
-			"param":   "file",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "file", "missing_required_parameter")
 		return
 	}
 	file, err := formFile.Open()
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "invalid_request_error",
-			"param":   "file",
-			"code":    "file_open_error",
-		}})
+		apierrors.InvalidRequest(c, err.Error(), "file_open_error")
 		return
 	}
 	defer file.Close()
 	data, err := io.ReadAll(file)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "invalid_request_error",
-			"param":   "file",
-			"code":    "file_read_error",
-		}})
+		apierrors.InvalidRequest(c, err.Error(), "file_read_error")
 		return
 	}
 	if len(data) == 0 {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Uploaded file is empty",
-			"type":    "invalid_request_error",
-			"param":   "file",
-			"code":    "empty_file",
-		}})
+		apierrors.InvalidRequest(c, "Uploaded file is empty", "empty_file")
 		return
 	}
 
@@ -1965,37 +1892,22 @@ func (h *Handler) tts(c *gin.Context) {
 	var original_request officialtypes.TTSAPIRequest
 	err := c.BindJSON(&original_request)
 	if err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be proper JSON",
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    err.Error(),
-		}})
+		apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 		return
 	}
 	if original_request.Input == "" {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Missing required parameter: input",
-			"type":    "invalid_request_error",
-			"param":   "input",
-			"code":    "missing_required_parameter",
-		}})
+		apierrors.MissingParam(c, "input", "missing_required_parameter")
 		return
 	}
 
 	proxyUrl := h.proxy.GetProxyIP()
 	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil || secret.Token == "" {
-		c.JSON(400, gin.H{"error": "TTS requires a logged-in ChatGPT access token."})
+		apierrors.BadRequest(c, "invalid_request_error", "TTS requires a logged-in ChatGPT access token.", "missing_access_token")
 		return
 	}
 	if secret.IsFree {
@@ -2079,22 +1991,12 @@ func (h *Handler) handleTranscription(c *gin.Context, isTranslation bool) {
 	contentType := strings.Split(c.GetHeader("Content-Type"), ";")[0]
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	if !strings.HasPrefix(contentType, "multipart/form-data") {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Request must be multipart/form-data",
-			"type":    "invalid_request_error",
-			"param":   "Content-Type",
-			"code":    "invalid_content_type",
-		}})
+		apierrors.InvalidRequest(c, "Request must be multipart/form-data", "invalid_content_type")
 		return
 	}
 
 	if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
-		c.JSON(400, gin.H{"error": gin.H{
-			"message": "Failed to parse multipart form: " + err.Error(),
-			"type":    "invalid_request_error",
-			"param":   nil,
-			"code":    "parse_error",
-		}})
+		apierrors.InvalidRequest(c, "Failed to parse multipart form: "+err.Error(), "parse_error")
 		return
 	}
 
