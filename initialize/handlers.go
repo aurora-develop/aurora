@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
@@ -635,43 +634,6 @@ var imageEditImageReferenceFields = map[string]bool{
 	"images[]":    true,
 	"image_url":   true,
 	"image_url[]": true,
-}
-
-func normalizeImageEditImages(rawImages []interface{}) []imageflow.ImageSource {
-	out := make([]imageflow.ImageSource, 0, len(rawImages))
-	for _, raw := range rawImages {
-		switch v := raw.(type) {
-		case *multipart.FileHeader:
-			if v == nil {
-				continue
-			}
-			f, err := v.Open()
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(f)
-			f.Close()
-			if err != nil || len(data) == 0 {
-				continue
-			}
-			ct := v.Header.Get("Content-Type")
-			if ct == "" {
-				ct = "image/png"
-			}
-			name := v.Filename
-			if name == "" {
-				name = "image.png"
-			}
-			out = append(out, imageflow.ImageSource{Data: data, Filename: name, ContentType: ct})
-		case imageflow.ImageSource:
-			if len(v.Data) > 0 {
-				out = append(out, v)
-			}
-		default:
-			// JSON 形态的 image 引用由 collectImageEditSourcesFromValue 处理,这里跳过
-		}
-	}
-	return out
 }
 
 func imageEditReadJSONImage(data []byte, filename, contentType string) (imageflow.ImageSource, error) {
