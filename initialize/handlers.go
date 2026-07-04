@@ -2,7 +2,6 @@ package initialize
 
 import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
-	"aurora/httpclient"
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/apierrors"
 	"aurora/internal/audioflow"
@@ -36,16 +35,6 @@ type Handler struct {
 	proxy    *proxys.IProxy
 	token    *tokens.AccessToken
 	sessions *SessionManager
-}
-
-func writeChatCompletionStreamDone(c *gin.Context, stopSent bool, model string, conversationID string) {
-	if !stopSent {
-		finalLine := officialtypes.StopChunkWithConversation("stop", model, conversationID)
-		c.Writer.WriteString("data: " + finalLine.String() + "\n\n")
-		c.Writer.Flush()
-	}
-	c.Writer.WriteString("data: [DONE]\n\n")
-	c.Writer.Flush()
 }
 
 func NewHandle(proxy *proxys.IProxy, token *tokens.AccessToken) *Handler {
@@ -637,293 +626,6 @@ var imageEditImageReferenceFields = map[string]bool{
 	"image_url[]": true,
 }
 
-func imageEditReadJSONImage(data []byte, filename, contentType string) (imageflow.ImageSource, error) {
-	if len(data) == 0 {
-		return imageflow.ImageSource{}, fmt.Errorf("image data is empty")
-	}
-	if filename == "" {
-		filename = "image.png"
-	}
-	if contentType == "" {
-		contentType = "image/png"
-	}
-	return imageflow.ImageSource{Data: data, Filename: filename, ContentType: contentType}, nil
-}
-
-// imageEditDecodeDataURL 解析 data:image/...;base64,XXXX 形式的 URL。
-func imageEditDecodeDataURL(url string) (imageflow.ImageSource, error) {
-	comma := strings.Index(url, ",")
-	if comma < 0 {
-		return imageflow.ImageSource{}, fmt.Errorf("invalid data URL")
-	}
-	header := url[:comma]
-	payload := url[comma+1:]
-	contentType := "image/png"
-	if semi := strings.Index(header, ";"); semi > 5 {
-		// 形如 data:image/png;base64
-		contentType = header[5:semi]
-		if !strings.HasPrefix(contentType, "image/") {
-			return imageflow.ImageSource{}, fmt.Errorf("data URL must be an image, got %q", contentType)
-		}
-	}
-	// 简单 base64 解码;若包含 URL 编码等其他格式,退回 base64.URLEncoding
-	dec := base64.StdEncoding
-	if strings.Contains(header, ";base64") {
-		dec = base64.StdEncoding
-	} else {
-		dec = base64.URLEncoding
-	}
-	raw, err := dec.DecodeString(payload)
-	if err != nil {
-		// 兜底再用 StdEncoding 试一次,容忍格式不严格的输入
-		raw, err = base64.StdEncoding.DecodeString(payload)
-		if err != nil {
-			return imageflow.ImageSource{}, err
-		}
-		contentType = "image/png"
-	}
-	ext := "png"
-	switch strings.ToLower(contentType) {
-	case "image/jpeg":
-		ext = "jpg"
-	case "image/gif":
-		ext = "gif"
-	case "image/webp":
-		ext = "webp"
-	}
-	return imageEditReadJSONImage(raw, "image_url."+ext, contentType)
-}
-
-// imageEditDownloadHTTPURL 下载一个 https/http 图片并包装为 imageflow.ImageSource。
-func imageEditDownloadHTTPURL(client httpclient.AuroraHttpClient, url string) (imageflow.ImageSource, error) {
-	if client == nil {
-		client = bogdanfinn.NewStdClient()
-	}
-	headers := httpclient.AuroraHeaders{
-		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-		"Accept":     "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-	}
-	resp, err := client.Request(httpclient.GET, url, headers, nil, nil)
-	if err != nil {
-		return imageflow.ImageSource{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return imageflow.ImageSource{}, fmt.Errorf("download image failed: status %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return imageflow.ImageSource{}, err
-	}
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = http.DetectContentType(data)
-	}
-	filename := "image_url"
-	if idx := strings.LastIndex(url, "/"); idx >= 0 && idx < len(url)-1 {
-		filename = url[idx+1:]
-	}
-	if dot := strings.Index(filename, "?"); dot >= 0 {
-		filename = filename[:dot]
-	}
-	if filename == "" {
-		filename = "image_url.png"
-	}
-	return imageEditReadJSONImage(data, filename, contentType)
-}
-
-// imageEditConvertURL 把字符串(image_url)解析为 imageflow.ImageSource。
-func imageEditConvertURL(client httpclient.AuroraHttpClient, raw string) (imageflow.ImageSource, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return imageflow.ImageSource{}, false, nil
-	}
-	if strings.HasPrefix(raw, "data:") {
-		item, err := imageEditDecodeDataURL(raw)
-		return item, true, err
-	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		item, err := imageEditDownloadHTTPURL(client, raw)
-		return item, true, err
-	}
-	// 非 URL、非 data URL:当 base64 处理
-	item, err := imageEditReadJSONImage([]byte(raw), "image.png", "image/png")
-	return item, true, err
-}
-
-// resolveEditImageSources 把 JSON images 数组 / image_url 字段解析为 []imageflow.ImageSource。
-func resolveEditImageSources(c *gin.Context, body map[string]interface{}, client httpclient.AuroraHttpClient) ([]imageflow.ImageSource, error) {
-	out := make([]imageflow.ImageSource, 0, 2)
-	appendValue := func(v interface{}) error {
-		switch t := v.(type) {
-		case string:
-			item, ok, err := imageEditConvertURL(client, t)
-			if err != nil {
-				return err
-			}
-			if ok {
-				out = append(out, item)
-			}
-		case map[string]interface{}:
-			// 形如 {"image_url": "..."} 或 {"url": "..."} 或 {"b64_json": "..."}
-			if urlVal, ok := t["image_url"]; ok {
-				if s, ok := urlVal.(string); ok {
-					item, _, err := imageEditConvertURL(client, s)
-					if err != nil {
-						return err
-					}
-					out = append(out, item)
-				}
-			} else if u, ok := t["url"]; ok {
-				if s, ok := u.(string); ok {
-					item, _, err := imageEditConvertURL(client, s)
-					if err != nil {
-						return err
-					}
-					out = append(out, item)
-				}
-			} else if b64, ok := t["b64_json"].(string); ok && b64 != "" {
-				item, err := imageEditReadJSONImage([]byte(b64), "image.png", "image/png")
-				if err != nil {
-					return err
-				}
-				out = append(out, item)
-			} else if b64, ok := t["base64"].(string); ok && b64 != "" {
-				item, err := imageEditReadJSONImage([]byte(b64), "image.png", "image/png")
-				if err != nil {
-					return err
-				}
-				out = append(out, item)
-			}
-		}
-		return nil
-	}
-
-	for _, key := range []string{"images", "image", "image_url"} {
-		val, ok := body[key]
-		if !ok || val == nil {
-			continue
-		}
-		switch arr := val.(type) {
-		case []interface{}:
-			for _, item := range arr {
-				if err := appendValue(item); err != nil {
-					return nil, err
-				}
-			}
-		case string:
-			if err := appendValue(arr); err != nil {
-				return nil, err
-			}
-		case map[string]interface{}:
-			if err := appendValue(arr); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return out, nil
-}
-
-// collectResponsesAPIParts 从 Responses API 风格的 input / content / messages
-// 字段中提取 (拼接后的文本, 所有 input_image / image_url 字符串列表)。
-//
-// 支持的 part 形态(对齐 OpenAI Responses API):
-//   - {"type":"input_image","image_url":"https://..."}
-//   - {"type":"input_image","image_url":{"url":"https://..."}}
-//   - {"type":"image","image_url":"https://..."}
-//   - {"type":"image_url","image_url":{...}}  旧 chat completion 形态
-//
-// input 字段本身可以是:
-//   - 字符串(直接当 prompt)
-//   - [{type, content:[...]}]   数组里直接是 part 列表
-//   - [{role:"user", content:[...]}]   数组里是 message 对象
-//   - {type, role, content:[...]}    单个对象
-func collectResponsesAPIParts(raw interface{}) (string, []string) {
-	if raw == nil {
-		return "", nil
-	}
-	var textParts []string
-	var imageURLs []string
-
-	appendFromContent := func(content interface{}) {
-		switch c := content.(type) {
-		case string:
-			if strings.TrimSpace(c) != "" {
-				textParts = append(textParts, c)
-			}
-		case []interface{}:
-			for _, item := range c {
-				part, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				partType := strings.ToLower(strings.TrimSpace(stringFromAny(part["type"])))
-				switch partType {
-				case "input_text", "text", "output_text":
-					if s := stringFromAny(part["text"]); s != "" {
-						textParts = append(textParts, s)
-					}
-				case "input_image", "image", "image_url":
-					// 优先取 image_url(字符串或对象),其次 url
-					switch u := part["image_url"].(type) {
-					case string:
-						imageURLs = append(imageURLs, u)
-					case map[string]interface{}:
-						if s := stringFromAny(u["url"]); s != "" {
-							imageURLs = append(imageURLs, s)
-						}
-					}
-					if s := stringFromAny(part["url"]); s != "" {
-						imageURLs = append(imageURLs, s)
-					}
-				}
-			}
-		}
-	}
-
-	switch v := raw.(type) {
-	case string:
-		textParts = append(textParts, v)
-	case map[string]interface{}:
-		// 形如 {type:"message", role:"user", content:[...]}
-		appendFromContent(v["content"])
-	case []interface{}:
-		for _, item := range v {
-			switch m := item.(type) {
-			case string:
-				textParts = append(textParts, m)
-			case map[string]interface{}:
-				// 顶层是 content 数组的 part
-				partType := strings.ToLower(strings.TrimSpace(stringFromAny(m["type"])))
-				if partType == "input_image" || partType == "image" || partType == "image_url" {
-					switch u := m["image_url"].(type) {
-					case string:
-						imageURLs = append(imageURLs, u)
-					case map[string]interface{}:
-						if s := stringFromAny(u["url"]); s != "" {
-							imageURLs = append(imageURLs, s)
-						}
-					}
-					if s := stringFromAny(m["url"]); s != "" {
-						imageURLs = append(imageURLs, s)
-					}
-					continue
-				}
-				// 标准 message 对象 {role, content}
-				appendFromContent(m["content"])
-			}
-		}
-	}
-	return strings.Join(textParts, "\n"), imageURLs
-}
-
-func stringFromAny(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
 func (h *Handler) imageEdits(c *gin.Context) {
 	h.runImageEditFlow(c, false)
 }
@@ -990,7 +692,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 
 		// 收集 images 数组
 		for _, src := range body.Images {
-			item, _, err := imageEditConvertURL(client, src.ImageURL)
+			item, _, err := imageflow.NormalizeImageURL(client, src.ImageURL)
 			if err != nil {
 				apierrors.InvalidRequest(c, "invalid image reference: "+err.Error(), "invalid_image")
 				return
@@ -1001,7 +703,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		}
 		// 兼容单张 image 字段
 		if body.Image != nil {
-			item, _, err := imageEditConvertURL(client, body.Image.ImageURL)
+			item, _, err := imageflow.NormalizeImageURL(client, body.Image.ImageURL)
 			if err != nil {
 				apierrors.InvalidRequest(c, "invalid image reference: "+err.Error(), "invalid_image")
 				return
@@ -1014,13 +716,13 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		if body.ImageURL != nil {
 			switch t := body.ImageURL.(type) {
 			case string:
-				item, _, err := imageEditConvertURL(client, t)
+				item, _, err := imageflow.NormalizeImageURL(client, t)
 				if err == nil && len(item.Data) > 0 {
 					imageSources = append(imageSources, item)
 				}
 			case map[string]interface{}:
 				if u, ok := t["url"].(string); ok {
-					item, _, err := imageEditConvertURL(client, u)
+					item, _, err := imageflow.NormalizeImageURL(client, u)
 					if err == nil && len(item.Data) > 0 {
 						imageSources = append(imageSources, item)
 					}
@@ -1043,7 +745,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 			}
 		}
 		for _, p := range imageParts {
-			item, _, err := imageEditConvertURL(client, p)
+			item, _, err := imageflow.NormalizeImageURL(client, p)
 			if err != nil {
 				c.JSON(400, gin.H{"error": gin.H{
 					"message": "invalid image reference: " + err.Error(),
@@ -1088,7 +790,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		if vs, ok := form.Value["image_url"]; ok {
 			client := bogdanfinn.NewStdClient()
 			for _, s := range vs {
-				item, _, err := imageEditConvertURL(client, s)
+				item, _, err := imageflow.NormalizeImageURL(client, s)
 				if err == nil && len(item.Data) > 0 {
 					imageSources = append(imageSources, item)
 				}

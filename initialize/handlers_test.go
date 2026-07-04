@@ -1,6 +1,7 @@
 package initialize
 
 import (
+	"aurora/internal/httpstream"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +93,7 @@ func TestWriteChatCompletionStreamDoneAddsStopBeforeDone(t *testing.T) {
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
-	writeChatCompletionStreamDone(c, false, "auto", "conv-xxx")
+	httpstream.WriteChatCompletionDone(c, false, "auto", "conv-xxx")
 
 	lines := sseDataLines(writer.Body.String())
 	if len(lines) != 2 {
@@ -119,7 +120,7 @@ func TestWriteChatCompletionStreamDoneSkipsDuplicateStop(t *testing.T) {
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
-	writeChatCompletionStreamDone(c, true, "auto", "conv-xxx")
+	httpstream.WriteChatCompletionDone(c, true, "auto", "conv-xxx")
 
 	lines := sseDataLines(writer.Body.String())
 	if len(lines) != 1 || lines[0] != "[DONE]" {
