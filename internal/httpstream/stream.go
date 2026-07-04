@@ -3,6 +3,7 @@ package httpstream
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	officialtypes "aurora/typings/official"
 
@@ -203,4 +204,30 @@ func WriteImageStreamError(c *gin.Context, index, total int, message string) {
 		"total":   total,
 		"message": message,
 	})
+}
+
+// ── Stream 参数解析 ──
+
+// RequestStreamFlag 解析 stream 参数,支持 JSON body 的 stream 字段或 ?stream=true 查询参数。
+// multipart/form-data 也支持 stream 字段(字符串 "true"/"1")。
+func RequestStreamFlag(c *gin.Context, jsonStream bool) bool {
+	if jsonStream {
+		return true
+	}
+	if v := strings.ToLower(strings.TrimSpace(c.Query("stream"))); v == "true" || v == "1" || v == "yes" {
+		return true
+	}
+	if v := strings.ToLower(strings.TrimSpace(c.PostForm("stream"))); v == "true" || v == "1" || v == "yes" {
+		return true
+	}
+	return false
+}
+
+// IsStreamTrue 把任意形式的 stream 字段值转换为 bool。
+func IsStreamTrue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
