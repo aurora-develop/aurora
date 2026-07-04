@@ -1171,12 +1171,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		// multipart/form-data
 		form, err := c.MultipartForm()
 		if err != nil {
-			c.JSON(400, gin.H{"error": gin.H{
-				"message": "Request must be multipart/form-data or application/json: " + err.Error(),
-				"type":    "invalid_request_error",
-				"param":   nil,
-				"code":    "invalid_multipart",
-			}})
+			apierrors.InvalidRequest(c, "Request must be multipart/form-data or application/json: "+err.Error(), "invalid_multipart")
 			return
 		}
 		parseFormFields(
