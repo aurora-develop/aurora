@@ -1076,33 +1076,6 @@ func original_requestHasFiles(request officialtypes.APIRequest) bool {
 	return false
 }
 
-var ttsFmtMap = map[string]string{
-	"mp3":  "mp3",
-	"opus": "opus",
-	"aac":  "aac",
-	"flac": "aac",
-	"wav":  "aac",
-	"pcm":  "aac",
-}
-
-var ttsTypeMap = map[string]string{
-	"mp3":  "audio/mpeg",
-	"opus": "audio/ogg",
-	"aac":  "audio/aac",
-}
-
-var ttsVoiceMap = map[string]string{
-	"alloy":   "cove",
-	"ash":     "fathom",
-	"coral":   "vale",
-	"echo":    "ember",
-	"fable":   "breeze",
-	"onyx":    "orbit",
-	"nova":    "maple",
-	"sage":    "glimmer",
-	"shimmer": "juniper",
-}
-
 func (h *Handler) tts(c *gin.Context) {
 	var original_request officialtypes.TTSAPIRequest
 	err := c.BindJSON(&original_request)
