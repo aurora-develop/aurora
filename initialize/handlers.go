@@ -1385,12 +1385,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 			writeImageStreamDone(c)
 			return
 		}
-		c.JSON(500, gin.H{"error": gin.H{
-			"message": "No image result found in response",
-			"type":    "image_generation_error",
-			"param":   nil,
-			"code":    "image_generation_error",
-		}})
+		apierrors.InternalError(c, "image_generation_error", "No image result found in response", "image_generation_error")
 		return
 	}
 	if stream {
