@@ -2,6 +2,7 @@ package chatgpt
 
 import (
 	"aurora/httpclient"
+	"aurora/internal/sseparser"
 	"aurora/internal/tokens"
 	"aurora/typings/chatgpt"
 	"encoding/json"
@@ -177,7 +178,7 @@ func TestHandlerStreamsConcatenatedOpenAIChunks(t *testing.T) {
 
 func TestStreamHandoffTopicFromPayload(t *testing.T) {
 	payload := `{"type":"stream_handoff","options":[{"type":"subscribe_ws_topic","topic_id":"conversation-turn-abc"}]}`
-	topicID, skip := streamHandoffTopicFromPayload(payload, "")
+	topicID, skip := sseparser.HandoffTopicFromPayload(payload, "")
 
 	if !skip {
 		t.Fatalf("skip = false, want true")
@@ -186,7 +187,7 @@ func TestStreamHandoffTopicFromPayload(t *testing.T) {
 		t.Fatalf("topicID = %q, want conversation-turn-abc", topicID)
 	}
 
-	topicID, skip = streamHandoffTopicFromPayload(`{"metadata":{"turn_exchange_id":"xyz"}}`, "server_ste_metadata")
+	topicID, skip = sseparser.HandoffTopicFromPayload(`{"metadata":{"turn_exchange_id":"xyz"}}`, "server_ste_metadata")
 	if !skip || topicID != "conversation-turn-xyz" {
 		t.Fatalf("server metadata topic = %q skip=%v, want conversation-turn-xyz true", topicID, skip)
 	}
@@ -727,7 +728,7 @@ func TestChatWebsocketConversationUpdateItem(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items = %#v, want one conversation-update SSE item", items)
 	}
-	payloads := sseDataPayloads(items[0])
+	payloads := sseparser.DataPayloads(items[0])
 	if len(payloads) != 1 || !strings.Contains(payloads[0], "conversation-update") {
 		t.Fatalf("payloads = %#v, want conversation-update data", payloads)
 	}
