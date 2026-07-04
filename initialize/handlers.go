@@ -1437,12 +1437,7 @@ func (h *Handler) files(c *gin.Context) {
 	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
 	uploaded, status, err := chatgpt.UploadFile(client, secret, h.proxy.GetProxyIP(), formFile.Filename, contentType, data)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "file_upload_error",
-			"param":   "file",
-			"code":    "file_upload_error",
-		}})
+		apierrors.InternalError(c, "file_upload_error", err.Error(), "file_upload_error")
 		return
 	}
 	uploaded.CreatedAt = time.Now().Unix()
