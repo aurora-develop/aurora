@@ -1309,12 +1309,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 				writeImageStreamDone(c)
 				return
 			}
-			c.JSON(500, gin.H{"error": gin.H{
-				"message": err.Error(),
-				"type":    "image_generation_error",
-				"param":   nil,
-				"code":    "image_generation_error",
-			}})
+			apierrors.InternalError(c, "image_generation_error", err.Error(), "image_generation_error")
 			return
 		}
 		for _, imageResult := range imageResults {
