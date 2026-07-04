@@ -1109,12 +1109,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		if body.Image != nil {
 			item, _, err := imageEditConvertURL(client, body.Image.ImageURL)
 			if err != nil {
-				c.JSON(400, gin.H{"error": gin.H{
-					"message": "invalid image reference: " + err.Error(),
-					"type":    "invalid_request_error",
-					"param":   "image",
-					"code":    "invalid_image",
-				}})
+				apierrors.InvalidRequest(c, "invalid image reference: "+err.Error(), "invalid_image")
 				return
 			}
 			if len(item.Data) > 0 {
