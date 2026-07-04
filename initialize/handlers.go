@@ -493,7 +493,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 
 	stream := requestStreamFlag(c, imageRequest.Stream)
 	if stream {
-		writeImageStreamHeader(c)
+		httpstream.WriteImageStreamHeader(c)
 	}
 
 	// 使用 imageflow 模块执行图片生成
@@ -507,11 +507,8 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	results, upstreamText, err := imageflow.Generate(client, secret, turnStile, proxyUrl, normalizedReq)
 	if err != nil {
 		if stream {
-			writeImageStreamEvent(c, "image.generation.error", gin.H{
-				"object":  "image.generation.error",
-				"message": err.Error(),
-			})
-			writeImageStreamDone(c)
+			httpstream.WriteImageStreamError(c, 0, imageRequest.N, err.Error())
+			httpstream.WriteImageStreamDone(c)
 			return
 		}
 		if upstreamText != "" {
@@ -524,11 +521,8 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 
 	if len(results) == 0 {
 		if stream {
-			writeImageStreamEvent(c, "image.generation.error", gin.H{
-				"object":  "image.generation.error",
-				"message": "No image result found in response",
-			})
-			writeImageStreamDone(c)
+			httpstream.WriteImageStreamError(c, 0, imageRequest.N, "No image result found in response")
+			httpstream.WriteImageStreamDone(c)
 			return
 		}
 		apierrors.InternalError(c, "image_generation_error", "No image result found in response", "image_generation_error")
@@ -545,25 +539,13 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 		}
 		data = append(data, item)
 		if stream {
-			writeImageStreamEvent(c, "image.generation.result", imageStreamResult{
-				Object:  "image.generation.result",
-				Index:   i,
-				Total:   imageRequest.N,
-				Created: 0,
-				Model:   imageRequest.Model,
-				Data:    []officialtypes.ImageGenerationData{item},
-			})
+			httpstream.WriteImageStreamResult(c, i, imageRequest.N, imageRequest.Model, []officialtypes.ImageGenerationData{item})
 		}
 	}
 
 	if stream {
-		writeImageStreamEvent(c, "image.generation.completed", imageStreamCompleted{
-			Object:  "image.generation.completed",
-			Created: 0,
-			Model:   imageRequest.Model,
-			Data:    data,
-		})
-		writeImageStreamDone(c)
+		httpstream.WriteImageStreamCompleted(c, imageRequest.Model, data)
+		httpstream.WriteImageStreamDone(c)
 		return
 	}
 	c.JSON(200, officialtypes.NewImageGenerationResponse(data))
