@@ -401,7 +401,7 @@ func (h *Handler) responses(c *gin.Context) {
 
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, secret, proxyUrl, client)
 
-	// 按 conversationID 复用 ChatClientState，保持 DeviceID/SessionID 一致
+	// 按 conversationID 复用 ChatClientState
 	var clientState *chatgpt.ChatClientState
 	if translated_request.ConversationID != "" {
 		clientState = h.sessions.Get(translated_request.ConversationID)
@@ -416,77 +416,27 @@ func (h *Handler) responses(c *gin.Context) {
 		reqModel = "auto"
 	}
 
-	response, wsConn, _, status, err := h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
-	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "request_conversion_error",
-			"param":   "model",
-			"code":    "request_conversion_error",
-		}})
-		return
+	// 使用 conversationflow 编排器执行完整 conversation 流程
+	orchestrator := conversationflow.FlowOrchestrator{
+		Proxy:    h.proxy,
+		Token:    h.token,
+		Sessions: h.sessions,
 	}
-	defer response.Body.Close()
-	if chatgpt.Handle_request_error(c, response) {
-		if wsConn != nil {
-			wsConn.Close()
-			wsConn = nil
-		}
-		return
-	}
+	result := orchestrator.ExecuteConversation(c, conversationflow.ExecuteRequest{
+		TranslatedRequest: translated_request,
+		OriginalRequest:   original_request,
+		Stream:            false,
+		ReqModel:          reqModel,
+		UID:               uid,
+		InputTokens:       input_tokens,
+	})
 
-	var full_response string
-	for i := maxContinueCount(); i > 0; i-- {
-		var continue_info *chatgpt.ContinueInfo
-		var response_part string
-		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, uid, translated_request, false, reqModel, chatgpt.HandlerDetailedOptions{
-			Websocket:   wsConn,
-			ClientState: clientState,
-		})
-		wsConn = nil
-		response_part, continue_info = result.Text, result.Continue
-		full_response += response_part
-		parentMessageID := result.ParentMessageID
-		if continue_info != nil {
-			parentMessageID = continue_info.ParentID
-		}
-		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
-		if result.ConversationID != "" {
-			h.sessions.Register(result.ConversationID, clientState)
-		}
-		if continue_info == nil {
-			break
-		}
-		translated_request.Messages = nil
-		translated_request.Action = "continue"
-		translated_request.ConversationID = continue_info.ConversationID
-		translated_request.ParentMessageID = continue_info.ParentID
-
-		response, wsConn, _, status, err = h.postConversationGptClientOrder(&client, &secret, translated_request, proxyUrl, false, clientState)
-		if err != nil {
-			c.JSON(status, gin.H{"error": gin.H{
-				"message": err.Error(),
-				"type":    "request_conversion_error",
-				"param":   "model",
-				"code":    "request_conversion_error",
-			}})
-			return
-		}
-		defer response.Body.Close()
-		if chatgpt.Handle_request_error(c, response) {
-			if wsConn != nil {
-				wsConn.Close()
-				wsConn = nil
-			}
-			return
-		}
-	}
 	if c.Writer.Status() != 200 {
 		return
 	}
 
-	output_tokens := util.CountToken(full_response)
-	responsesResponse := officialtypes.NewResponsesResponse(full_response, input_tokens, output_tokens, reqModel)
+	output_tokens := util.CountToken(result.Text)
+	responsesResponse := officialtypes.NewResponsesResponse(result.Text, input_tokens, output_tokens, reqModel)
 	if !responsesRequest.Stream || os.Getenv("STREAM_MODE") == "false" {
 		c.JSON(200, responsesResponse)
 		return
@@ -496,7 +446,7 @@ func (h *Handler) responses(c *gin.Context) {
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.String(200, "event: response.created\ndata: "+officialtypes.ResponsesCreated(responsesResponse)+"\n\n")
-	c.String(200, "event: response.output_text.delta\ndata: "+officialtypes.ResponsesTextDelta(full_response)+"\n\n")
+	c.String(200, "event: response.output_text.delta\ndata: "+officialtypes.ResponsesTextDelta(result.Text)+"\n\n")
 	c.String(200, "event: response.completed\ndata: "+officialtypes.ResponsesCompleted(responsesResponse)+"\n\n")
 	c.String(200, "data: [DONE]\n\n")
 }
