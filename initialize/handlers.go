@@ -1802,12 +1802,7 @@ func (h *Handler) handleTranscription(c *gin.Context, isTranslation bool) {
 
 	text, status, err := chatgpt.TranscribeAudio(client, secret, proxyUrl, audioData, fileHeader.Filename, mimeType, language)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "transcription_error",
-			"param":   nil,
-			"code":    "transcription_error",
-		}})
+		apierrors.InternalError(c, "transcription_error", err.Error(), "transcription_error")
 		return
 	}
 
