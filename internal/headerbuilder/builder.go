@@ -180,11 +180,9 @@ func (b *Builder) WithSentinelTokens(tokens SentinelTokens) *Builder {
 
 // ── Conduit Token ──
 
-// WithConduitToken 设置 X-Conduit-Token。
+// WithConduitToken 设置 X-Conduit-Token（即使为空也设置）。
 func (b *Builder) WithConduitToken(token string) *Builder {
-	if token != "" {
-		b.header.Set("X-Conduit-Token", token)
-	}
+	b.header.Set("X-Conduit-Token", token)
 	return b
 }
 
