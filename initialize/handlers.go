@@ -1083,12 +1083,7 @@ func (h *Handler) runImageEditFlow(c *gin.Context, asVariation bool) {
 			Messages interface{} `json:"messages,omitempty"`
 		}
 		if err := c.BindJSON(&body); err != nil {
-			c.JSON(400, gin.H{"error": gin.H{
-				"message": "Request must be proper JSON",
-				"type":    "invalid_request_error",
-				"param":   nil,
-				"code":    err.Error(),
-			}})
+			apierrors.InvalidRequest(c, "Request must be proper JSON", err.Error())
 			return
 		}
 		prompt = strings.TrimSpace(body.Prompt)
