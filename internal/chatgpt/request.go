@@ -1545,7 +1545,7 @@ func streamHandoffTopicFromMetadata(raw map[string]interface{}) string {
 	return ""
 }
 
-func parseConversationEvent(line string, state *conversationPatchState, model string) (conversationStreamEvent, bool) {
+func parseConversationEvent(line string, state *sseparser.PatchState, model string) (conversationStreamEvent, bool) {
 	var raw map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return conversationStreamEvent{}, false
@@ -1567,22 +1567,22 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 	var direct chatgpt_types.ChatGPTResponse
 	if err := json.Unmarshal([]byte(line), &direct); err == nil && sseparser.IsUsableConversationResponse(direct) {
 		channel := sseparser.ChannelFromValue(raw)
-		state.channel = firstNonEmpty(channel, state.channel)
-		return conversationStreamEvent{response: direct, messageID: direct.Message.ID, channel: state.channel}, true
+		state.Channel = firstNonEmpty(channel, state.Channel)
+		return conversationStreamEvent{response: direct, messageID: direct.Message.ID, channel: state.Channel}, true
 	}
 
 	if response, ok := sseparser.ResponseFromValue(raw["v"]); ok {
-		state.response = response
+		state.Response = response
 		if channel := sseparser.ChannelFromValue(raw["v"]); channel != "" {
-			state.channel = channel
+			state.Channel = channel
 		}
-		return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
+		return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 	}
 	if text, ok := raw["v"].(string); ok && raw["p"] == nil && raw["o"] == nil {
-		ensureConversationPatchDefaults(state)
-		current, _ := state.response.Message.Content.Parts[0].(string)
-		state.response.Message.Content.Parts[0] = current + text
-		return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
+		sseparser.EnsurePatchDefaults(state)
+		current, _ := state.Response.Message.Content.Parts[0].(string)
+		state.Response.Message.Content.Parts[0] = current + text
+		return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 	}
 
 	if patchPath, ok := raw["p"].(string); ok {
@@ -1599,17 +1599,17 @@ func parseConversationEvent(line string, state *conversationPatchState, model st
 					}
 					subPath, _ := op["p"].(string)
 					subOp, _ := op["o"].(string)
-					if applyConversationPatch(state, subPath, subOp, op["v"]) {
+					if sseparser.ApplyPatch(state, subPath, subOp, op["v"]) {
 						applied = true
 					}
 				}
 				if applied {
-					return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
+					return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 				}
 			}
 		}
-		if applyConversationPatch(state, patchPath, patchOperation, raw["v"]) {
-			return conversationStreamEvent{response: state.response, messageID: state.response.Message.ID, channel: state.channel}, true
+		if sseparser.ApplyPatch(state, patchPath, patchOperation, raw["v"]) {
+			return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 		}
 	}
 
@@ -1665,7 +1665,7 @@ func responseFromValue(value interface{}) (chatgpt_types.ChatGPTResponse, bool) 
 	}
 
 	var response chatgpt_types.ChatGPTResponse
-	if err := json.Unmarshal(data, &response); err == nil && isUsableConversationResponse(response) {
+	if err := json.Unmarshal(data, &response); err == nil && sseparser.IsUsableConversationResponse(response) {
 		return response, true
 	}
 
@@ -1686,7 +1686,7 @@ func applyConversationPatch(state *conversationPatchState, patchPath string, ope
 			state.response.ConversationID = text
 		}
 	case patchPath == "/message":
-		if response, ok := responseFromValue(value); ok {
+		if response, ok := sseparser.ResponseFromValue(value); ok {
 			if response.ConversationID != "" {
 				state.response.ConversationID = response.ConversationID
 			}
@@ -2503,7 +2503,7 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	var assistantMessageID string
 	artifactState := newArtifactAccumulator()
 	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
-	var patchState conversationPatchState
+	var patchState sseparser.PatchState
 	var handoffTopicID string
 	var currentEvent string
 	var readingWebsocket bool
@@ -2576,7 +2576,7 @@ readLoop:
 				return HandlerResult{}
 			}
 		}
-		if eventName, ok := sseEventName(line); ok {
+		if eventName, ok := sseparser.EventName(line); ok {
 			currentEvent = eventName
 		}
 		for _, line := range sseparser.DataPayloads(line) {
@@ -2597,7 +2597,7 @@ readLoop:
 				break readLoop
 			}
 			observeArtifacts(line)
-			if topicID, skip := streamHandoffTopicFromPayload(line, currentEvent); skip {
+			if topicID, skip := sseparser.HandoffTopicFromPayload(line, currentEvent); skip {
 				if topicID != "" {
 					handoffTopicID = topicID
 				}
@@ -2753,7 +2753,7 @@ readLoop:
 				c.JSON(500, gin.H{"error": original_response.Error})
 				return HandlerResult{}
 			}
-			sentinel = append(sentinel, sentinelsFromResponse(original_response)...)
+			sentinel = append(sentinel, sseparser.SentinelsFromResponse(original_response)...)
 			if original_response.ConversationID != convId {
 				if convId == "" {
 					convId = original_response.ConversationID
@@ -3093,7 +3093,7 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 
 	var convId string
 	var fallbackMsgID string
-	var patchState conversationPatchState
+	var patchState sseparser.PatchState
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -3105,7 +3105,7 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 				return "", ""
 			}
 		}
-		for _, payload := range sseDataPayloads(line) {
+		for _, payload := range sseparser.DataPayloads(line) {
 			if strings.HasPrefix(payload, "[DONE]") {
 				break
 			}
