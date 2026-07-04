@@ -5,6 +5,7 @@ import (
 	"aurora/httpclient"
 	"aurora/internal/browserfp"
 	"aurora/internal/fingerprint"
+	"aurora/internal/headerbuilder"
 	"aurora/internal/prooftoken"
 	"aurora/internal/so"
 	"aurora/internal/sseparser"
@@ -2757,51 +2758,25 @@ func createBaseHeader() httpclient.AuroraHeaders {
 }
 
 func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
-	header := make(httpclient.AuroraHeaders)
-	// 对齐 2026-06-24 chatgpt.com 浏览器抓包:Chrome 147 Win64
-	header.Set("Accept", "*/*")
-	header.Set("Accept-Language", "en-US,en;q=0.9")
-	header.Set("Oai-Language", "en-US")
-	header.Set("Origin", "https://chatgpt.com")
-	// referer 跟 state.ConversationID 联动;空就发首页
-	if state != nil && state.ConversationID != "" {
-		header.Set("Referer", "https://chatgpt.com/c/"+state.ConversationID)
-	} else {
-		header.Set("Referer", "https://chatgpt.com/")
-	}
-	// sec-ch-ua-* 对齐 Chrome 148 (与 UA / prooftoken 同步, 对齐 2026-06-24 浏览器抓包)
-	header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
-	header.Set("Sec-Ch-Ua-Mobile", "?0")
-	header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-	header.Set("Priority", "u=1, i")
-	header.Set("Sec-Fetch-Dest", "empty")
-	header.Set("Sec-Fetch-Mode", "cors")
-	header.Set("Sec-Fetch-Site", "same-origin")
-	ua := util.FixedUserAgent
-	if state != nil && state.UserAgent != "" {
-		ua = state.UserAgent
-	}
-	header.Set("User-Agent", ua)
+	conversationID := ""
 	deviceID := oaiDeviceID
 	sessionID := oaiSessionID
+	ua := ""
 	if state != nil {
+		if state.ConversationID != "" {
+			conversationID = state.ConversationID
+		}
 		if state.DeviceID != "" {
 			deviceID = state.DeviceID
 		}
 		if state.SessionID != "" {
 			sessionID = state.SessionID
 		}
+		if state.UserAgent != "" {
+			ua = state.UserAgent
+		}
 	}
-	header.Set("Oai-Device-Id", deviceID)
-	header.Set("Oai-Session-Id", sessionID)
-	// 对齐 2026-06-24 chatgpt.com 浏览器抓包的 build / version
-	if fp := browserfp.Get(); fp != nil {
-		header.Set("Oai-Client-Version", fp.BuildID)
-	} else {
-		header.Set("Oai-Client-Version", browserfp.DefaultBuildID)
-	}
-	header.Set("Oai-Client-Build-Number", "7823760")
-	return header
+	return headerbuilder.NewBaseHeaderWithState(conversationID, deviceID, sessionID, ua)
 }
 
 // defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。

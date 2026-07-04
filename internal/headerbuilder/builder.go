@@ -209,13 +209,16 @@ func NewBaseHeader() httpclient.AuroraHeaders {
 }
 
 // NewBaseHeaderWithState 创建带 state 的基础 header。
-func NewBaseHeaderWithState(conversationID, deviceID, sessionID string) httpclient.AuroraHeaders {
+func NewBaseHeaderWithState(conversationID, deviceID, sessionID, userAgent string) httpclient.AuroraHeaders {
 	b := New().WithBaseHeaders(conversationID)
 	if deviceID != "" {
 		b.WithDeviceID(deviceID)
 	}
 	if sessionID != "" {
 		b.WithSessionID(sessionID)
+	}
+	if userAgent != "" {
+		b.header.Set("User-Agent", userAgent)
 	}
 	return b.Build()
 }
