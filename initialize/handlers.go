@@ -9,6 +9,7 @@ import (
 	"aurora/internal/chatgpt"
 	"aurora/internal/conversationflow"
 	"aurora/internal/httpstream"
+	"aurora/internal/imageflow"
 	"aurora/internal/proxys"
 	"aurora/internal/tokens"
 	"aurora/internal/toolcall"
@@ -475,12 +476,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	proxyUrl := h.proxy.GetProxyIP()
 	secret, status, err := h.secretFromAuthorization(c, true, true, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "authorization_error",
-			"param":   "Authorization",
-			"code":    status,
-		}})
+		apierrors.AuthError(c, status, err.Error())
 		return
 	}
 	if secret == nil || secret.Token == "" {
@@ -496,12 +492,7 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 	client := bogdanfinn.NewStdClient()
 	turnStile, status, err := h.initTurnStileWithRetry(&client, &secret, proxyUrl)
 	if err != nil {
-		c.JSON(status, gin.H{
-			"message": err.Error(),
-			"type":    "InitTurnStile_request_error",
-			"param":   err,
-			"code":    status,
-		})
+		apierrors.InternalError(c, "InitTurnStile_request_error", err.Error(), status)
 		return
 	}
 
@@ -510,113 +501,33 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 		writeImageStreamHeader(c)
 	}
 
-	var data []officialtypes.ImageGenerationData
-	for i := 0; i < imageRequest.N; i++ {
-		if stream {
-			writeImageStreamEvent(c, "image.generation.chunk", imageStreamChunk{
-				Object:       "image.generation.chunk",
-				Index:        i,
-				Total:        imageRequest.N,
-				Created:      0,
-				Model:        imageRequest.Model,
-				ProgressText: fmt.Sprintf("Generating image %d/%d ...", i+1, imageRequest.N),
-			})
-		}
-		imageResults, upstreamText, err := chatgpt.GeneratePictureConversationImages(client, secret, turnStile, imageRequest.Prompt, imageRequest.Model, proxyUrl)
-		if err != nil {
-			if stream {
-				writeImageStreamEvent(c, "image.generation.error", gin.H{
-					"object":  "image.generation.error",
-					"index":   i,
-					"total":   imageRequest.N,
-					"message": err.Error(),
-				})
-				writeImageStreamDone(c)
-				return
-			}
-			c.JSON(500, gin.H{"error": gin.H{
-				"message": err.Error(),
-				"type":    "image_generation_error",
-				"param":   nil,
-				"code":    "image_generation_error",
-			}})
-			return
-		}
-		for _, imageResult := range imageResults {
-			item := officialtypes.ImageGenerationData{
-				RevisedPrompt: imageRequest.Prompt,
-			}
-			if imageRequest.ResponseFormat == "b64_json" {
-				if imageResult.B64JSON != "" {
-					item.B64JSON = imageResult.B64JSON
-				} else if imageResult.URL != "" {
-					imageBytes, err := chatgpt.DownloadImageBytes(client, imageResult.URL, secret)
-					if err != nil {
-						if stream {
-							writeImageStreamEvent(c, "image.generation.error", gin.H{
-								"object":  "image.generation.error",
-								"index":   i,
-								"total":   imageRequest.N,
-								"message": err.Error(),
-							})
-							writeImageStreamDone(c)
-							return
-						}
-						c.JSON(500, gin.H{"error": gin.H{
-							"message": err.Error(),
-							"type":    "image_download_error",
-							"param":   nil,
-							"code":    "image_download_error",
-						}})
-						return
-					}
-					item.B64JSON = base64.StdEncoding.EncodeToString(imageBytes)
-				}
-			} else {
-				item.URL = imageResult.URL
-				if item.URL == "" && imageResult.B64JSON != "" {
-					item.B64JSON = imageResult.B64JSON
-				}
-			}
-			data = append(data, item)
-			if stream {
-				writeImageStreamEvent(c, "image.generation.result", imageStreamResult{
-					Object:  "image.generation.result",
-					Index:   len(data) - 1,
-					Total:   imageRequest.N,
-					Created: 0,
-					Model:   imageRequest.Model,
-					Data:    []officialtypes.ImageGenerationData{item},
-				})
-			}
-			if len(data) >= imageRequest.N {
-				break
-			}
-		}
-		if len(imageResults) == 0 && upstreamText != "" {
-			if stream {
-				writeImageStreamEvent(c, "image.generation.error", gin.H{
-					"object":  "image.generation.error",
-					"index":   i,
-					"total":   imageRequest.N,
-					"message": "No image result found in response: " + upstreamText,
-				})
-				writeImageStreamDone(c)
-				return
-			}
-			c.JSON(500, gin.H{"error": gin.H{
-				"message": "No image result found in response: " + upstreamText,
-				"type":    "image_generation_error",
-				"param":   nil,
-				"code":    "image_generation_error",
-			}})
-			return
-		}
-		if len(data) >= imageRequest.N {
-			break
-		}
+	// 使用 imageflow 模块执行图片生成
+	normalizedReq := imageflow.NormalizedImageRequest{
+		Prompt:         imageRequest.Prompt,
+		Model:          imageRequest.Model,
+		ResponseFormat: imageRequest.ResponseFormat,
+		N:              imageRequest.N,
+		Stream:         stream,
 	}
-	if len(data) == 0 {
+	results, upstreamText, err := imageflow.Generate(client, secret, turnStile, proxyUrl, normalizedReq)
+	if err != nil {
+		if stream {
+			writeImageStreamEvent(c, "image.generation.error", gin.H{
+				"object":  "image.generation.error",
+				"message": err.Error(),
+			})
+			writeImageStreamDone(c)
+			return
+		}
+		if upstreamText != "" {
+			apierrors.InternalError(c, "image_generation_error", "No image result found in response: "+upstreamText, "image_generation_error")
+		} else {
+			apierrors.InternalError(c, "image_generation_error", err.Error(), "image_generation_error")
+		}
+		return
+	}
+
+	if len(results) == 0 {
 		if stream {
 			writeImageStreamEvent(c, "image.generation.error", gin.H{
 				"object":  "image.generation.error",
@@ -625,14 +536,31 @@ func (h *Handler) imageGenerations(c *gin.Context) {
 			writeImageStreamDone(c)
 			return
 		}
-		c.JSON(500, gin.H{"error": gin.H{
-			"message": "No image result found in response",
-			"type":    "image_generation_error",
-			"param":   nil,
-			"code":    "image_generation_error",
-		}})
+		apierrors.InternalError(c, "image_generation_error", "No image result found in response", "image_generation_error")
 		return
 	}
+
+	// 转换结果为官方格式
+	var data []officialtypes.ImageGenerationData
+	for i, result := range results {
+		item := officialtypes.ImageGenerationData{
+			RevisedPrompt: imageRequest.Prompt,
+			URL:           result.URL,
+			B64JSON:       result.B64JSON,
+		}
+		data = append(data, item)
+		if stream {
+			writeImageStreamEvent(c, "image.generation.result", imageStreamResult{
+				Object:  "image.generation.result",
+				Index:   i,
+				Total:   imageRequest.N,
+				Created: 0,
+				Model:   imageRequest.Model,
+				Data:    []officialtypes.ImageGenerationData{item},
+			})
+		}
+	}
+
 	if stream {
 		writeImageStreamEvent(c, "image.generation.completed", imageStreamCompleted{
 			Object:  "image.generation.completed",
