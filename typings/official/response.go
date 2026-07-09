@@ -353,7 +353,17 @@ func ResponsesCompleted(response ResponsesResponse) string {
 
 type OpenAIAccessTokenWithSession struct {
 	SessionToken string `json:"session_token"`
-	AccessToken  string `json:"access_token"`
+	AccessToken  string `json:"accessToken"`
+}
+
+// GetAccessToken returns the access token field.
+func (s *OpenAIAccessTokenWithSession) GetAccessToken() string {
+	return s.AccessToken
+}
+
+// GetSessionToken returns the session token field.
+func (s *OpenAIAccessTokenWithSession) GetSessionToken() string {
+	return s.SessionToken
 }
 
 func NewOpenAISessionToken(session_token string, access_token string) *OpenAIAccessTokenWithSession {

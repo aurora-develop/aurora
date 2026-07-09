@@ -21,15 +21,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
+	"os"
 
 	"github.com/PuerkitoBio/goquery"
 
 	//http "github.com/bogdanfinn/fhttp"
-	"io"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2696,7 +2696,7 @@ type AuthSession struct {
 		IntercomHash string        `json:"intercom_hash"`
 	} `json:"user"`
 	Expires      time.Time `json:"expires"`
-	AccessToken  string    `json:"access_token"`
+	AccessToken  string    `json:"accessToken"`
 	AuthProvider string    `json:"authProvider"`
 }
 

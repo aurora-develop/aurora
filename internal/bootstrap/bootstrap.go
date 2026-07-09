@@ -140,6 +140,14 @@ func exchangeRefreshToken(acct *accounts.Account) bool {
 	if err != nil {
 		return false
 	}
+	// 优先尝试 struct 形式 (*OpenAIAccessTokenWithSession 等)
+	if r, ok := result.(interface{ GetAccessToken() string }); ok {
+		if at := r.GetAccessToken(); at != "" {
+			acct.Token = at
+			return true
+		}
+	}
+	// fallback: map[string]interface{} (旧 API 直接返回 map)
 	if data, ok := result.(map[string]interface{}); ok {
 		if accessToken, ok := data["access_token"].(string); ok && accessToken != "" {
 			acct.Token = accessToken
@@ -161,8 +169,16 @@ func exchangeSessionToken(acct *accounts.Account) bool {
 	if err != nil {
 		return false
 	}
+	// 优先尝试 struct 形式 (*OpenAIAccessTokenWithSession)
+	if r, ok := result.(interface{ GetAccessToken() string }); ok {
+		if at := r.GetAccessToken(); at != "" {
+			acct.Token = at
+			return true
+		}
+	}
+	// fallback: map[string]interface{}
 	if data, ok := result.(map[string]interface{}); ok {
-		if accessToken, ok := data["access_token"].(string); ok && accessToken != "" {
+		if accessToken, ok := data["accessToken"].(string); ok && accessToken != "" {
 			acct.Token = accessToken
 			return true
 		}

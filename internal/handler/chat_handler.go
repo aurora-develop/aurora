@@ -77,7 +77,14 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 	input_tokens := countMessagesTokens(original_request.Messages)
 
 	uid := uuid.NewString()
-	client := setupClientWithProxy(proxyUrl)
+	// 优先用 account.Client（bootstrap.InitClient 时已绑 fingerprint + proxy）
+	// 只有在 account.Client 为 nil（理论上不应发生）才 fallback 到 setupClientWithProxy
+	var client *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		client = c
+	} else {
+		client = setupClientWithProxy(proxyUrl)
+	}
 
 	// 工具调用模式判定
 	toolsEnabled := toolCallingEnabled(original_request.Tools, h.cfg)
@@ -284,7 +291,13 @@ func (h *ChatHandler) Responses(c *gin.Context) {
 	}
 
 	uid := uuid.NewString()
-	client := setupClientWithProxy(proxyUrl)
+	// 优先用 account.Client（bootstrap.InitClient 时已绑 fingerprint + proxy）
+	var client *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		client = c
+	} else {
+		client = setupClientWithProxy(proxyUrl)
+	}
 
 	translated_request := chatgptrequestconverter.ConvertAPIRequest(original_request, account, proxyUrl, client)
 
