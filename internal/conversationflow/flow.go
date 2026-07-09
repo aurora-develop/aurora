@@ -4,8 +4,8 @@ import (
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
-	"aurora/internal/proxys"
-	"aurora/internal/tokens"
+	"aurora/internal/proxy"
+	"aurora/internal/accounts"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
 	"aurora/util"
@@ -26,8 +26,8 @@ type SessionRegistry interface {
 
 // FlowOrchestrator 会话编排器，封装 chatGPT conversation 的完整执行链。
 type FlowOrchestrator struct {
-	Proxy           *proxys.IProxy
-	Token           *tokens.AccessToken
+	Proxy           *proxy.Pool
+	Token           *accounts.Pool
 	Sessions        SessionRegistry
 }
 
@@ -61,19 +61,19 @@ type ExecuteResult struct {
 // 5. 累积 response/thinking/sentinel
 // 6. 注册 session
 func (f *FlowOrchestrator) ExecuteConversation(c *gin.Context, req ExecuteRequest) ExecuteResult {
-	proxyURL := f.Proxy.GetProxyIP()
+	proxyURL := f.Proxy.Allocate()
 
 	// 1. 获取或创建 ChatClientState
 	clientState := f.resolveClientState(req.TranslatedRequest)
 
-	// 2. 获取 secret
-	secret := f.resolveSecret(c, req)
+	// 2. 获取 account
+	account := f.resolveSecret(c, req)
 
 	client := bogdanfinn.NewStdClient()
 
 	// 3. 初始化 turnstile + WebSocket
 	response, wsConn, turnStile, status, err := f.postConversationOrder(
-		client, secret, req.TranslatedRequest, proxyURL, req.Stream, clientState,
+		client, account, req.TranslatedRequest, proxyURL, req.Stream, clientState,
 	)
 	if err != nil {
 		f.writeError(c, status, err)
@@ -101,7 +101,7 @@ func (f *FlowOrchestrator) ExecuteConversation(c *gin.Context, req ExecuteReques
 	pingSent := false
 
 	for i := maxContinueCount(); i > 0; i-- {
-		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, req.UID, req.TranslatedRequest, req.Stream, req.ReqModel, chatgpt.HandlerDetailedOptions{
+		result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, req.UID, req.TranslatedRequest, req.Stream, req.ReqModel, chatgpt.HandlerDetailedOptions{
 			Websocket:        wsConn,
 			ClientState:      clientState,
 			ArtifactDelivery: req.OriginalRequest.ArtifactDelivery,
@@ -118,7 +118,7 @@ func (f *FlowOrchestrator) ExecuteConversation(c *gin.Context, req ExecuteReques
 			if !pingSent && turnStile != nil {
 				pingSent = true
 				go func() {
-					chatgpt.POSTSentinelPing(client, secret, turnStile, conversationID, result.ParentMessageID, clientState)
+					chatgpt.POSTSentinelPing(client, account, turnStile, conversationID, result.ParentMessageID, clientState)
 				}()
 			}
 		}
@@ -144,7 +144,7 @@ func (f *FlowOrchestrator) ExecuteConversation(c *gin.Context, req ExecuteReques
 		req.TranslatedRequest.ParentMessageID = result.Continue.ParentID
 
 		response, wsConn, _, status, err = f.postConversationOrder(
-			client, secret, req.TranslatedRequest, proxyURL, req.Stream, clientState,
+			client, account, req.TranslatedRequest, proxyURL, req.Stream, clientState,
 		)
 		if err != nil {
 			f.writeError(c, status, err)
@@ -181,8 +181,8 @@ func (f *FlowOrchestrator) HandleToolCalling(c *gin.Context, req ExecuteRequest)
 		}
 	}
 
-	proxyURL := f.Proxy.GetProxyIP()
-	secret := f.resolveSecretForTool(c, req)
+	proxyURL := f.Proxy.Allocate()
+	account := f.resolveSecretForTool(c, req)
 	client := bogdanfinn.NewStdClient()
 	clientState := f.resolveClientState(req.TranslatedRequest)
 
@@ -197,7 +197,7 @@ func (f *FlowOrchestrator) HandleToolCalling(c *gin.Context, req ExecuteRequest)
 		}
 
 		response, wsConn, _, status, err := f.postConversationOrder(
-			client, secret, translated, proxyURL, false, clientState,
+			client, account, translated, proxyURL, false, clientState,
 		)
 		if err != nil {
 			f.writeError(c, status, err)
@@ -205,7 +205,7 @@ func (f *FlowOrchestrator) HandleToolCalling(c *gin.Context, req ExecuteRequest)
 		}
 		_ = wsConn
 
-		result := chatgpt.HandlerDetailedWithOptions(c, response, client, secret, req.UID, translated, false, req.ReqModel, chatgpt.HandlerDetailedOptions{
+		result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, req.UID, translated, false, req.ReqModel, chatgpt.HandlerDetailedOptions{
 			Websocket:        nil,
 			ClientState:      clientState,
 			ArtifactDelivery: req.OriginalRequest.ArtifactDelivery,
@@ -248,29 +248,27 @@ func (f *FlowOrchestrator) resolveClientState(translated chatgpt_types.ChatGPTRe
 	return clientState
 }
 
-func (f *FlowOrchestrator) resolveSecret(c *gin.Context, req ExecuteRequest) *tokens.Secret {
-	resolver := authresolver.NewResolver(f.Token)
-	result := resolver.Resolve(c, authresolver.ResolveRequest{
-		NeedsPaid:         req.ToolsEnabled,
-		AllowFallbackPaid: true,
-		ProxyURL:          f.Proxy.GetProxyIP(),
-	})
-	return result.Secret
+func (f *FlowOrchestrator) resolveSecret(c *gin.Context, req ExecuteRequest) *accounts.Account {
+	resolver := authresolver.New()
+	token, isCustomerKey, _ := resolver.ResolveAccessToken(c)
+	if isCustomerKey || token == "" {
+		// 无外部 token,从池中取 free 账号
+		if a, _ := f.Token.Acquire(accounts.TypeFree); a != nil {
+			return a
+		}
+		return nil
+	}
+	// 外部 token → 临时账号(TypeFree)
+	return accounts.NewAccount(uuid.NewString(), accounts.TypeFree, token)
 }
 
-func (f *FlowOrchestrator) resolveSecretForTool(c *gin.Context, req ExecuteRequest) *tokens.Secret {
-	resolver := authresolver.NewResolver(f.Token)
-	result := resolver.Resolve(c, authresolver.ResolveRequest{
-		NeedsPaid:         true,
-		AllowFallbackPaid: true,
-		ProxyURL:          f.Proxy.GetProxyIP(),
-	})
-	return result.Secret
+func (f *FlowOrchestrator) resolveSecretForTool(c *gin.Context, req ExecuteRequest) *accounts.Account {
+	return f.resolveSecret(c, req)
 }
 
 func (f *FlowOrchestrator) postConversationOrder(
 	client *bogdanfinn.TlsClient,
-	secret *tokens.Secret,
+	account *accounts.Account,
 	translatedRequest chatgpt_types.ChatGPTRequest,
 	proxyURL string,
 	stream bool,
@@ -281,22 +279,22 @@ func (f *FlowOrchestrator) postConversationOrder(
 	}
 	turnTraceID := uuid.NewString()
 
-	turnStile, status, err := initTurnStileWithRetryState(f.Token, client, secret, proxyURL, state)
+	turnStile, status, err := initTurnStileWithRetryState(f.Token, client, account, proxyURL, state)
 	if err != nil {
 		return nil, nil, nil, status, err
 	}
 
-	chatgpt.POSTConversationInit(client, secret, state)
+	chatgpt.POSTConversationInit(client, account, state)
 
 	var wsConn *websocket.Conn
-	if stream && !secret.IsFree {
-		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(client, secret, state, proxyURL)
+	if stream && !(account.Type == accounts.TypeNoAuth) {
+		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(client, account, state, proxyURL)
 		if err != nil {
 			return nil, nil, nil, http.StatusInternalServerError, err
 		}
 	}
 
-	conduitToken, err := chatgpt.PrepareConversationConduitFullWithSentinel(client, translatedRequest, secret, proxyURL, turnTraceID, state, turnStile)
+	conduitToken, err := chatgpt.PrepareConversationConduitFullWithSentinel(client, translatedRequest, account, proxyURL, turnTraceID, state, turnStile)
 	if err != nil {
 		if wsConn != nil {
 			wsConn.Close()
@@ -304,7 +302,7 @@ func (f *FlowOrchestrator) postConversationOrder(
 		return nil, nil, nil, http.StatusInternalServerError, err
 	}
 
-	response, err := chatgpt.POSTconversationPreparedWithState(client, translatedRequest, secret, turnStile, proxyURL, conduitToken, turnTraceID, state)
+	response, err := chatgpt.POSTconversationPreparedWithState(client, translatedRequest, account, turnStile, proxyURL, conduitToken, turnTraceID, state)
 	if err != nil {
 		if wsConn != nil {
 			wsConn.Close()
@@ -314,24 +312,20 @@ func (f *FlowOrchestrator) postConversationOrder(
 	return response, wsConn, turnStile, http.StatusOK, nil
 }
 
-func initTurnStileWithRetryState(tokenPool *tokens.AccessToken, client *bogdanfinn.TlsClient, secret *tokens.Secret, proxyUrl string, state *chatgpt.ChatClientState) (*chatgpt.TurnStile, int, error) {
+func initTurnStileWithRetryState(pool *accounts.Pool, client *bogdanfinn.TlsClient, account *accounts.Account, proxyUrl string, state *chatgpt.ChatClientState) (*chatgpt.TurnStile, int, error) {
 	for {
 		client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-		turnStile, status, err := chatgpt.InitTurnStileWithState(client, secret, proxyUrl, state)
+		turnStile, status, err := chatgpt.InitTurnStileWithState(client, account, proxyUrl, state)
 		if err == nil {
 			return turnStile, status, nil
 		}
-		if status == http.StatusUnauthorized && secret != nil && !secret.IsFree && secret.Token != "" {
-			if !tokenPool.DisableSecret(secret.Token) {
-				return nil, status, err
+		// 401 时:标记当前账号失败;TypeNoAuth 账号(免费匿名)可以重置 device id 重试
+		if status == http.StatusUnauthorized && account != nil {
+			pool.ReportFailure(account)
+			if account.Type == accounts.TypeNoAuth {
+				account.Token = uuid.NewString()
+				continue
 			}
-			newSecret := tokenPool.GetPaidSecret()
-			if newSecret == nil || newSecret.Token == "" {
-				return nil, status, err
-			}
-			secret = newSecret
-			client = bogdanfinn.NewStdClient()
-			continue
 		}
 		return nil, status, err
 	}

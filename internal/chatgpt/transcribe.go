@@ -2,7 +2,7 @@ package chatgpt
 
 import (
 	"aurora/httpclient"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -21,7 +21,7 @@ type TranscribeResult struct {
 // TranscribeAudio 调用 ChatGPT 内部 /backend-api/transcribe 接口完成语音转文字。
 // 参数:
 //   - client:   HTTP 客户端
-//   - secret:   登录态(需要 paid token,免费 token 不支持)
+//   - account:   登录态(需要 paid token,免费 token 不支持)
 //   - proxy:    代理地址
 //   - audioData:  音频文件原始字节
 //   - filename:   文件名(如 "audio.mp3")
@@ -29,11 +29,11 @@ type TranscribeResult struct {
 //   - language:   语言提示(ISO 代码,如 "zh","en",可传 "")
 //
 // 返回转写后的文本、HTTP 状态码和错误。
-func TranscribeAudio(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string, audioData []byte, filename, mimeType, language string) (string, int, error) {
+func TranscribeAudio(client httpclient.AuroraHttpClient, account *accounts.Account, proxy string, audioData []byte, filename, mimeType, language string) (string, int, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	if secret == nil || secret.Token == "" || secret.IsFree {
+	if account == nil || account.Token == "" || account.Type == accounts.TypeNoAuth {
 		return "", http.StatusBadRequest, fmt.Errorf("audio transcription requires a logged-in ChatGPT access token")
 	}
 	if len(audioData) == 0 {
@@ -68,13 +68,13 @@ func TranscribeAudio(client httpclient.AuroraHttpClient, secret *tokens.Secret, 
 	header := createBaseHeader()
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", w.FormDataContentType())
-	if secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
+	if account.Token != "" {
+		header.Set("Authorization", "Bearer "+account.Token)
 	}
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
+	if account.PUID != "" {
+		header.Set("Cookie", "_puid="+account.PUID+";")
 	}
-	setTeamAccountHeader(header, secret)
+	setTeamAccountHeader(header, account)
 
 	// oai-did cookie (对齐 ChatGPT Web 客户端)
 	didCookie := &http.Cookie{

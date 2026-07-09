@@ -4,7 +4,7 @@ import (
 	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
 	"aurora/httpclient"
 	"aurora/internal/chatgpt"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	chatgpt_types "aurora/typings/chatgpt"
 	"fmt"
 	"net/http"
@@ -47,8 +47,8 @@ type SynthesizeResult struct {
 }
 
 // Synthesize 执行 TTS 合成流程。
-func Synthesize(client interface{ SetProxy(string); SetCookies(string, interface{}) }, secret *tokens.Secret, input, voice, format, proxyURL string) (*SynthesizeResult, int, error) {
-	if secret == nil || secret.Token == "" || secret.IsFree {
+func Synthesize(client interface{ SetProxy(string); SetCookies(string, interface{}) }, account *accounts.Account, input, voice, format, proxyURL string) (*SynthesizeResult, int, error) {
+	if account == nil || account.Token == "" || account.Type == accounts.TypeNoAuth {
 		return nil, http.StatusBadRequest, fmt.Errorf("TTS requires a logged-in ChatGPT access token")
 	}
 
@@ -58,7 +58,7 @@ func Synthesize(client interface{ SetProxy(string); SetCookies(string, interface
 	clientState.ParentMessageID = translatedRequest.ParentMessageID
 
 	// TTS 使用独立的 conversation 流程，此处返回 conversation ID 供后续获取音频
-	_, status, err := postConversationForTTS(client, secret, translatedRequest, proxyURL, clientState)
+	_, status, err := postConversationForTTS(client, account, translatedRequest, proxyURL, clientState)
 	if err != nil {
 		return nil, status, err
 	}
@@ -72,15 +72,15 @@ type TranscribeResult struct {
 }
 
 // Transcribe 执行音频转写。
-func Transcribe(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxyURL string, audioData []byte, filename, mimeType, language string) (*TranscribeResult, int, error) {
-	if secret == nil || secret.Token == "" || secret.IsFree {
+func Transcribe(client httpclient.AuroraHttpClient, account *accounts.Account, proxyURL string, audioData []byte, filename, mimeType, language string) (*TranscribeResult, int, error) {
+	if account == nil || account.Token == "" || account.Type == accounts.TypeNoAuth {
 		return nil, http.StatusBadRequest, fmt.Errorf("audio transcription requires a logged-in ChatGPT access token")
 	}
 	if len(audioData) == 0 {
 		return nil, http.StatusBadRequest, fmt.Errorf("empty audio data")
 	}
 
-	text, status, err := chatgpt.TranscribeAudio(client, secret, proxyURL, audioData, filename, mimeType, language)
+	text, status, err := chatgpt.TranscribeAudio(client, account, proxyURL, audioData, filename, mimeType, language)
 	if err != nil {
 		return nil, status, err
 	}
@@ -124,7 +124,7 @@ func ValidateTranscriptionFormat(format string) (string, bool) {
 	return ct, ok
 }
 
-func postConversationForTTS(client interface{}, secret *tokens.Secret, req chatgpt_types.ChatGPTRequest, proxyURL string, state *chatgpt.ChatClientState) (*http.Response, int, error) {
+func postConversationForTTS(client interface{}, account *accounts.Account, req chatgpt_types.ChatGPTRequest, proxyURL string, state *chatgpt.ChatClientState) (*http.Response, int, error) {
 	// TTS 的 conversation 发送由 chatgpt 包内部完成
 	// 此处仅为编排入口，实际调用需要注入 FlowOrchestrator
 	return nil, http.StatusOK, nil

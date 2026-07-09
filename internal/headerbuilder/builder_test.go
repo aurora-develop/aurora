@@ -3,7 +3,7 @@ package headerbuilder
 import (
 	"testing"
 
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 )
 
 func TestNew(t *testing.T) {
@@ -45,22 +45,22 @@ func TestWithTargetPath(t *testing.T) {
 }
 
 func TestWithAuth_PaidUser(t *testing.T) {
-	secret := tokens.NewSecret("test-token")
-	h := New().WithAuth(secret).Build()
+	acct := &accounts.Account{Type: accounts.TypeFree, Token: "test-token"}
+	h := New().WithAuth(acct).Build()
 	if h["Authorization"] != "Bearer test-token" {
 		t.Fatalf("expected Bearer test-token, got %s", h["Authorization"])
 	}
 }
 
 func TestWithAuth_FreeUser(t *testing.T) {
-	secret := tokens.NewSecretWithFree("free-uuid")
-	h := New().WithAuth(secret).Build()
+	acct := &accounts.Account{Type: accounts.TypeNoAuth, Token: "free-uuid"}
+	h := New().WithAuth(acct).Build()
 	if h["Oai-Device-Id"] != "free-uuid" {
 		t.Fatalf("expected free-uuid, got %s", h["Oai-Device-Id"])
 	}
 }
 
-func TestWithAuth_NilSecret(t *testing.T) {
+func TestWithAuth_NilAccount(t *testing.T) {
 	h := New().WithAuth(nil).Build()
 	if h["Authorization"] != "" {
 		t.Fatalf("expected empty, got %s", h["Authorization"])
@@ -68,16 +68,16 @@ func TestWithAuth_NilSecret(t *testing.T) {
 }
 
 func TestWithTeamAccount(t *testing.T) {
-	secret := tokens.NewSecretWithTeam("token", "team-123")
-	h := New().WithTeamAccount(secret).Build()
+	acct := &accounts.Account{Type: accounts.TypeFree, Token: "token", TeamUserID: "team-123"}
+	h := New().WithTeamAccount(acct).Build()
 	if h["Chatgpt-Account-Id"] != "team-123" {
 		t.Fatalf("expected team-123, got %s", h["Chatgpt-Account-Id"])
 	}
 }
 
 func TestWithTeamAccount_Empty(t *testing.T) {
-	secret := tokens.NewSecret("token")
-	h := New().WithTeamAccount(secret).Build()
+	acct := &accounts.Account{Type: accounts.TypeFree, Token: "token"}
+	h := New().WithTeamAccount(acct).Build()
 	if h["Chatgpt-Account-Id"] != "" {
 		t.Fatalf("expected empty, got %s", h["Chatgpt-Account-Id"])
 	}
@@ -147,14 +147,14 @@ func TestNewBaseHeader(t *testing.T) {
 }
 
 func TestBuilderChaining(t *testing.T) {
-	secret := tokens.NewSecret("test-token")
+	acct := &accounts.Account{Type: accounts.TypeFree, Token: "test-token", TeamUserID: "team-456"}
 	h := New().
 		WithBaseHeaders("conv-123").
 		WithContentType("application/json").
 		WithAccept("*/*").
 		WithTargetPath("/backend-api/test").
-		WithAuth(secret).
-		WithTeamAccount(secret).
+		WithAuth(acct).
+		WithTeamAccount(acct).
 		WithConduitToken("conduit-123").
 		WithTurnTraceID("trace-123").
 		Build()
@@ -167,5 +167,8 @@ func TestBuilderChaining(t *testing.T) {
 	}
 	if h["X-Conduit-Token"] != "conduit-123" {
 		t.Fatalf("expected conduit-123, got %s", h["X-Conduit-Token"])
+	}
+	if h["Chatgpt-Account-Id"] != "team-456" {
+		t.Fatalf("expected team-456, got %s", h["Chatgpt-Account-Id"])
 	}
 }

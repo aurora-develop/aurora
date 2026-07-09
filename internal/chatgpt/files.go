@@ -2,7 +2,7 @@ package chatgpt
 
 import (
 	"aurora/httpclient"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -61,11 +61,11 @@ func LookupUploadedFile(fileID string) (UploadedFile, bool) {
 }
 
 // UploadFile 执行完整三步上传,对齐 chatgpttoapi/files.go UploadFile。
-func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy, filename, mimeHint string, data []byte) (UploadedFile, int, error) {
+func UploadFile(client httpclient.AuroraHttpClient, account *accounts.Account, proxy, filename, mimeHint string, data []byte) (UploadedFile, int, error) {
 	if proxy != "" {
 		client.SetProxy(proxy)
 	}
-	if secret == nil || secret.Token == "" || secret.IsFree {
+	if account == nil || account.Token == "" || account.Type == accounts.TypeNoAuth {
 		return UploadedFile{}, http.StatusBadRequest, fmt.Errorf("file upload requires a logged-in ChatGPT access token")
 	}
 	if len(data) == 0 {
@@ -104,7 +104,7 @@ func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 		step1Payload["height"] = height
 	}
 
-	meta, status, err := createUpload(client, secret, step1Payload)
+	meta, status, err := createUpload(client, account, step1Payload)
 	if err != nil {
 		return UploadedFile{}, status, err
 	}
@@ -115,7 +115,7 @@ func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	}
 
 	// ---- Step 3: POST /backend-api/files/{file_id}/uploaded ----
-	if status, err := confirmUpload(client, secret, meta.FileID); err != nil {
+	if status, err := confirmUpload(client, account, meta.FileID); err != nil {
 		return UploadedFile{}, status, err
 	}
 
@@ -134,7 +134,7 @@ func UploadFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy
 	return result, http.StatusOK, nil
 }
 
-func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, payload map[string]interface{}) (uploadMetaResponse, int, error) {
+func createUpload(client httpclient.AuroraHttpClient, account *accounts.Account, payload map[string]interface{}) (uploadMetaResponse, int, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
@@ -142,13 +142,13 @@ func createUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, pay
 	header := createBaseHeader()
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
-	if secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
+	if account.Token != "" {
+		header.Set("Authorization", "Bearer "+account.Token)
 	}
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
+	if account.PUID != "" {
+		header.Set("Cookie", "_puid="+account.PUID+";")
 	}
-	setTeamAccountHeader(header, secret)
+	setTeamAccountHeader(header, account)
 	response, err := client.Request(http.MethodPost, BaseURL+"/files", header, nil, bytes.NewReader(body))
 	if err != nil {
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
@@ -190,17 +190,17 @@ func putUpload(client httpclient.AuroraHttpClient, uploadURL, contentType string
 	return response.StatusCode, nil
 }
 
-func confirmUpload(client httpclient.AuroraHttpClient, secret *tokens.Secret, fileID string) (int, error) {
+func confirmUpload(client httpclient.AuroraHttpClient, account *accounts.Account, fileID string) (int, error) {
 	header := createBaseHeader()
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
-	if secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
+	if account.Token != "" {
+		header.Set("Authorization", "Bearer "+account.Token)
 	}
-	if secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
+	if account.PUID != "" {
+		header.Set("Cookie", "_puid="+account.PUID+";")
 	}
-	setTeamAccountHeader(header, secret)
+	setTeamAccountHeader(header, account)
 	response, err := client.Request(http.MethodPost, BaseURL+"/files/"+fileID+"/uploaded", header, nil, strings.NewReader("{}"))
 	if err != nil {
 		return http.StatusInternalServerError, err

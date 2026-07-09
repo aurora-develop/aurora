@@ -4,7 +4,7 @@ import (
 	"aurora/httpclient"
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/chatgpt"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -38,11 +38,11 @@ type ImageResult struct {
 }
 
 // Generate 执行图片生成流程：上传源图 → 调用上游 → 转换结果。
-func Generate(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnStile *chatgpt.TurnStile, proxyURL string, req NormalizedImageRequest) ([]ImageResult, string, error) {
+func Generate(client httpclient.AuroraHttpClient, account *accounts.Account, turnStile *chatgpt.TurnStile, proxyURL string, req NormalizedImageRequest) ([]ImageResult, string, error) {
 	// 上传源图（如果有）
 	var references []chatgpt.ImageEditReference
 	for _, src := range req.Sources {
-		uploaded, _, err := chatgpt.UploadFile(client, secret, proxyURL, src.Filename, src.ContentType, src.Data)
+		uploaded, _, err := chatgpt.UploadFile(client, account, proxyURL, src.Filename, src.ContentType, src.Data)
 		if err != nil {
 			return nil, "", fmt.Errorf("upload image failed: %w", err)
 		}
@@ -64,11 +64,11 @@ func Generate(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnSti
 		var err error
 		if len(references) > 0 {
 			imageResults, upstreamText, err = chatgpt.GeneratePictureConversationImagesWithReferences(
-				client, secret, turnStile, req.Prompt, req.Model, proxyURL, references,
+				client, account, turnStile, req.Prompt, req.Model, proxyURL, references,
 			)
 		} else {
 			imageResults, upstreamText, err = chatgpt.GeneratePictureConversationImages(
-				client, secret, turnStile, req.Prompt, req.Model, proxyURL,
+				client, account, turnStile, req.Prompt, req.Model, proxyURL,
 			)
 		}
 		if err != nil {
@@ -78,7 +78,7 @@ func Generate(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnSti
 			return nil, upstreamText, fmt.Errorf("no image result found: %s", upstreamText)
 		}
 		for _, ir := range imageResults {
-			item, err := convertImageResult(client, secret, ir, req.ResponseFormat)
+			item, err := convertImageResult(client, account, ir, req.ResponseFormat)
 			if err != nil {
 				return nil, upstreamText, err
 			}
@@ -94,13 +94,13 @@ func Generate(client httpclient.AuroraHttpClient, secret *tokens.Secret, turnSti
 	return allResults, upstreamText, nil
 }
 
-func convertImageResult(client httpclient.AuroraHttpClient, secret *tokens.Secret, ir chatgpt.ImageGenerationResult, responseFormat string) (ImageResult, error) {
+func convertImageResult(client httpclient.AuroraHttpClient, account *accounts.Account, ir chatgpt.ImageGenerationResult, responseFormat string) (ImageResult, error) {
 	if responseFormat == "b64_json" {
 		if ir.B64JSON != "" {
 			return ImageResult{B64JSON: ir.B64JSON}, nil
 		}
 		if ir.URL != "" {
-			imageBytes, err := chatgpt.DownloadImageBytes(client, ir.URL, secret)
+			imageBytes, err := chatgpt.DownloadImageBytes(client, ir.URL, account)
 			if err != nil {
 				return ImageResult{}, fmt.Errorf("image download failed: %w", err)
 			}

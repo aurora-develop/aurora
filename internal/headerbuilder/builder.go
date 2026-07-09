@@ -2,8 +2,8 @@ package headerbuilder
 
 import (
 	"aurora/httpclient"
+	"aurora/internal/accounts"
 	"aurora/internal/browserfp"
-	"aurora/internal/tokens"
 	"aurora/util"
 	"strings"
 )
@@ -81,34 +81,34 @@ func (b *Builder) WithSessionID(sessionID string) *Builder {
 
 // ── 鉴权 header ──
 
-// WithAuth 根据 secret 设置鉴权 header（Bearer token 或 Oai-Device-Id）。
-func (b *Builder) WithAuth(secret *tokens.Secret) *Builder {
-	if secret == nil {
+// WithAuth 根据 account 设置鉴权 header（Bearer token 或 Oai-Device-Id）。
+func (b *Builder) WithAuth(account *accounts.Account) *Builder {
+	if account == nil {
 		return b
 	}
-	if secret.IsFree && secret.Token != "" {
-		b.header.Set("Oai-Device-Id", secret.Token)
+	if account.Type == accounts.TypeNoAuth && account.Token != "" {
+		b.header.Set("Oai-Device-Id", account.Token)
 	}
-	if !secret.IsFree && secret.Token != "" {
-		b.header.Set("Authorization", "Bearer "+secret.Token)
+	if account.Type != accounts.TypeNoAuth && account.Token != "" {
+		b.header.Set("Authorization", "Bearer "+account.Token)
 	}
 	return b
 }
 
-// WithCookies 根据 secret 设置 cookie header。
-func (b *Builder) WithCookies(secret *tokens.Secret) *Builder {
-	if secret == nil {
+// WithCookies 根据 account 设置 cookie header。
+func (b *Builder) WithCookies(account *accounts.Account) *Builder {
+	if account == nil {
 		return b
 	}
 	cookieStr := ""
-	if secret.PUID != "" {
-		cookieStr = "_puid=" + secret.PUID
+	if account.PUID != "" {
+		cookieStr = "_puid=" + account.PUID
 	}
-	if secret.IsFree && secret.Token != "" {
+	if account.Type == accounts.TypeNoAuth && account.Token != "" {
 		if cookieStr != "" {
 			cookieStr += "; "
 		}
-		cookieStr += "oai-did=" + secret.Token
+		cookieStr += "oai-did=" + account.Token
 	}
 	if cookieStr != "" {
 		b.header["Cookie"] = cookieStr
@@ -116,10 +116,10 @@ func (b *Builder) WithCookies(secret *tokens.Secret) *Builder {
 	return b
 }
 
-// WithTeamAccount 根据 secret 设置 team account header。
-func (b *Builder) WithTeamAccount(secret *tokens.Secret) *Builder {
-	if secret != nil && strings.TrimSpace(secret.TeamUserID) != "" {
-		b.header.Set("Chatgpt-Account-Id", strings.TrimSpace(secret.TeamUserID))
+// WithTeamAccount 根据 account 设置 team account header。
+func (b *Builder) WithTeamAccount(account *accounts.Account) *Builder {
+	if account != nil && strings.TrimSpace(account.TeamUserID) != "" {
+		b.header.Set("Chatgpt-Account-Id", strings.TrimSpace(account.TeamUserID))
 	}
 	return b
 }

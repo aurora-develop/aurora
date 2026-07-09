@@ -3,7 +3,7 @@ package chatgpt
 import (
 	"aurora/httpclient"
 	"aurora/internal/sseparser"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"aurora/typings/chatgpt"
 	"encoding/json"
 	"fmt"
@@ -344,7 +344,7 @@ func TestGetConduitTokenAllowsNullToken(t *testing.T) {
 		},
 	}
 
-	token, err := getConduitToken(client, chatGPTRequestForTest(), &tokens.Secret{}, nil, "trace-id")
+	token, err := getConduitToken(client, chatGPTRequestForTest(), &accounts.Account{}, nil, "trace-id")
 
 	if err != nil {
 		t.Fatalf("getConduitToken returned error for null token: %v", err)
@@ -365,7 +365,7 @@ func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
 		},
 	}
 
-	token, err := PrepareConversationConduit(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id")
+	token, err := PrepareConversationConduit(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id")
 
 	if err != nil {
 		t.Fatalf("PrepareConversationConduit returned error: %v", err)
@@ -451,7 +451,7 @@ func TestPrepareConversationConduitFullChainsThreeStates(t *testing.T) {
 	msg := chatGPTRequestForTest()
 	msg.AddMessage("user", "hello world") // partial_query 取前 5 rune = "hello"
 
-	token, err := PrepareConversationConduitFull(client, msg, &tokens.Secret{}, "", "trace-id", nil)
+	token, err := PrepareConversationConduitFull(client, msg, &accounts.Account{}, "", "trace-id", nil)
 	if err != nil {
 		t.Fatalf("PrepareConversationConduitFull returned error: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestPrepareConversationConduitFullFailsFastOnStep1(t *testing.T) {
 		},
 	}
 
-	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id", nil)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -536,7 +536,7 @@ func TestPrepareConversationConduitFullFailsFastOnStep2(t *testing.T) {
 		},
 	}
 
-	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id", nil)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -559,7 +559,7 @@ func TestPrepareConversationConduitFullFailsFastOnStep3(t *testing.T) {
 		},
 	}
 
-	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", nil)
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id", nil)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -586,7 +586,7 @@ func TestPrepareConversationConduitFullPropagatesState(t *testing.T) {
 	state.SessionID = "session-3state"
 	state.ParentMessageID = "parent-3state"
 
-	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", state)
+	_, err := PrepareConversationConduitFull(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id", state)
 	if err != nil {
 		t.Fatalf("PrepareConversationConduitFull returned error: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestPrepareConversationConduitFullPropagatesState(t *testing.T) {
 }
 
 func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) {
-	header := conversationHeaders(&tokens.Secret{}, nil, "text/event-stream", "/backend-api/f/conversation", "", "trace-id")
+	header := conversationHeaders(&accounts.Account{}, nil, "text/event-stream", "/backend-api/f/conversation", "", "trace-id")
 
 	if _, ok := header["X-Conduit-Token"]; !ok {
 		t.Fatalf("X-Conduit-Token header missing for empty conversation conduit token")
@@ -679,7 +679,7 @@ func TestPrepareConversationConduitUsesClientState(t *testing.T) {
 	state.ParentMessageID = "parent-state"
 	state.StartTime = time.Now().Add(-2500 * time.Millisecond)
 
-	token, err := PrepareConversationConduitWithState(client, chatGPTRequestForTest(), &tokens.Secret{}, "", "trace-id", state)
+	token, err := PrepareConversationConduitWithState(client, chatGPTRequestForTest(), &accounts.Account{}, "", "trace-id", state)
 
 	if err != nil {
 		t.Fatalf("PrepareConversationConduitWithState returned error: %v", err)

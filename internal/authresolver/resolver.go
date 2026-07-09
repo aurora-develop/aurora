@@ -1,11 +1,21 @@
+// Package authresolver 解析请求的 Authorization header,返回对应的 *accounts.Account。
+//
+// 设计原则:
+//   - 不持有 token 池,池由 accounts.Pool 管理
+//   - 只负责"从请求头拿到 token 字符串,定位/创建一个 account"
+//   - customer key 匹配: 视为无外部 token,返回 nil,让 handler 从池中取一个
+//   - 外部 access_token: 创建临时账号 (TypeNoAuth 或 TypeFree)
+//   - 外部 JWT (eyJhbGciOiJSUzI1NiI...): 创建临时账号 (TypeFree)
+//   - UUID 设备号: 创建临时账号 (TypeNoAuth)
+//
+// 配合 handler 的使用模式:
+//   authresolver.ResolveAccessToken(c) → 返回 access_token 字符串
+//   handler 拿字符串去 pool.Lookup() / pool.CreateTemporary()
 package authresolver
 
 import (
-	"aurora/httpclient/bogdanfinn"
-	"aurora/internal/chatgpt"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"errors"
-	"net/http"
 	"os"
 	"strings"
 
@@ -13,120 +23,65 @@ import (
 	"github.com/google/uuid"
 )
 
-// Resolver 从请求上下文和账号池中解析最终使用的 secret。
-type Resolver struct {
-	token *tokens.AccessToken
+// AccessTokenResolver 从 gin.Context 解析 access token。
+type AccessTokenResolver struct {
+	// CustomerKey 全局密钥,匹配时视为"无外部 token" (用 customer key 当默认鉴权)
+	CustomerKey string
 }
 
-func NewResolver(token *tokens.AccessToken) *Resolver {
-	return &Resolver{token: token}
-}
-
-// ResolveRequest 鉴权解析参数。
-type ResolveRequest struct {
-	NeedsPaid         bool
-	AllowFallbackPaid bool
-	ProxyURL          string
-}
-
-// ResolveResult 鉴权解析结果。
-type ResolveResult struct {
-	Secret  *tokens.Secret
-	Status  int
-	Error   error
-	TeamID  string
-}
-
-// Resolve 从 gin.Context 和账号池中解析最终使用的 secret。
-func (r *Resolver) Resolve(c *gin.Context, req ResolveRequest) ResolveResult {
-	secret := r.token.GetSecret()
-	if req.NeedsPaid || req.AllowFallbackPaid {
-		secret = r.token.GetPaidSecret()
-	}
-
-	authToken, teamAccountID, _ := authorizationTokenAndTeam(c)
-	if authToken != "" && os.Getenv("Authorization") != "" && authToken == os.Getenv("Authorization") {
-		authToken = ""
-	}
-	if authToken != "" {
-		if strings.HasPrefix(authToken, "eyJhbGciOiJSUzI1NiI") {
-			secret = r.token.GenerateTempToken(authToken)
-		} else if isUUID(authToken) {
-			secret = r.token.GenerateDeviceId(authToken)
-		} else if teamAccountID != "" {
-			accessToken, status, err := accessTokenFromRefreshToken(authToken, req.ProxyURL)
-			if err != nil {
-				return ResolveResult{Status: status, Error: err}
-			}
-			secret = r.token.GenerateTempToken(accessToken)
-		}
-	}
-	if req.NeedsPaid && (secret == nil || secret.Token == "" || secret.IsFree) && !req.AllowFallbackPaid {
-		return ResolveResult{}
-	}
-	return ResolveResult{
-		Secret: secret.WithTeamUserID(teamAccountID),
-		Status: 0,
+func New() *AccessTokenResolver {
+	return &AccessTokenResolver{
+		CustomerKey: os.Getenv("Authorization"),
 	}
 }
 
-// ResolveWithPaidCheck 解析 secret 并校验 paid token 可用性。
-// 用于 images、audio 等必须 paid token 的接口。
-// 返回 (secret, 需要中止的 http status, error)。
-func (r *Resolver) ResolveWithPaidCheck(c *gin.Context, proxyURL string) (*tokens.Secret, int, error) {
-	result := r.Resolve(c, ResolveRequest{
-		NeedsPaid:         true,
-		AllowFallbackPaid: true,
-		ProxyURL:          proxyURL,
-	})
-	if result.Error != nil {
-		return nil, result.Status, result.Error
+// ResolveAccessToken 从 gin.Context 解析 Authorization header 中的 token 字符串。
+//
+// 返回:
+//   - token: 解析出的 token (可能是 customer key / JWT access token / UUID device id / "")
+//   - isCustomerKey: true 表示 token 等于 CustomerKey,handler 应走"无外部 token"分支
+//   - err: 解析失败 (极少发生)
+func (r *AccessTokenResolver) ResolveAccessToken(c *gin.Context) (token string, isCustomerKey bool, err error) {
+	authHeader := c.GetHeader("Authorization")
+	token, _ = splitAuthHeader(authHeader)
+
+	if token != "" && r.CustomerKey != "" && token == r.CustomerKey {
+		// customer key 匹配,视为无外部 token
+		return "", true, nil
 	}
-	if result.Secret == nil || result.Secret.Token == "" {
-		return nil, 0, nil
-	}
-	if result.Secret.IsFree {
-		return nil, 0, nil
-	}
-	return result.Secret, 0, nil
+	return token, false, nil
 }
 
-func accessTokenFromRefreshToken(refreshToken string, proxy string) (string, int, error) {
-	client := bogdanfinn.NewStdClient()
-	result, status, err := chatgpt.GETTokenForRefreshToken(client, refreshToken, proxy)
-	if status == 0 {
-		status = http.StatusBadRequest
-	}
+// ResolveAccount 从 gin.Context 解析后直接返回对应的 *accounts.Account(临时账号)。
+//
+// 行为:
+//   - customer key 或无 token → 返回 nil (handler 应从池中取)
+//   - UUID → 创建 TypeNoAuth 临时账号
+//   - JWT access_token → 创建 TypeFree 临时账号 (Token 字段存 JWT)
+//   - 其它 → 兜底: 当成 TypeFree
+//
+// 不消耗 pool 中的账号,不修改 pool。
+func (r *AccessTokenResolver) ResolveAccount(c *gin.Context) (*accounts.Account, error) {
+	token, isCustomerKey, err := r.ResolveAccessToken(c)
 	if err != nil {
-		return "", status, err
+		return nil, err
 	}
-	if data, ok := result.(map[string]interface{}); ok {
-		if accessToken, ok := data["access_token"].(string); ok && accessToken != "" {
-			return accessToken, status, nil
-		}
+	if isCustomerKey || token == "" {
+		return nil, nil
 	}
-	return "", status, errors.New("refresh token response did not include access_token")
+
+	// 区分 UUID 和 JWT
+	if isValidUUID(token) {
+		acct := accounts.NewAccount(uuid.NewString(), accounts.TypeNoAuth, token)
+		return acct, nil
+	}
+
+	// JWT access_token (eyJhbGciOiJSUzI1NiI...) 或其它 → TypeFree
+	acct := accounts.NewAccount(uuid.NewString(), accounts.TypeFree, token)
+	return acct, nil
 }
 
-func authorizationTokenAndTeam(c *gin.Context) (string, string, bool) {
-	token, authorizationTeamID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
-	if teamID := teamAccountIDFromRequest(c); teamID != "" {
-		return token, teamID, authorizationTeamID != ""
-	}
-	return token, authorizationTeamID, authorizationTeamID != ""
-}
-
-func teamAccountIDFromRequest(c *gin.Context) string {
-	for _, header := range []string{"ChatGPT-Account-ID", "Chatgpt-Account-Id", "Team-Account-ID", "X-ChatGPT-Account-ID"} {
-		if value := strings.TrimSpace(c.GetHeader(header)); value != "" {
-			return value
-		}
-	}
-	_, teamAccountID := splitAuthorizationTokenAndTeam(c.GetHeader("Authorization"))
-	return teamAccountID
-}
-
-func splitAuthorizationTokenAndTeam(authHeader string) (string, string) {
+func splitAuthHeader(authHeader string) (string, string) {
 	payload := strings.TrimSpace(authHeader)
 	if len(payload) >= len("Bearer ") && strings.EqualFold(payload[:len("Bearer ")], "Bearer ") {
 		payload = strings.TrimSpace(payload[len("Bearer "):])
@@ -139,7 +94,10 @@ func splitAuthorizationTokenAndTeam(authHeader string) (string, string) {
 	return token, strings.TrimSpace(parts[1])
 }
 
-func isUUID(str string) bool {
-	_, err := uuid.Parse(str)
+func isValidUUID(s string) bool {
+	_, err := uuid.Parse(s)
 	return err == nil
 }
+
+// ErrNoToken 表示请求未携带有效 token
+var ErrNoToken = errors.New("no token in request")

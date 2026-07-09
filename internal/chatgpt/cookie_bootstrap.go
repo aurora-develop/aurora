@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"aurora/httpclient"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 )
 
 // CookieBootstrap 负责把 Cloudflare 在 chatgpt.com 下发的
@@ -28,7 +28,7 @@ type CookieBootstrap struct {
 	lastBootAt   time.Time
 }
 
-// 全局引导器,所有 secret 共享同一个 CookieJar(每个 client 各自有自己
+// 全局引导器,所有 account 共享同一个 CookieJar(每个 client 各自有自己
 // 的 jar,这里只负责"告诉 caller 何时需要重引导")。
 var cookieBootstrap CookieBootstrap
 
@@ -37,7 +37,7 @@ var cookieBootstrap CookieBootstrap
 //
 // 返回 true 表示 jar 已经有"基本可用"的 cookie,可以继续发请求。
 // 返回 false 表示拿不到(被 CF 拦了)。
-func bootstrapCookieJar(client httpclient.AuroraHttpClient, secret *tokens.Secret) bool {
+func bootstrapCookieJar(client httpclient.AuroraHttpClient, account *accounts.Account) bool {
 	cookieBootstrap.mu.Lock()
 	defer cookieBootstrap.mu.Unlock()
 
@@ -96,10 +96,10 @@ func hasUsableCookies(cookies []*http.Cookie) bool {
 
 // ensureBootstrapped 在请求前调用,jar 没初始化就主动引导一次。
 // 失败也不 fatal —— 调用方自己判断后续请求是否被 CF 拦截。
-func ensureBootstrapped(client httpclient.AuroraHttpClient, secret *tokens.Secret) {
+func ensureBootstrapped(client httpclient.AuroraHttpClient, account *accounts.Account) {
 	cookies := client.GetCookies("https://chatgpt.com")
 	if hasUsableCookies(cookies) {
 		return
 	}
-	bootstrapCookieJar(client, secret)
+	bootstrapCookieJar(client, account)
 }

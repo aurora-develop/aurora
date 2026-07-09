@@ -2,7 +2,7 @@ package chatgpt
 
 import (
 	backendchatgpt "aurora/internal/chatgpt"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 	"aurora/internal/toolcall"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Secret, proxy string, client httpclient.AuroraHttpClient) chatgpt_types.ChatGPTRequest {
+func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.Account, proxy string, client httpclient.AuroraHttpClient) chatgpt_types.ChatGPTRequest {
 	chatgpt_request := chatgpt_types.NewChatGPTRequest()
 
 	// Model is passed directly to upstream; default to "auto" if not provided
@@ -132,7 +132,7 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 			parts, metadata := buildMessageParts(official_types.APIMessage{
 				Role:    role,
 				Content: official_types.MessageContent{TextValue: text},
-			}, client, secret, proxy)
+			}, client, account, proxy)
 			if len(metadata) > 0 {
 				chatgpt_request.AddMultimodalMessage(role, parts, metadata)
 			} else {
@@ -140,7 +140,7 @@ func ConvertAPIRequest(api_request official_types.APIRequest, secret *tokens.Sec
 			}
 			continue
 		}
-		parts, metadata := buildMessageParts(apiMessage, client, secret, proxy)
+		parts, metadata := buildMessageParts(apiMessage, client, account, proxy)
 		if len(metadata) > 0 {
 			chatgpt_request.AddMultimodalMessage(role, parts, metadata)
 			continue
@@ -166,9 +166,9 @@ func ConvertTTSAPIRequest(input string) chatgpt_types.ChatGPTRequest {
 	return chatgpt_request
 }
 
-func buildMessageParts(message official_types.APIMessage, client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) ([]interface{}, map[string]interface{}) {
+func buildMessageParts(message official_types.APIMessage, client httpclient.AuroraHttpClient, account *accounts.Account, proxy string) ([]interface{}, map[string]interface{}) {
 	text := message.Text()
-	files := enrichFiles(message.Files(), client, secret, proxy)
+	files := enrichFiles(message.Files(), client, account, proxy)
 	if len(files) == 0 {
 		return []interface{}{text}, nil
 	}
@@ -233,7 +233,7 @@ func buildMessageParts(message official_types.APIMessage, client httpclient.Auro
 	}
 }
 
-func enrichFiles(files []official_types.FileAttachment, client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) []official_types.FileAttachment {
+func enrichFiles(files []official_types.FileAttachment, client httpclient.AuroraHttpClient, account *accounts.Account, proxy string) []official_types.FileAttachment {
 	enriched := make([]official_types.FileAttachment, 0, len(files))
 	seen := make(map[string]bool)
 	for _, file := range files {
@@ -243,8 +243,8 @@ func enrichFiles(files []official_types.FileAttachment, client httpclient.Aurora
 		}
 
 		// 处理 image_url 的 inline 数据(data: URL 或 http URL)
-		if file.Source != "" && client != nil && secret != nil {
-			if uploaded, ok := uploadInlineImage(file, client, secret, proxy); ok {
+		if file.Source != "" && client != nil && account != nil {
+			if uploaded, ok := uploadInlineImage(file, client, account, proxy); ok {
 				file = uploaded
 			} else {
 				// 免费账号或上传失败:丢弃图片,只保留文本
@@ -282,7 +282,7 @@ func enrichFiles(files []official_types.FileAttachment, client httpclient.Aurora
 }
 
 // uploadInlineImage 将 data: URL 或 http URL 图片上传到 ChatGPT 文件服务。
-func uploadInlineImage(file official_types.FileAttachment, client httpclient.AuroraHttpClient, secret *tokens.Secret, proxy string) (official_types.FileAttachment, bool) {
+func uploadInlineImage(file official_types.FileAttachment, client httpclient.AuroraHttpClient, account *accounts.Account, proxy string) (official_types.FileAttachment, bool) {
 	src := file.Source
 	var data []byte
 	var filename string
@@ -343,7 +343,7 @@ func uploadInlineImage(file official_types.FileAttachment, client httpclient.Aur
 		filename = "image.png"
 	}
 
-	uploaded, _, err := backendchatgpt.UploadFile(client, secret, proxy, filename, contentType, data)
+	uploaded, _, err := backendchatgpt.UploadFile(client, account, proxy, filename, contentType, data)
 	if err != nil {
 		// 免费 token 无法上传文件,回退:把 data URL 原样传递
 		return file, false

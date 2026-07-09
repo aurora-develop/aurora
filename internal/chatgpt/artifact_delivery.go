@@ -12,50 +12,50 @@ import (
 	"strings"
 
 	"aurora/httpclient"
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
 )
 
-func materializeArtifactEvents(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string, events []StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
+func materializeArtifactEvents(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID string, events []StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
 	cfg = cfg.normalized()
 	var out []map[string]interface{}
 	for _, ev := range events {
-		out = append(out, materializeArtifactEvent(client, secret, conversationID, ev, cfg)...)
+		out = append(out, materializeArtifactEvent(client, account, conversationID, ev, cfg)...)
 	}
 	return out
 }
 
-func materializeArtifactEvent(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
+func materializeArtifactEvent(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
 	if ev.Event != StreamEventArtifact {
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
 	switch ev.Kind {
 	case "generated_image":
-		return materializeGeneratedImageEvent(client, secret, conversationID, ev, cfg)
+		return materializeGeneratedImageEvent(client, account, conversationID, ev, cfg)
 	case "sandbox_file", "pdf":
-		return materializeSandboxEvent(client, secret, conversationID, ev, cfg)
+		return materializeSandboxEvent(client, account, conversationID, ev, cfg)
 	default:
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
 }
 
-func materializeGeneratedImageEvent(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
+func materializeGeneratedImageEvent(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
 	if ev.FileID == "" {
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
 	if cfg.Delivery == ArtifactDeliveryURL {
-		if url, err := ResolveGeneratedImageURL(client, secret, conversationID, ev.FileID); err == nil {
+		if url, err := ResolveGeneratedImageURL(client, account, conversationID, ev.FileID); err == nil {
 			ev.URL = url
 		} else {
 			ev.Error = err.Error()
 		}
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
-	url, err := ResolveGeneratedImageURL(client, secret, conversationID, ev.FileID)
+	url, err := ResolveGeneratedImageURL(client, account, conversationID, ev.FileID)
 	if err != nil {
 		ev.Error = err.Error()
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
-	data, err := DownloadURLBytes(client, url, secret, "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	data, err := DownloadURLBytes(client, url, account, "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	if err != nil {
 		ev.Error = err.Error()
 		return []map[string]interface{}{streamEventToMap(ev)}
@@ -67,7 +67,7 @@ func materializeGeneratedImageEvent(client httpclient.AuroraHttpClient, secret *
 	return materializeBytes(ev, data, cfg)
 }
 
-func materializeSandboxEvent(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
+func materializeSandboxEvent(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID string, ev StreamEvent, cfg ArtifactStreamConfig) []map[string]interface{} {
 	if conversationID == "" || ev.MessageID == "" || ev.SandboxPath == "" {
 		ev.Error = "sandbox artifact requires conversation_id, message_id and sandbox_path"
 		return []map[string]interface{}{streamEventToMap(ev)}
@@ -79,14 +79,14 @@ func materializeSandboxEvent(client httpclient.AuroraHttpClient, secret *tokens.
 		ev.MimeType = mimeTypeForName(ev.Name)
 	}
 	if cfg.Delivery == ArtifactDeliveryURL {
-		if url, err := ResolveSandboxDownloadURL(client, secret, conversationID, ev.MessageID, ev.SandboxPath); err == nil {
+		if url, err := ResolveSandboxDownloadURL(client, account, conversationID, ev.MessageID, ev.SandboxPath); err == nil {
 			ev.URL = url
 		} else {
 			ev.Error = err.Error()
 		}
 		return []map[string]interface{}{streamEventToMap(ev)}
 	}
-	data, mimeType, err := DownloadSandboxFile(client, secret, conversationID, ev.MessageID, ev.SandboxPath)
+	data, mimeType, err := DownloadSandboxFile(client, account, conversationID, ev.MessageID, ev.SandboxPath)
 	if err != nil {
 		ev.Error = err.Error()
 		return []map[string]interface{}{streamEventToMap(ev)}
@@ -160,24 +160,24 @@ func materializeBytes(ev StreamEvent, data []byte, cfg ArtifactStreamConfig) []m
 	return events
 }
 
-func ResolveGeneratedImageURL(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID, fileID string) (string, error) {
+func ResolveGeneratedImageURL(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID, fileID string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("artifact download client is unavailable")
 	}
 	if fileID == "" {
 		return "", fmt.Errorf("missing file_id")
 	}
-	return GetImageDownloadURL(client, fileDownloadBaseURL()+fileID+"/download", secret)
+	return GetImageDownloadURL(client, fileDownloadBaseURL()+fileID+"/download", account)
 }
 
-func ResolveSandboxDownloadURL(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID, messageID, sandboxPath string) (string, error) {
+func ResolveSandboxDownloadURL(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID, messageID, sandboxPath string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("artifact download client is unavailable")
 	}
 	if conversationID == "" || messageID == "" || sandboxPath == "" {
 		return "", fmt.Errorf("missing sandbox download identifiers")
 	}
-	apiURL, targetPath := conversationURL(secret, "/conversation/"+conversationID+"/interpreter/download")
+	apiURL, targetPath := conversationURL(account, "/conversation/"+conversationID+"/interpreter/download")
 	bodyJSON, err := json.Marshal(map[string]interface{}{
 		"message_id":   messageID,
 		"sandbox_path": sandboxPath,
@@ -185,7 +185,7 @@ func ResolveSandboxDownloadURL(client httpclient.AuroraHttpClient, secret *token
 	if err != nil {
 		return "", err
 	}
-	header := conversationHeaders(secret, nil, "*/*", targetPath, "", "")
+	header := conversationHeaders(account, nil, "*/*", targetPath, "", "")
 	response, err := client.Request(http.MethodPost, apiURL, header, nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
@@ -214,12 +214,12 @@ func ResolveSandboxDownloadURL(client httpclient.AuroraHttpClient, secret *token
 	return "", fmt.Errorf("interpreter/download missing download_url")
 }
 
-func DownloadSandboxFile(client httpclient.AuroraHttpClient, secret *tokens.Secret, conversationID, messageID, sandboxPath string) ([]byte, string, error) {
-	downloadURL, err := ResolveSandboxDownloadURL(client, secret, conversationID, messageID, sandboxPath)
+func DownloadSandboxFile(client httpclient.AuroraHttpClient, account *accounts.Account, conversationID, messageID, sandboxPath string) ([]byte, string, error) {
+	downloadURL, err := ResolveSandboxDownloadURL(client, account, conversationID, messageID, sandboxPath)
 	if err != nil {
 		return nil, "", err
 	}
-	data, err := DownloadURLBytes(client, downloadURL, secret, "*/*")
+	data, err := DownloadURLBytes(client, downloadURL, account, "*/*")
 	if err != nil {
 		return nil, "", err
 	}
@@ -230,23 +230,23 @@ func DownloadSandboxFile(client httpclient.AuroraHttpClient, secret *tokens.Secr
 	return data, mimeType, nil
 }
 
-func DownloadURLBytes(client httpclient.AuroraHttpClient, url string, secret *tokens.Secret, accept string) ([]byte, error) {
+func DownloadURLBytes(client httpclient.AuroraHttpClient, url string, account *accounts.Account, accept string) ([]byte, error) {
 	if client == nil {
 		return nil, fmt.Errorf("download client is unavailable")
 	}
 	header := make(httpclient.AuroraHeaders)
-	if secret != nil && secret.PUID != "" {
-		header.Set("Cookie", "_puid="+secret.PUID+";")
+	if account != nil && account.PUID != "" {
+		header.Set("Cookie", "_puid="+account.PUID+";")
 	}
 	header.Set("User-Agent", defaultUserAgent())
 	if accept == "" {
 		accept = "*/*"
 	}
 	header.Set("Accept", accept)
-	if secret != nil && secret.Token != "" {
-		header.Set("Authorization", "Bearer "+secret.Token)
+	if account != nil && account.Token != "" {
+		header.Set("Authorization", "Bearer "+account.Token)
 	}
-	setTeamAccountHeader(header, secret)
+	setTeamAccountHeader(header, account)
 	response, err := client.Request(http.MethodGet, url, header, nil, nil)
 	if err != nil {
 		return nil, err

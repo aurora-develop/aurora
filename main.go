@@ -1,27 +1,21 @@
 package main
 
 import (
-	"aurora/initialize"
-	"aurora/internal/browserfp"
+	"aurora/internal/bootstrap"
 	"os"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/g-utils/endless"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	gin.SetMode(gin.ReleaseMode)
-	_ = godotenv.Load(".env")
-	browserfp.Init()
-	router := initialize.RegisterRouter()
+	app, err := bootstrap.Init()
+	if err != nil {
+		panic(err)
+	}
+	defer app.Cleanup()
 
-	host := os.Getenv("SERVER_HOST")
-	port := os.Getenv("SERVER_PORT")
-	tlsCert := os.Getenv("TLS_CERT")
-	tlsKey := os.Getenv("TLS_KEY")
-
+	host := app.Config.ServerHost
+	port := app.Config.ServerPort
 	if host == "" {
 		host = "0.0.0.0"
 	}
@@ -32,9 +26,9 @@ func main() {
 		}
 	}
 
-	if tlsCert != "" && tlsKey != "" {
-		_ = endless.ListenAndServeTLS(host+":"+port, tlsCert, tlsKey, router)
+	if app.Config.TLSCert != "" && app.Config.TLSKey != "" {
+		_ = endless.ListenAndServeTLS(host+":"+port, app.Config.TLSCert, app.Config.TLSKey, app.Router)
 	} else {
-		_ = endless.ListenAndServe(host+":"+port, router)
+		_ = endless.ListenAndServe(host+":"+port, app.Router)
 	}
 }
