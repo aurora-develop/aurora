@@ -82,6 +82,7 @@ func Init() (*App, error) {
 	// 4. free_tokens.txt — 设备 UUID
 	for _, t := range accounts.LoadTokensFromFile("free_tokens.txt") {
 		acct := accounts.CreateAccount(t.Token, accounts.TypeNoAuth, profiles)
+		acct.Proxy = proxyPool.Allocate()
 		acct.Status = accounts.StatusActive
 		accs = append(accs, acct)
 	}
@@ -91,6 +92,7 @@ func Init() (*App, error) {
 		for i := 0; i < cfg.FreeAccountsNum; i++ {
 			uid := uuid.NewString()
 			acct := accounts.CreateAccount(uid, accounts.TypeNoAuth, profiles)
+			acct.Proxy = proxyPool.Allocate()
 			acct.Status = accounts.StatusActive
 			accs = append(accs, acct)
 		}

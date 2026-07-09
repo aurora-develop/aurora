@@ -62,10 +62,14 @@ func resolveAccount(c *gin.Context, pool *accounts.Pool, cfg *config.Config, nee
 
 	expected := cfg.Authorization
 
-	// 无 token 或匹配全局密钥 → 从池里取默认账号
+	// 无 token 或匹配全局密钥 → 先尝试 free,再 fallback 到 noauth
 	if token == "" || (expected != "" && token == expected) {
 		acct, err := pool.Acquire(accounts.TypeFree)
-		if err != nil {
+		if err != nil || acct == nil {
+			// free 池空时(无 session/access/refresh token 账号),fallback 到 noauth(UUID 设备)
+			acct, err = pool.Acquire(accounts.TypeNoAuth)
+		}
+		if err != nil || acct == nil {
 			return nil, http.StatusUnauthorized, ErrNoAvailable
 		}
 		if needsPaid && acct.Type == accounts.TypeNoAuth {

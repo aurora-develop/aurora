@@ -2696,7 +2696,7 @@ type AuthSession struct {
 		IntercomHash string        `json:"intercom_hash"`
 	} `json:"user"`
 	Expires      time.Time `json:"expires"`
-	AccessToken  string    `json:"accessToken"`
+	AccessToken  string    `json:"access_token"`
 	AuthProvider string    `json:"authProvider"`
 }
 
