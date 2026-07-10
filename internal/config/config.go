@@ -17,6 +17,7 @@ type Config struct {
 	StreamMode         bool
 	MaxContinueCount   int
 	EnableHistory      bool
+	EnableExternalToken bool  // 是否接受外部传入的 accessToken
 	ToolCallingEnabled bool
 	RefusalRetries     int
 	DebugToolLog       string
@@ -40,6 +41,7 @@ func Load() Config {
 		StreamMode:         getBoolEnv("STREAM_MODE", true),
 		MaxContinueCount:   getIntEnv("MAX_CONTINUE_COUNT", 3),
 		EnableHistory:      getBoolEnv("ENABLE_HISTORY", false),
+		EnableExternalToken: getBoolEnv("ENABLE_EXTERNAL_TOKEN", false),
 		ToolCallingEnabled: getBoolEnv("TOOL_CALLING_ENABLED", true),
 		RefusalRetries:     getIntEnv("REFUSAL_RETRIES", 3),
 		DebugToolLog:       os.Getenv("DEBUG_TOOL_LOG"),

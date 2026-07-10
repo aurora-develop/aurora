@@ -71,6 +71,7 @@ type Account struct {
 	Token         string // access_token 或 UUID
 	RefreshToken  string // 用于自动续期（/auth/refresh）
 	SessionToken  string // 仅免费账号有，用于续期（/auth/session）
+	IsTemporary   bool   // 外部传入 token 临时创建的账号,会被 GC 清理
 
 	// 身份
 	PUID             string

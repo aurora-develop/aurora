@@ -153,6 +153,7 @@ func Init() (*App, error) {
 		return false
 	}
 	stopHealthCheck := accountPool.StartHealthCheck(10*time.Minute, renewFn)
+	stopTempGC := accountPool.StartTempAccountGC(10*time.Minute, 1*time.Minute)
 
 	// 注册路由
 	router := handler.RegisterRouter(accountPool, &cfg)
@@ -161,7 +162,10 @@ func Init() (*App, error) {
 		Router:      router,
 		Config:      &cfg,
 		AccountPool: accountPool,
-		Cleanup:     func() { stopHealthCheck() },
+		Cleanup: func() {
+			stopHealthCheck()
+			stopTempGC()
+		},
 	}, nil
 }
 
