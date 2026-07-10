@@ -41,10 +41,22 @@ func Init() (*App, error) {
 	profiles := accounts.DefaultProfiles
 	var accs []*accounts.Account
 
+	// 去重 key: chatgpt_account_id (for free/puid) 或 token (for noauth/refresh)
+	seen := make(map[string]bool)
+
 	// 1. access_tokens.txt — 纯 access token，不可续期
 	for _, t := range accounts.LoadTokensFromFile("access_tokens.txt") {
+		// 从 access_token JWT 解析 chatgpt_account_id 用于去重
+		chatGPTID := accounts.ExtractChatGPTAccountID(t.Token)
+		key := "access:" + chatGPTID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
 		acct := accounts.CreateAccount(t.Token, accounts.TypeFree, profiles)
 		acct.TeamUserID = t.TeamID
+		acct.ChatGPTAccountID = chatGPTID
 		acct.Status = accounts.StatusActive
 		acct.Proxy = proxyPool.Allocate()
 		accs = append(accs, acct)
@@ -52,12 +64,22 @@ func Init() (*App, error) {
 
 	// 2. refresh_tokens.txt — 带 refresh_token，可续期
 	for _, t := range accounts.LoadTokensFromFile("refresh_tokens.txt") {
+		// 立即交换一次获取 access_token 才能解析 chatgpt_account_id
+		// 先用 refresh_token 本身做去重 key,避免重复交换
+		key := "refresh:" + t.Token
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
 		acct := accounts.CreateAccount("", accounts.TypeFree, profiles)
 		acct.RefreshToken = t.Token
 		acct.TeamUserID = t.TeamID
 		acct.Proxy = proxyPool.Allocate()
 		// 立即交换一次获取 access_token
 		if exchangeRefreshToken(acct) {
+			// exchange 成功后从 access_token 解析 chatgpt_account_id
+			acct.ChatGPTAccountID = accounts.ExtractChatGPTAccountID(acct.Token)
 			acct.Status = accounts.StatusActive
 		} else {
 			acct.Status = accounts.StatusExpired
@@ -67,11 +89,19 @@ func Init() (*App, error) {
 
 	// 3. session_tokens.txt — ChatGPT session token，用于免费账号续期
 	for _, t := range accounts.LoadTokensFromFile("session_tokens.txt") {
+		key := "session:" + t.Token
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
 		acct := accounts.CreateAccount("", accounts.TypeFree, profiles)
 		acct.SessionToken = t.Token
 		acct.Proxy = proxyPool.Allocate()
 		// 立即交换一次获取 access_token
 		if exchangeSessionToken(acct) {
+			// exchange 成功后从 access_token 解析 chatgpt_account_id
+			acct.ChatGPTAccountID = accounts.ExtractChatGPTAccountID(acct.Token)
 			acct.Status = accounts.StatusActive
 		} else {
 			acct.Status = accounts.StatusExpired
@@ -81,6 +111,12 @@ func Init() (*App, error) {
 
 	// 4. free_tokens.txt — 设备 UUID
 	for _, t := range accounts.LoadTokensFromFile("free_tokens.txt") {
+		key := "free:" + t.Token
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
 		acct := accounts.CreateAccount(t.Token, accounts.TypeNoAuth, profiles)
 		acct.Proxy = proxyPool.Allocate()
 		acct.Status = accounts.StatusActive
@@ -91,6 +127,7 @@ func Init() (*App, error) {
 	if cfg.FreeAccounts {
 		for i := 0; i < cfg.FreeAccountsNum; i++ {
 			uid := uuid.NewString()
+			// UUID 设备号天然唯一,不需要去重
 			acct := accounts.CreateAccount(uid, accounts.TypeNoAuth, profiles)
 			acct.Proxy = proxyPool.Allocate()
 			acct.Status = accounts.StatusActive

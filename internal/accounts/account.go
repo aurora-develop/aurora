@@ -73,8 +73,9 @@ type Account struct {
 	SessionToken  string // 仅免费账号有，用于续期（/auth/session）
 
 	// 身份
-	PUID       string
-	TeamUserID string
+	PUID             string
+	TeamUserID       string
+	ChatGPTAccountID string // 来自 JWT: https://api.openai.com/auth.chatgpt_account_id
 
 	// 隔离单元（每个账号独立）
 	Client      httpclient.AuroraHttpClient // 专属 TLS Client
