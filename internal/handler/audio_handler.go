@@ -277,10 +277,14 @@ func (h *AudioHandler) handleTranscription(c *gin.Context, isTranslation bool) {
 		mimeType = "audio/mpeg"
 	}
 
-	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
-	if proxyUrl != "" {
-		client.SetProxy(proxyUrl)
+	// 使用账号绑定的 Client(有指纹 + 代理);不存在则新建
+	client, ok := account.Client.(*bogdanfinn.TlsClient)
+	if !ok || client == nil {
+		client = bogdanfinn.NewStdClient()
+		client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+		if proxyUrl != "" {
+			client.SetProxy(proxyUrl)
+		}
 	}
 
 	text, status, err := chatgpt.TranscribeAudio(client, account, proxyUrl, audioData, fileHeader.Filename, mimeType, language)

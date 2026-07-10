@@ -76,10 +76,10 @@ func TranscribeAudio(client httpclient.AuroraHttpClient, account *accounts.Accou
 	}
 	setTeamAccountHeader(header, account)
 
-	// oai-did cookie (对齐 ChatGPT Web 客户端)
+	// oai-did cookie (对齐 ChatGPT Web 客户端,使用账号绑定指纹的 deviceID)
 	didCookie := &http.Cookie{
 		Name:  "oai-did",
-		Value: oaiDeviceID,
+		Value: account.Fingerprint.OaiDeviceID,
 		Path:  "/",
 	}
 	// 合并 BasicCookies + oai-did
