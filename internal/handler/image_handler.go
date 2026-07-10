@@ -883,6 +883,17 @@ func (h *ImageHandler) runImageEditFlow(c *gin.Context, asVariation bool) {
 		c.JSON(403, gin.H{"error": "Images API requires a logged-in ChatGPT account."})
 		return
 	}
+	if asVariation {
+		if !account.Type.Satisfies(accounts.CapImageVariation) {
+			c.JSON(403, gin.H{"error": "Image variation requires a logged-in ChatGPT account."})
+			return
+		}
+	} else {
+		if !account.Type.Satisfies(accounts.CapImageEdit) {
+			c.JSON(403, gin.H{"error": "Image edit requires a logged-in ChatGPT account."})
+			return
+		}
+	}
 
 	proxyUrl := account.Proxy
 	client := setupClientWithProxy(proxyUrl)

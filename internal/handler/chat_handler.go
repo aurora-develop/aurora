@@ -283,6 +283,10 @@ func (h *ChatHandler) Responses(c *gin.Context) {
 		c.Abort()
 		return
 	}
+	if !account.Type.Satisfies(accounts.CapResponses) {
+		c.JSON(403, gin.H{"error": "Responses API requires a logged-in ChatGPT account."})
+		return
+	}
 
 	proxyUrl := account.Proxy
 	input_tokens := 0
@@ -470,6 +474,10 @@ func (h *ChatHandler) Files(c *gin.Context) {
 
 // handleToolCalling 工具调用模式的主流程（对齐 initialize/handlers.go:handleToolCalling）
 func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officialtypes.APIRequest, client **bogdanfinn.TlsClient, account *accounts.Account, clientState **chatgpt.ChatClientState, reqModel *string, uid *string, proxyUrl *string, inputTokens *int) {
+	if account == nil || !account.Type.Satisfies(accounts.CapToolCalling) {
+		c.JSON(403, gin.H{"error": "Tool calling requires a logged-in ChatGPT account."})
+		return
+	}
 	tools := originalRequest.Tools
 	maxRefusalRetries := h.cfg.RefusalRetries
 	if maxRefusalRetries <= 0 {

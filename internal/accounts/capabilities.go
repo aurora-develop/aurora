@@ -9,9 +9,9 @@ type Capability struct {
 
 // 系统内所有功能及其当前账号要求
 var (
-	CapChat           = Capability{Name: "chat"}
-	CapResponses      = Capability{Name: "responses"}
-	CapToolCalling    = Capability{Name: "tool_calling"}
+	CapChat           = Capability{Name: "chat", RequiresLogin: true}
+	CapResponses      = Capability{Name: "responses", RequiresLogin: true}
+	CapToolCalling    = Capability{Name: "tool_calling", RequiresLogin: true}
 	CapImageGenerate  = Capability{Name: "image_generation", RequiresLogin: true}
 	CapImageEdit      = Capability{Name: "image_edit", RequiresLogin: true}
 	CapImageVariation = Capability{Name: "image_variation", RequiresLogin: true}
