@@ -23,8 +23,13 @@ Aurora 将 ChatGPT Web 后端能力转换为类 OpenAI API，支持聊天、Resp
 - `/auth/refresh`：传入 OpenAI `refresh_token` 获取 `access_token`。
 - `/auth/session`：传入 ChatGPT `session_token` 获取新的 `session_token` 和 `access_token`。
 - `/backend-api/conversation` 原始 ChatGPT conversation 请求透传。
-- 支持 `access_tokens.txt` 账号池、`free_tokens.txt` 免费 UUID 池、自动生成免费账号、代理池、TLS。
 
+- 支持 `access_tokens.txt` 账号池、`free_tokens.txt` 免费 UUID 池、`refresh_tokens.txt` OAuth 刷新令牌池、`session_tokens.txt` 会话令牌池、自动生成免费账号、代理池、TLS。
+- **完整账号管理体系**：每个账号拥有独立的 TLS Client、代理 IP、浏览器指纹和 WSS 连接，支持三类型账号（TypeNoAuth / TypeFree / TypePUID），六种生命周期状态。
+- **Token 去重**：通过解析 JWT payload 中的 `chatgpt_account_id` 去重，同一 ChatGPT 账号多次出现不会重复占用池位置。
+- **Capability 能力控制**：10 种按账号类型控制的能力（Chat / Responses / ToolCalling / ImageGenerate / ImageEdit / ImageVariation / TTS / Transcribe / FileUpload / WebSocket），noauth 仅可访问 chat/responses，其余需登录。
+- **后台健康检查**：每 10 分钟自动续期已过期的 `session_token` / `refresh_token` 账号。
+- **外部 access_token 支持**：`ENABLE_EXTERNAL_TOKEN=true` 时接受外部传入的 ChatGPT access_token，自动创建隔离的临时账号（含独立 TLS Client + UA + 代理 + 浏览器指纹），10 分钟无请求自动释放。
 ## 部署
 
 ### 编译部署
@@ -102,6 +107,9 @@ ENABLE_HISTORY=false
 TOOL_CALLING_ENABLED=true
 REFUSAL_RETRIES=3
 # DEBUG_TOOL_LOG=tool_debug.log
+
+# 外部 access_token（接受外部传入的 ChatGPT access_token）
+ENABLE_EXTERNAL_TOKEN=false
 ```
 
 说明：
@@ -118,12 +126,16 @@ REFUSAL_RETRIES=3
 - `ENABLE_HISTORY`：设为 `true` 时在请求中保留对话历史上下文。
 - `TOOL_CALLING_ENABLED`：设为 `false` 时忽略请求中的 `tools` 字段，关闭工具调用模拟。
 - `REFUSAL_RETRIES`：模型陷入 "sandbox 拒绝" 循环时的最大重试次数，默认 `3`。
+- `ENABLE_EXTERNAL_TOKEN`：设为 `true` 时接受外部传入的 ChatGPT access_token，自动创建隔离的临时账号（含独立 TLS Client、UA、代理、指纹），10 分钟无请求自动释放。默认 `false`。
 - `DEBUG_TOOL_LOG`：设为文件路径时，将每次工具解析的详细 trace 写入该文件（调试用）。
 
 本地账号文件：
 
 - `access_tokens.txt`：每行一个 ChatGPT `access_token`，用于需要登录账号的能力。
 - `free_tokens.txt`：每行一个 UUID device id，作为免费账号池。
+- `refresh_tokens.txt`：每行一个 OpenAI `refresh_token`（支持 `token:team_id` 格式），启动时自动交换为 `access_token`，过期后自动续期。
+- `session_tokens.txt`：每行一个 ChatGPT `session_token`（支持 `token:team_id` 格式），启动时自动交换为 `access_token`，过期后自动续期。
+- `proxies.txt`：每行一个代理 URL（需要包含端口），与 `PROXY_URL` 一起组成代理池。
 
 ## 注意事项
 

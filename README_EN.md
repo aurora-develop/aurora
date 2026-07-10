@@ -21,8 +21,13 @@ For full endpoints, authentication, token exchange, and curl examples, see: [API
 - `/auth/refresh`: pass an OpenAI `refresh_token` to obtain an `access_token`.
 - `/auth/session`: pass a ChatGPT `session_token` to obtain a new `session_token` and `access_token`.
 - `/backend-api/conversation` for direct proxying of raw ChatGPT conversation requests.
-- Support for `access_tokens.txt` account pool, `free_tokens.txt` free UUID pool, automatic free account generation, proxy pool, and TLS.
 
+- Support for `access_tokens.txt` account pool, `free_tokens.txt` free UUID pool, `refresh_tokens.txt` OAuth refresh token pool, `session_tokens.txt` session token pool, automatic free account generation, proxy pool, and TLS.
+- **Full account management**: Each account has an independent TLS Client, proxy IP, browser fingerprint, and WSS connection. Supports 3 account types (TypeNoAuth / TypeFree / TypePUID) and 6 lifecycle states.
+- **Token deduplication**: Deduplicates accounts by parsing `chatgpt_account_id` from the JWT payload — the same account won't occupy the pool twice even if multiple tokens are provided.
+- **Capability system**: 10 capabilities (Chat / Responses / ToolCalling / ImageGenerate / ImageEdit / ImageVariation / TTS / Transcribe / FileUpload / WebSocket). Only chat/responses are accessible to noauth accounts; others require login.
+- **Health check**: Automatically renews expired `session_token` / `refresh_token` accounts every 10 minutes.
+- **External access_token support**: When `ENABLE_EXTERNAL_TOKEN=true`, accept externally provided ChatGPT access_tokens. Temporary isolated accounts (TLS Client + UA + proxy + fingerprint) are created and released after 10 minutes of inactivity.
 ## Deployment
 
 ### Build from source
@@ -100,6 +105,9 @@ ENABLE_HISTORY=false
 TOOL_CALLING_ENABLED=true
 REFUSAL_RETRIES=3
 # DEBUG_TOOL_LOG=tool_debug.log
+
+# External access token (accept ChatGPT access_token from request header)
+ENABLE_EXTERNAL_TOKEN=false
 ```
 
 Details:
@@ -116,19 +124,16 @@ Details:
 - `ENABLE_HISTORY`: Set to `true` to preserve conversation history context in requests.
 - `TOOL_CALLING_ENABLED`: Set to `false` to ignore the `tools` field in requests and disable tool calling emulation.
 - `REFUSAL_RETRIES`: Maximum retry attempts when the model enters a "sandbox refusal" loop; defaults to `3`.
+- `ENABLE_EXTERNAL_TOKEN`: When set to `true`, accept externally provided ChatGPT access_tokens. A temporary account (with isolated TLS Client, UA, proxy, and browser fingerprint) is created per token, automatically released after 10 minutes of inactivity. Default `false`.
 - `DEBUG_TOOL_LOG`: Set to a file path to write detailed trace logs for each tool call parsing (for debugging).
 
 Local account files:
 
 - `access_tokens.txt`: One ChatGPT `access_token` per line, used for features that require a logged-in account.
 - `free_tokens.txt`: One UUID device ID per line, serving as a free account pool.
-
-## Notes
-
-- Image, TTS, and file features depend on a logged-in access token and are unavailable with free UUID accounts.
-- `STREAM_MODE=false` forcibly disables streaming for Chat Completions.
-- This project is a ChatGPT Web capability conversion service. The endpoint shapes are designed to be compatible with the OpenAI API as much as possible, but it is not an official OpenAI service.
-
+- `refresh_tokens.txt`: One OpenAI `refresh_token` per line (supports `token:team_id` format). Automatically exchanged for an `access_token` on startup; auto-renewed on expiry.
+- `session_tokens.txt`: One ChatGPT `session_token` per line (supports `token:team_id` format). Automatically exchanged for an `access_token` on startup; auto-renewed on expiry.
+- `proxies.txt`: One proxy URL per line (port required). Forms a proxy pool with `PROXY_URL`.
 ## Acknowledgments
 
 Thanks to all the contributors for their PR support.
