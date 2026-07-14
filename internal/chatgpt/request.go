@@ -618,9 +618,12 @@ type sentinelReqResponse struct {
 // 对齐 2026-06-24 浏览器抓包: /sentinel/req 使用与 prepare **完全相同** 的
 // 25 元素 Build25 格式,唯一区别是 [3] nonce=2 (prepare=1)。
 // 直接复用 fingerprint.Build25(),不手写重复数组。
-func buildSentinelReqToken(state *ChatClientState) string {
+func buildSentinelReqToken(state *ChatClientState, account *accounts.Account) string {
 	ua := defaultUserAgent()
 	deviceID := oaiDeviceID
+	if account != nil && account.Fingerprint.OaiDeviceID != "" {
+		deviceID = account.Fingerprint.OaiDeviceID
+	}
 	if state != nil {
 		if state.UserAgent != "" {
 			ua = state.UserAgent
@@ -679,7 +682,7 @@ func POSTSentinelReq(client httpclient.AuroraHttpClient, account *accounts.Accou
 		flow = "conversation"
 	}
 	// 使用与 prepare 相同的指纹格式,但 nonce=2
-	reqToken := buildSentinelReqToken(state)
+	reqToken := buildSentinelReqToken(state, account)
 	apiUrl, targetPath := sentinelURL(account, "/sentinel/req")
 	bodyJSON, err := json.Marshal(map[string]string{
 		"p":    reqToken,
@@ -727,9 +730,16 @@ func sentinelHeader(account *accounts.Account, targetPath string) httpclient.Aur
 
 func sentinelHeaderWithState(account *accounts.Account, targetPath string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	// 优先用账号指纹中的设备 ID;签名未分配时回退到全局
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -783,7 +793,7 @@ func setTeamAccountHeader(header httpclient.AuroraHeaders, account *accounts.Acc
 func getURLAttribution(client httpclient.AuroraHttpClient, account *accounts.Account, url string) string {
 	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	if account != nil && account.PUID != "" {
 		header.Set("Cookie", "_puid="+account.PUID+";")
 	}
@@ -818,9 +828,15 @@ func conversationHeaders(account *accounts.Account, chatToken *TurnStile, accept
 
 func conversationHeadersWithState(account *accounts.Account, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -1761,7 +1777,7 @@ func CollectImageResults(response *http.Response, client httpclient.AuroraHttpCl
 }
 
 func conversationFetchHeaders(account *accounts.Account) httpclient.AuroraHeaders {
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
 	if account.Token != "" {
@@ -1882,9 +1898,15 @@ func imageConversationHeaders(account *accounts.Account, turnStile *TurnStile, c
 
 func imageConversationHeadersWithState(account *accounts.Account, turnStile *TurnStile, conduitToken, accept string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -2780,6 +2802,8 @@ func createBaseHeader() httpclient.AuroraHeaders {
 	return createBaseHeaderForState(nil)
 }
 
+// createBaseHeaderForState 创建基础 headers。
+// deviceID/sessionID/ua 优先用 state 中的值，其次用全局值。
 func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
 	deviceID := oaiDeviceID
@@ -2800,6 +2824,26 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 		}
 	}
 	return headerbuilder.NewBaseHeaderWithState(conversationID, deviceID, sessionID, ua)
+}
+
+// baseHeaderFromAccount 返回带 account.Fingerprint 设备标识的基础 headers。
+// 用于被 createBaseHeader 的调用方在拿到 account 后覆盖 deviceID/sessionID/ua。
+func baseHeaderFromAccount(account *accounts.Account) httpclient.AuroraHeaders {
+	h := createBaseHeader()
+	if account != nil {
+		if account.Fingerprint.OaiDeviceID != "" {
+			h.Set("Oai-Device-Id", account.Fingerprint.OaiDeviceID)
+		} else {
+			h.Set("Oai-Device-Id", oaiDeviceID)
+		}
+		if account.Fingerprint.OaiSessionID != "" {
+			h.Set("Oai-Session-Id", account.Fingerprint.OaiSessionID)
+		}
+		if account.Fingerprint.UserAgent != "" {
+			h.Set("User-Agent", account.Fingerprint.UserAgent)
+		}
+	}
+	return h
 }
 
 // defaultUserAgent 返回全局统一的 User-Agent (Chrome 148 Windows)。
@@ -2896,7 +2940,7 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 }
 
 func getTTSBlobFromURL(client httpclient.AuroraHttpClient, account *accounts.Account, reqURL string) ([]byte, int, error) {
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "audio/*,*/*")
 	if !(account.Type == accounts.TypeNoAuth) && account.Token != "" {
 		header.Set("Authorization", "Bearer "+account.Token)
@@ -2977,7 +3021,7 @@ func RemoveConversation(client httpclient.AuroraHttpClient, account *accounts.Ac
 	} else {
 		url = BaseURL + "/conversation/" + id
 	}
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Content-Type", "application/json")
 	if !(account.Type == accounts.TypeNoAuth) && account.Token != "" {
 		header.Set("Authorization", "Bearer "+account.Token)
