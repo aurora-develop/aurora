@@ -41,7 +41,7 @@ func Load() Config {
 		StreamMode:         getBoolEnv("STREAM_MODE", true),
 		MaxContinueCount:   getIntEnv("MAX_CONTINUE_COUNT", 3),
 		EnableHistory:      getBoolEnv("ENABLE_HISTORY", false),
-		EnableExternalToken: getBoolEnv("ENABLE_EXTERNAL_TOKEN", false),
+		EnableExternalToken: getBoolEnv("ENABLE_EXTERNAL_TOKEN", true),
 		ToolCallingEnabled: getBoolEnv("TOOL_CALLING_ENABLED", true),
 		RefusalRetries:     getIntEnv("REFUSAL_RETRIES", 3),
 		DebugToolLog:       os.Getenv("DEBUG_TOOL_LOG"),
