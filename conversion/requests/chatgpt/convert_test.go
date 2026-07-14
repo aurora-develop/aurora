@@ -1,19 +1,27 @@
 package chatgpt
 
 import (
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
+	chatgpt_types "aurora/typings/chatgpt"
 	"aurora/typings/official"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
+var testAccount = accounts.NewAccount("test", accounts.TypeNoAuth, "")
+
+func testConvert(t *testing.T, req official.APIRequest) chatgpt_types.ChatGPTRequest {
+	t.Helper()
+	return ConvertAPIRequest(req, testAccount, "", nil)
+}
+
 func TestConvertAPIRequestNoToolsNoInjection(t *testing.T) {
 	req := official.APIRequest{
 		Model:    "gpt-5",
 		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	if len(out.Messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(out.Messages))
 	}
@@ -36,7 +44,7 @@ func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 			official.NewTextMessage("user", "list files"),
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	if len(out.Messages) < 2 {
 		t.Fatalf("messages = %d, want ≥ 2 (system + user + nudge)", len(out.Messages))
 	}
@@ -63,7 +71,7 @@ func TestConvertAPIRequestAppendsFinalNudgeForUserTurn(t *testing.T) {
 			official.NewTextMessage("user", "Working directory: /home/x\nlist"),
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	last := out.Messages[len(out.Messages)-1]
 	if last.Author.Role != "user" {
 		t.Fatalf("last role = %q, want user (nudge)", last.Author.Role)
@@ -91,7 +99,7 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 			{Role: "tool", ToolCallID: "c1", Name: "bash", Content: official.MessageContent{TextValue: "file1.py\nfile2.py"}},
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	// 找到 tool 消息
 	var toolMsg string
 	for _, m := range out.Messages {
@@ -122,7 +130,7 @@ func TestConvertAPIRequestSerializesHistoryToolCalls(t *testing.T) {
 			}{Name: "bash", Arguments: `{"command":"ls"}`}}}},
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	// 找到 assistant 消息,确认 <tool_call> 标签已序列化
 	var found bool
 	for _, m := range out.Messages {
@@ -148,7 +156,7 @@ func TestConvertAPIRequestForcedToolChoice(t *testing.T) {
 		ToolChoice: choice,
 		Messages:   []official.APIMessage{official.NewTextMessage("user", "x")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	text, _ := out.Messages[0].Content.Parts[0].(string)
 	if !strings.Contains(text, `MUST call the tool "bash"`) {
 		t.Fatalf("missing forced-call line: %s", text)
@@ -164,7 +172,7 @@ func TestConvertAPIRequestToolChoiceNoneStripsProtocol(t *testing.T) {
 		ToolChoice: &official.ToolChoice{Type: "none"},
 		Messages:   []official.APIMessage{official.NewTextMessage("user", "just answer in text")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	text, _ := out.Messages[0].Content.Parts[0].(string)
 	if !strings.Contains(text, "DISABLED tool calling") {
 		t.Fatalf("missing none-warning: %s", text)
