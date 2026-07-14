@@ -135,6 +135,25 @@ func createBaseHeaderForState(state *ChatClientState) httpclient.AuroraHeaders {
 	return headerbuilder.NewBaseHeaderWithState(conversationID, deviceID, sessionID, ua)
 }
 
+// baseHeaderFromAccount 返回带 account.Fingerprint 设备标识的基础 headers。
+func baseHeaderFromAccount(account *accounts.Account) httpclient.AuroraHeaders {
+	h := createBaseHeader()
+	if account != nil {
+		if account.Fingerprint.OaiDeviceID != "" {
+			h.Set("Oai-Device-Id", account.Fingerprint.OaiDeviceID)
+		} else {
+			h.Set("Oai-Device-Id", oaiDeviceID)
+		}
+		if account.Fingerprint.OaiSessionID != "" {
+			h.Set("Oai-Session-Id", account.Fingerprint.OaiSessionID)
+		}
+		if account.Fingerprint.UserAgent != "" {
+			h.Set("User-Agent", account.Fingerprint.UserAgent)
+		}
+	}
+	return h
+}
+
 // readResponseSnippet 读取响应体的前 limit 字节用于错误报告。
 func readResponseSnippet(body io.Reader, limit int64) string {
 	if limit <= 0 {
@@ -165,7 +184,7 @@ func setTeamAccountHeader(header httpclient.AuroraHeaders, account *accounts.Acc
 func getURLAttribution(client httpclient.AuroraHttpClient, account *accounts.Account, url string) string {
 	requestURL := BaseURL + "/attributions"
 	payload := bytes.NewBuffer([]byte(`{"urls":["` + url + `"]}`))
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	if account != nil && account.PUID != "" {
 		header.Set("Cookie", "_puid="+account.PUID+";")
 	}

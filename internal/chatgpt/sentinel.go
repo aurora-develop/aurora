@@ -448,9 +448,12 @@ func POSTSentinelFinalizeWithState(client httpclient.AuroraHttpClient, account *
 }
 
 // buildSentinelReqToken 为 /sentinel/req 端点生成指纹 token (nonce=2)。
-func buildSentinelReqToken(state *ChatClientState) string {
+func buildSentinelReqToken(state *ChatClientState, account *accounts.Account) string {
 	ua := defaultUserAgent()
 	deviceID := oaiDeviceID
+	if account != nil && account.Fingerprint.OaiDeviceID != "" {
+		deviceID = account.Fingerprint.OaiDeviceID
+	}
 	if state != nil {
 		if state.UserAgent != "" {
 			ua = state.UserAgent
@@ -503,7 +506,7 @@ func POSTSentinelReq(client httpclient.AuroraHttpClient, account *accounts.Accou
 	if flow == "" {
 		flow = "conversation"
 	}
-	reqToken := buildSentinelReqToken(state)
+	reqToken := buildSentinelReqToken(state, account)
 	apiUrl, targetPath := sentinelURL(account, "/sentinel/req")
 	bodyJSON, err := json.Marshal(map[string]string{
 		"p":    reqToken,

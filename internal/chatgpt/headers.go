@@ -34,9 +34,15 @@ func conversationHeaders(account *accounts.Account, chatToken *TurnStile, accept
 // conversationHeadersWithState 创建对话请求的 header（带 state）。
 func conversationHeadersWithState(account *accounts.Account, chatToken *TurnStile, accept, targetPath, conduitToken, turnTraceID string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -89,9 +95,15 @@ func sentinelHeader(account *accounts.Account, targetPath string) httpclient.Aur
 // sentinelHeaderWithState 创建 sentinel 请求的 header（带 state）。
 func sentinelHeaderWithState(account *accounts.Account, targetPath string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -126,9 +138,15 @@ func imageConversationHeaders(account *accounts.Account, turnStile *TurnStile, c
 // imageConversationHeadersWithState 创建图片对话请求的 header（带 state）。
 func imageConversationHeadersWithState(account *accounts.Account, turnStile *TurnStile, conduitToken, accept string, state *ChatClientState) httpclient.AuroraHeaders {
 	conversationID := ""
-	deviceID := oaiDeviceID
-	sessionID := oaiSessionID
-	ua := ""
+	deviceID := account.Fingerprint.OaiDeviceID
+	if deviceID == "" {
+		deviceID = oaiDeviceID
+	}
+	sessionID := account.Fingerprint.OaiSessionID
+	if sessionID == "" {
+		sessionID = oaiSessionID
+	}
+	ua := account.Fingerprint.UserAgent
 	if state != nil {
 		if state.ConversationID != "" {
 			conversationID = state.ConversationID
@@ -170,7 +188,7 @@ func imageConversationHeadersWithState(account *accounts.Account, turnStile *Tur
 
 // conversationFetchHeaders 创建查询对话的 header。
 func conversationFetchHeaders(account *accounts.Account) httpclient.AuroraHeaders {
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
 	if account.Token != "" {

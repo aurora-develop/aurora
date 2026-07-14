@@ -101,7 +101,7 @@ func HandlerTTS(response *http.Response, input string) (string, string) {
 }
 
 func getTTSBlobFromURL(client httpclient.AuroraHttpClient, account *accounts.Account, reqURL string) ([]byte, int, error) {
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "audio/*,*/*")
 	if !(account.Type == accounts.TypeNoAuth) && account.Token != "" {
 		header.Set("Authorization", "Bearer "+account.Token)
@@ -184,7 +184,7 @@ func RemoveConversation(client httpclient.AuroraHttpClient, account *accounts.Ac
 	} else {
 		url = BaseURL + "/conversation/" + id
 	}
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Content-Type", "application/json")
 	if !(account.Type == accounts.TypeNoAuth) && account.Token != "" {
 		header.Set("Authorization", "Bearer "+account.Token)

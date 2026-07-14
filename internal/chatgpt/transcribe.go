@@ -65,7 +65,7 @@ func TranscribeAudio(client httpclient.AuroraHttpClient, account *accounts.Accou
 	}
 
 	// 请求头
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", w.FormDataContentType())
 	if account.Token != "" {

@@ -139,7 +139,7 @@ func createUpload(client httpclient.AuroraHttpClient, account *accounts.Account,
 	if err != nil {
 		return uploadMetaResponse{}, http.StatusInternalServerError, err
 	}
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
 	if account.Token != "" {
@@ -191,7 +191,7 @@ func putUpload(client httpclient.AuroraHttpClient, uploadURL, contentType string
 }
 
 func confirmUpload(client httpclient.AuroraHttpClient, account *accounts.Account, fileID string) (int, error) {
-	header := createBaseHeader()
+	header := baseHeaderFromAccount(account)
 	header.Set("Accept", "application/json")
 	header.Set("Content-Type", "application/json")
 	if account.Token != "" {
