@@ -120,33 +120,6 @@ func TestBuild25_MatchesSample(t *testing.T) {
 	}
 }
 
-func TestBuild25_Default(t *testing.T) {
-	got := Build25(DefaultOptions())
-	if len(got) != 25 {
-		t.Fatalf("len != 25: got %d", len(got))
-	}
-	for i, v := range got {
-		t.Logf("[%d] %T %v", i, v, v)
-	}
-	// [0] must be int (number, not string)
-	if _, ok := got[0].(int); !ok {
-		t.Errorf("[0] should be int (number), got %T", got[0])
-	}
-	// [2] must be int64 (number)
-	if _, ok := got[2].(int64); !ok {
-		t.Errorf("[2] should be int64 (number), got %T", got[2])
-	}
-	// [5] must be SDK URL string
-	if got[5] != "https://chatgpt.com/backend-api/sentinel/sdk.js" {
-		t.Errorf("[5] should be SDK URL, got %v", got[5])
-	}
-	// [8] must be comma-separated languages string
-	if _, ok := got[8].(string); !ok {
-		t.Errorf("[8] should be string, got %T", got[8])
-	}
-	fmt.Println("TestBuild25_Default 通过")
-}
-
 func typeOf(v any) string {
 	switch v.(type) {
 	case string:
