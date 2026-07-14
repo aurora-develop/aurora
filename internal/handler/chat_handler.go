@@ -454,10 +454,16 @@ func (h *ChatHandler) Files(c *gin.Context) {
 
 	contentType := formFile.Header.Get("Content-Type")
 
-	client := bogdanfinn.NewStdClient()
-	client.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+	// 使用 account 绑定的 Client（有指纹 + 代理）；不存在则新建
+	var fileClient *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		fileClient = c
+	} else {
+		fileClient = bogdanfinn.NewStdClient()
+		fileClient.SetCookies("https://chatgpt.com", chatgpt.BasicCookies)
+	}
 
-	uploaded, status, err := chatgpt.UploadFile(client, account, account.Proxy, formFile.Filename, contentType, data)
+	uploaded, status, err := chatgpt.UploadFile(fileClient, account, account.Proxy, formFile.Filename, contentType, data)
 	if err != nil {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": err.Error(),
@@ -605,11 +611,17 @@ func (h *ChatHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 
-	client := bogdanfinn.NewStdClient()
-	if account.Proxy != "" {
-		client.SetProxy(account.Proxy)
+	// 使用 account 绑定的 Client（有指纹 + 代理）；不存在则新建
+	var convClient *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		convClient = c
+	} else {
+		convClient = bogdanfinn.NewStdClient()
+		if account.Proxy != "" {
+			convClient.SetProxy(account.Proxy)
+		}
 	}
-	turnStile, status, err := chatgpt.InitSentinel(client, account, account.Proxy, 0)
+	turnStile, status, err := chatgpt.InitSentinel(convClient, account, account.Proxy, 0)
 	if err != nil {
 		if status == http.StatusUnauthorized {
 			h.accountPool.ReportFailure(account)
@@ -623,7 +635,7 @@ func (h *ChatHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 
-	response, err := chatgpt.POSTconversation(client, original_request, account, turnStile, account.Proxy)
+	response, err := chatgpt.POSTconversation(convClient, original_request, account, turnStile, account.Proxy)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "error sending request"})
 		return

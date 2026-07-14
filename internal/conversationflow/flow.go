@@ -69,7 +69,13 @@ func (f *FlowOrchestrator) ExecuteConversation(c *gin.Context, req ExecuteReques
 	// 2. 获取 account
 	account := f.resolveSecret(c, req)
 
-	client := bogdanfinn.NewStdClient()
+	// 使用 account 绑定的 Client（有指纹 + 代理）；不存在则新建
+	var client *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		client = c
+	} else {
+		client = bogdanfinn.NewStdClient()
+	}
 
 	// 3. 初始化 turnstile + WebSocket
 	response, wsConn, turnStile, status, err := f.postConversationOrder(
@@ -183,7 +189,13 @@ func (f *FlowOrchestrator) HandleToolCalling(c *gin.Context, req ExecuteRequest)
 
 	proxyURL := f.Proxy.Allocate()
 	account := f.resolveSecretForTool(c, req)
-	client := bogdanfinn.NewStdClient()
+	// 使用 account 绑定的 Client（有指纹 + 代理）；不存在则新建
+	var client *bogdanfinn.TlsClient
+	if c, ok := account.Client.(*bogdanfinn.TlsClient); ok && c != nil {
+		client = c
+	} else {
+		client = bogdanfinn.NewStdClient()
+	}
 	clientState := f.resolveClientState(req.TranslatedRequest)
 
 	var lastText, lastConversationID string
