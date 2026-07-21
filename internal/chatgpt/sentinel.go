@@ -225,10 +225,14 @@ func InitSentinelWithState(client httpclient.AuroraHttpClient, account *accounts
 	}
 
 	// so 段
-	if prepare.So.Required && prepare.So.CollectorDX != "" && prepare.So.SnapshotDX != "" && prepare.Token != "" {
+	chatToken := prepare.Token
+	if chatToken == "" {
+		chatToken = prepare.PrepareToken
+	}
+	if prepare.So.Required && prepare.So.CollectorDX != "" && prepare.So.SnapshotDX != "" && chatToken != "" {
 		ts.soSession = so.NewSession(requirementsToken, prepare.So.CollectorDX)
 		ts.soSnapshotDX = prepare.So.SnapshotDX
-		ts.soChatToken = prepare.Token
+		ts.soChatToken = chatToken
 		ts.soFlow = stateFlow(state, ua)
 		ts.soSession.Start()
 	}
