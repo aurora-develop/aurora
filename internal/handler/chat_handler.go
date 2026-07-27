@@ -3,14 +3,16 @@ package handler
 import (
 	"fmt"
 	"io"
-"net/http"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
 	"aurora/internal/config"
+	"aurora/internal/httpstream"
 	"aurora/internal/toolcall"
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
@@ -142,6 +144,24 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 	var stopSent bool
 	pingSent := false
 
+	// 记录请求开始时间，用于 TTFT / total-time 计时
+	startTime := time.Now()
+	ttftSet := false
+	var ttftMs int64
+
+	// 提取 instructions / input 用于缓存模拟（与 Responses 路径一致）
+	var instructions string
+	var inputTextParts []string
+	for _, msg := range original_request.Messages {
+		if msg.Role == "system" {
+			instructions += msg.Text()
+		} else {
+			inputTextParts = append(inputTextParts, msg.Text())
+		}
+	}
+	inputText := strings.Join(inputTextParts, "\n")
+	cacheWriteTokens, cachedTokens := RecordCache(translated_request.ConversationID, instructions, inputText)
+
 	if !h.cfg.StreamMode {
 		original_request.Stream = false
 	}
@@ -163,6 +183,11 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 		continue_info = result.Continue
 		full_response += result.Text
 		full_thinking += result.ThinkingText
+		// 首个输出 token 到达时记录 TTFT（text chunk 已在 HandlerDetailedWithOptions 内写出）
+		if result.Text != "" && !ttftSet {
+			ttftSet = true
+			ttftMs = time.Since(startTime).Milliseconds()
+		}
 		if result.ConversationID != "" {
 			conversationID = result.ConversationID
 			h.sessions.Register(conversationID, clientState)
@@ -225,20 +250,8 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 	} else {
 		if original_request.StreamOptions != nil && original_request.StreamOptions.IncludeUsage {
 			output_tokens := util.CountToken(full_response)
-			usageChunk := officialtypes.ChatCompletionChunk{
-				ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-				Object:  "chat.completion.chunk",
-				Created: 0,
-				Model:   reqModel,
-				Choices: []officialtypes.Choices{},
-				Usage: &officialtypes.StreamUsage{
-					PromptTokens:     input_tokens,
-					CompletionTokens: output_tokens,
-					TotalTokens:      input_tokens + output_tokens,
-				},
-			}
-			c.Writer.WriteString("data: " + usageChunk.String() + "\n\n")
-			c.Writer.Flush()
+			msSinceStart := time.Since(startTime).Milliseconds()
+			httpstream.WriteUsageChunk(c, reqModel, input_tokens, output_tokens, cachedTokens, cacheWriteTokens, msSinceStart, ttftMs, ttftSet)
 		}
 		writeChatCompletionStreamDone(c, stopSent, reqModel, conversationID)
 	}
@@ -320,53 +333,24 @@ func (h *ChatHandler) Responses(c *gin.Context) {
 		reqModel = "auto"
 	}
 
-	response, wsConn, _, status, err := conversationClientOrder(&client, account, translated_request, proxyUrl, false, clientState, h.accountPool)
-	if err != nil {
-		c.JSON(status, gin.H{"error": gin.H{
-			"message": err.Error(),
-			"type":    "request_conversion_error",
-			"param":   "model",
-			"code":    "request_conversion_error",
-		}})
-		return
+	// 提取 instructions / input 用于缓存模拟
+	var instructions string
+	var inputTextParts []string
+	for _, msg := range original_request.Messages {
+		if msg.Role == "system" {
+			instructions += msg.Text()
+		} else {
+			inputTextParts = append(inputTextParts, msg.Text())
+		}
 	}
-	defer response.Body.Close()
-	if chatgpt.Handle_request_error(c, response) {
-		if wsConn != nil {
-			wsConn.Close()
-			wsConn = nil
-		}
-		return
-	}
+	inputText := strings.Join(inputTextParts, "\n")
+	cacheWriteTokens, cachedTokens := RecordCache(translated_request.ConversationID, instructions, inputText)
 
-	var full_response string
-	for i := h.cfg.MaxContinueCount; i > 0; i-- {
-		var continue_info *chatgpt.ContinueInfo
-		var response_part string
-		result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, uid, translated_request, false, reqModel, chatgpt.HandlerDetailedOptions{
-			Websocket:   wsConn,
-			ClientState: clientState,
-		})
-		wsConn = nil
-		response_part, continue_info = result.Text, result.Continue
-		full_response += response_part
-		parentMessageID := result.ParentMessageID
-		if continue_info != nil {
-			parentMessageID = continue_info.ParentID
-		}
-		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
-		if result.ConversationID != "" {
-			h.sessions.Register(result.ConversationID, clientState)
-		}
-		if continue_info == nil {
-			break
-		}
-		translated_request.Messages = nil
-		translated_request.Action = "continue"
-		translated_request.ConversationID = continue_info.ConversationID
-		translated_request.ParentMessageID = continue_info.ParentID
+	streamRequested := responsesRequest.Stream && h.cfg.StreamMode
 
-		response, wsConn, _, status, err = conversationClientOrder(&client, account, translated_request, proxyUrl, false, clientState, h.accountPool)
+	// 非流式路径：保持原有行为，使用新的 NewResponsesResponse 签名（含 reasoning + cache）
+	if !streamRequested {
+		response, wsConn, _, status, err := conversationClientOrder(&client, account, translated_request, proxyUrl, false, clientState, h.accountPool)
 		if err != nil {
 			c.JSON(status, gin.H{"error": gin.H{
 				"message": err.Error(),
@@ -384,26 +368,222 @@ func (h *ChatHandler) Responses(c *gin.Context) {
 			}
 			return
 		}
-	}
-	if c.Writer.Status() != 200 {
-		return
-	}
 
-	output_tokens := util.CountToken(full_response)
-	responsesResponse := officialtypes.NewResponsesResponse(full_response, input_tokens, output_tokens, reqModel)
-	if !responsesRequest.Stream || !h.cfg.StreamMode {
+		var full_response string
+		var full_thinking string
+		var conversationID string
+		for i := h.cfg.MaxContinueCount; i > 0; i-- {
+			var continue_info *chatgpt.ContinueInfo
+			result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, uid, translated_request, false, reqModel, chatgpt.HandlerDetailedOptions{
+				Websocket:   wsConn,
+				ClientState: clientState,
+			})
+			wsConn = nil
+			full_response += result.Text
+			full_thinking += result.ThinkingText
+			parentMessageID := result.ParentMessageID
+			continue_info = result.Continue
+			if continue_info != nil {
+				parentMessageID = continue_info.ParentID
+			}
+			clientState.NoteTurnResult(result.ConversationID, parentMessageID)
+			if result.ConversationID != "" {
+				conversationID = result.ConversationID
+				h.sessions.Register(conversationID, clientState)
+			}
+			if continue_info == nil {
+				break
+			}
+			translated_request.Messages = nil
+			translated_request.Action = "continue"
+			translated_request.ConversationID = continue_info.ConversationID
+			translated_request.ParentMessageID = continue_info.ParentID
+
+			response, wsConn, _, status, err = conversationClientOrder(&client, account, translated_request, proxyUrl, false, clientState, h.accountPool)
+			if err != nil {
+				c.JSON(status, gin.H{"error": gin.H{
+					"message": err.Error(),
+					"type":    "request_conversion_error",
+					"param":   "model",
+					"code":    "request_conversion_error",
+				}})
+				return
+			}
+			defer response.Body.Close()
+			if chatgpt.Handle_request_error(c, response) {
+				if wsConn != nil {
+					wsConn.Close()
+					wsConn = nil
+				}
+				return
+			}
+		}
+		if c.Writer.Status() != 200 {
+			return
+		}
+
+		output_tokens := util.CountToken(full_response)
+		reasoning_tokens := util.CountToken(full_thinking)
+		responsesResponse := officialtypes.NewResponsesResponse(full_response, full_thinking, input_tokens, output_tokens, reasoning_tokens, cachedTokens, cacheWriteTokens, reqModel)
 		c.JSON(200, responsesResponse)
 		return
 	}
 
+	// ── 流式路径 ──
+	startTime := time.Now()
+	respID := "resp_" + uuid.NewString()
+	reasoningItemID := "rs_" + uuid.NewString()
+	messageItemID := "msg_" + uuid.NewString()
+
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
-	c.String(200, "event: response.created\ndata: "+officialtypes.ResponsesCreated(responsesResponse)+"\n\n")
-	c.String(200, "event: response.output_text.delta\ndata: "+officialtypes.ResponsesTextDelta(full_response)+"\n\n")
-	c.String(200, "event: response.completed\ndata: "+officialtypes.ResponsesCompleted(responsesResponse)+"\n\n")
-	c.String(200, "data: [DONE]\n\n")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, _ := c.Writer.(http.Flusher)
+
+	// response.created
+	c.Writer.WriteString("event: response.created\ndata: " + responsesCreatedEvent(respID, reqModel) + "\n\n")
+	// output_item.added (reasoning, output_index 0)
+	c.Writer.WriteString("event: response.output_item.added\ndata: " + responsesOutputItemAddedEvent(0, reasoningItemID, "reasoning") + "\n\n")
+	// output_item.added (message, output_index 1)
+	c.Writer.WriteString("event: response.output_item.added\ndata: " + responsesOutputItemAddedEvent(1, messageItemID, "message") + "\n\n")
+	if flusher != nil {
+		c.Writer.WriteHeader(200)
+		flusher.Flush()
+	}
+
+	response, wsConn, _, _, err := conversationClientOrder(&client, account, translated_request, proxyUrl, true, clientState, h.accountPool)
+	if err != nil {
+		c.Writer.WriteString("event: response.failed\ndata: " + responsesFailedEvent(err.Error()) + "\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+	defer response.Body.Close()
+	if chatgpt.Handle_request_error(c, response) {
+		if wsConn != nil {
+			wsConn.Close()
+			wsConn = nil
+		}
+		c.Writer.WriteString("event: response.failed\ndata: " + responsesFailedEvent("upstream error") + "\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+
+	var full_response string
+	var full_thinking string
+	var conversationID string
+	ttftSet := false
+	var ttftMs int64
+
+	for i := h.cfg.MaxContinueCount; i > 0; i-- {
+		var continue_info *chatgpt.ContinueInfo
+		result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, uid, translated_request, true, reqModel, chatgpt.HandlerDetailedOptions{
+			Websocket:   wsConn,
+			ClientState: clientState,
+		})
+		wsConn = nil
+		full_response += result.Text
+		full_thinking += result.ThinkingText
+
+		// 思维链增量
+		if result.ThinkingText != "" {
+			reasoningEvt := officialtypes.ResponsesReasoningDeltaEvent{
+				Type:         "response.reasoning_text.delta",
+				ItemID:       reasoningItemID,
+				OutputIndex:  0,
+				ContentIndex: 0,
+				Delta:        result.ThinkingText,
+			}
+			c.Writer.WriteString("event: response.reasoning_text.delta\ndata: " + reasoningEvt.String() + "\n\n")
+		}
+
+		// 正文增量
+		if result.Text != "" {
+			if !ttftSet {
+				ttftSet = true
+				ttftMs = time.Since(startTime).Milliseconds()
+			}
+			textEvt := officialtypes.ResponsesTextDeltaEvent{
+				Type:         "response.output_text.delta",
+				ItemID:       messageItemID,
+				OutputIndex:  1,
+				ContentIndex: 0,
+				Delta:        result.Text,
+			}
+			c.Writer.WriteString("event: response.output_text.delta\ndata: " + textEvt.String() + "\n\n")
+		}
+
+		if flusher != nil {
+			flusher.Flush()
+		}
+
+		parentMessageID := result.ParentMessageID
+		continue_info = result.Continue
+		if continue_info != nil {
+			parentMessageID = continue_info.ParentID
+		}
+		clientState.NoteTurnResult(result.ConversationID, parentMessageID)
+		if result.ConversationID != "" {
+			conversationID = result.ConversationID
+			h.sessions.Register(conversationID, clientState)
+		}
+		if continue_info == nil {
+			break
+		}
+		translated_request.Messages = nil
+		translated_request.Action = "continue"
+		translated_request.ConversationID = continue_info.ConversationID
+		translated_request.ParentMessageID = continue_info.ParentID
+
+		response, wsConn, _, _, err = conversationClientOrder(&client, account, translated_request, proxyUrl, true, clientState, h.accountPool)
+		if err != nil {
+			c.Writer.WriteString("event: response.failed\ndata: " + responsesFailedEvent(err.Error()) + "\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		defer response.Body.Close()
+		if chatgpt.Handle_request_error(c, response) {
+			if wsConn != nil {
+				wsConn.Close()
+				wsConn = nil
+			}
+			c.Writer.WriteString("event: response.failed\ndata: " + responsesFailedEvent("upstream error") + "\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+	}
+
+	// output_item.done (reasoning)
+	c.Writer.WriteString("event: response.output_item.done\ndata: " + responsesOutputItemDoneEvent(0, reasoningItemID, "reasoning", full_thinking) + "\n\n")
+	// output_item.done (message)
+	c.Writer.WriteString("event: response.output_item.done\ndata: " + responsesOutputItemDoneEvent(1, messageItemID, "message", full_response) + "\n\n")
+
+	output_tokens := util.CountToken(full_response)
+	reasoning_tokens := util.CountToken(full_thinking)
+	responsesResponse := officialtypes.NewResponsesResponse(full_response, full_thinking, input_tokens, output_tokens, reasoning_tokens, cachedTokens, cacheWriteTokens, reqModel)
+	// 在 response.completed 事件里附带 timing（HTTP headers 在首次 Flush 后不可写）
+	responsesResponse.MsSinceStart = time.Since(startTime).Milliseconds()
+	if ttftSet {
+		responsesResponse.MsTTFT = ttftMs
+	}
+	// response.completed
+	c.Writer.WriteString("event: response.completed\ndata: " + responsesCompletedEvent(responsesResponse) + "\n\n")
+	c.Writer.WriteString("data: [DONE]\n\n")
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
+
+// writeTimingHeader 在非流式响应中设置 timing 头部（仅非流式路径使用）。
 
 func (h *ChatHandler) Files(c *gin.Context) {
 	account, _, err := resolveAccount(c, h.accountPool, h.cfg, true)
