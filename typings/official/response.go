@@ -1,6 +1,9 @@
 package official
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ChatCompletionChunk struct {
 	ID             string                 `json:"id"`
@@ -246,28 +249,15 @@ func derefString(p *string) string {
 }
 
 type ResponsesResponse struct {
-	ID         string            `json:"id"`
-	Object     string            `json:"object"`
-	CreatedAt  int64             `json:"created_at"`
-	Status     string            `json:"status"`
-	Model      string            `json:"model"`
-	Output     []ResponsesOutput `json:"output"`
-	OutputText string            `json:"output_text"`
-	Usage      usage             `json:"usage"`
-}
-
-type ResponsesOutput struct {
-	ID      string             `json:"id"`
-	Type    string             `json:"type"`
-	Status  string             `json:"status"`
-	Role    string             `json:"role"`
-	Content []ResponsesContent `json:"content"`
-}
-
-type ResponsesContent struct {
-	Type        string        `json:"type"`
-	Text        string        `json:"text"`
-	Annotations []interface{} `json:"annotations"`
+	ID               string                `json:"id"`
+	Object           string                `json:"object"`
+	CreatedAt        int64                 `json:"created_at"`
+	Status           string                `json:"status"`
+	Model            string                `json:"model"`
+	Output           []ResponsesOutputItem `json:"output"`
+	OutputText       string                `json:"output_text"`
+	Usage            ResponsesUsage        `json:"usage"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
 }
 
 type ResponsesTextDeltaEvent struct {
@@ -287,38 +277,55 @@ type ResponsesCompletedEvent struct {
 	Response ResponsesResponse `json:"response"`
 }
 
-func NewResponsesResponse(text string, inputTokens, outputTokens int, model string) ResponsesResponse {
+func NewResponsesResponse(text, reasoning string, inputTokens, outputTokens, reasoningTokens int, cachedTokens, cacheWriteTokens int, model string) ResponsesResponse {
 	if model == "" {
 		model = "auto"
 	}
-	return ResponsesResponse{
-		ID:         "resp_QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-		Object:     "response",
-		CreatedAt:  int64(0),
-		Status:     "completed",
-		Model:      model,
-		OutputText: text,
-		Usage: usage{
-			PromptTokens:     inputTokens,
-			CompletionTokens: outputTokens,
-			TotalTokens:      inputTokens + outputTokens,
+	resp := ResponsesResponse{
+		ID:               "resp_QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		Object:           "response",
+		CreatedAt:        time.Now().Unix(),
+		Status:           "completed",
+		Model:            model,
+		OutputText:       text,
+		ReasoningContent: reasoning,
+		Usage: ResponsesUsage{
+			InputTokens: inputTokens,
+			InputTokensDetails: ResponsesInputTokensDetails{
+				CachedTokens:     cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
+			OutputTokens: outputTokens,
+			OutputTokensDetails: ResponsesOutputTokensDetails{
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: inputTokens + outputTokens,
 		},
-		Output: []ResponsesOutput{
+		Output: []ResponsesOutputItem{
 			{
 				ID:     "msg_QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 				Type:   "message",
 				Status: "completed",
 				Role:   "assistant",
-				Content: []ResponsesContent{
-					{
-						Type:        "output_text",
-						Text:        text,
-						Annotations: []interface{}{},
-					},
+				Content: []ResponsesContentPart{
+					{Type: "output_text", Text: text},
 				},
 			},
 		},
 	}
+	if reasoning != "" {
+		resp.Output = append([]ResponsesOutputItem{
+			{
+				ID:     "rs_QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+				Type:   "reasoning",
+				Status: "completed",
+				Content: []ResponsesContentPart{
+					{Type: "reasoning_text", Text: reasoning},
+				},
+			},
+		}, resp.Output...)
+	}
+	return resp
 }
 
 func ResponsesTextDelta(text string) string {
@@ -349,6 +356,62 @@ func ResponsesCompleted(response ResponsesResponse) string {
 	}
 	resp, _ := json.Marshal(event)
 	return string(resp)
+}
+
+// ── OpenAI Responses API 扩展类型（对齐 openai-node responses.ts） ──
+
+// ResponsesUsage 对齐 OpenAI ResponseUsage。
+type ResponsesUsage struct {
+	InputTokens         int                        `json:"input_tokens"`
+	InputTokensDetails  ResponsesInputTokensDetails  `json:"input_tokens_details"`
+	OutputTokens        int                        `json:"output_tokens"`
+	OutputTokensDetails ResponsesOutputTokensDetails `json:"output_tokens_details"`
+	TotalTokens         int                        `json:"total_tokens"`
+}
+
+type ResponsesInputTokensDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
+}
+
+type ResponsesOutputTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// ResponsesOutputItem 对齐 OpenAI ResponseOutputItem 的最小形态。
+type ResponsesOutputItem struct {
+	ID      string                 `json:"id"`
+	Type    string                 `json:"type"` // "message" | "reasoning"
+	Status  string                 `json:"status,omitempty"`
+	Role    string                 `json:"role,omitempty"`
+	Content []ResponsesContentPart `json:"content"`
+}
+
+type ResponsesContentPart struct {
+	Type string `json:"type"` // "output_text" | "reasoning_text"
+	Text string `json:"text"`
+}
+
+// ResponsesReasoningItem 用于最终 output 数组里的思维链项。
+type ResponsesReasoningItem struct {
+	ID      string                 `json:"id"`
+	Type    string                 `json:"type"` // "reasoning"
+	Status  string                 `json:"status"`
+	Content []ResponsesContentPart `json:"content"`
+}
+
+// ResponsesReasoningDeltaEvent 流式思维链事件。
+type ResponsesReasoningDeltaEvent struct {
+	Type         string `json:"type"` // "response.reasoning_text.delta"
+	ItemID       string `json:"item_id"`
+	OutputIndex  int    `json:"output_index"`
+	ContentIndex int    `json:"content_index"`
+	Delta        string `json:"delta"`
+}
+
+func (e ResponsesReasoningDeltaEvent) String() string {
+	b, _ := json.Marshal(e)
+	return string(b)
 }
 
 type OpenAIAccessTokenWithSession struct {

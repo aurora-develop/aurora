@@ -390,7 +390,7 @@ func (h *ChatHandler) Responses(c *gin.Context) {
 	}
 
 	output_tokens := util.CountToken(full_response)
-	responsesResponse := officialtypes.NewResponsesResponse(full_response, input_tokens, output_tokens, reqModel)
+	responsesResponse := officialtypes.NewResponsesResponse(full_response, "", input_tokens, output_tokens, 0, 0, 0, reqModel)
 	if !responsesRequest.Stream || !h.cfg.StreamMode {
 		c.JSON(200, responsesResponse)
 		return
