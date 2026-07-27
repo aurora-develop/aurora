@@ -12,6 +12,7 @@ import (
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
 	"aurora/internal/config"
+	"aurora/internal/httpstream"
 	"aurora/internal/toolcall"
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
@@ -143,6 +144,24 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 	var stopSent bool
 	pingSent := false
 
+	// 记录请求开始时间，用于 TTFT / total-time 计时
+	startTime := time.Now()
+	ttftSet := false
+	var ttftMs int64
+
+	// 提取 instructions / input 用于缓存模拟（与 Responses 路径一致）
+	var instructions string
+	var inputTextParts []string
+	for _, msg := range original_request.Messages {
+		if msg.Role == "system" {
+			instructions += msg.Text()
+		} else {
+			inputTextParts = append(inputTextParts, msg.Text())
+		}
+	}
+	inputText := strings.Join(inputTextParts, "\n")
+	cacheWriteTokens, cachedTokens := RecordCache(translated_request.ConversationID, instructions, inputText)
+
 	if !h.cfg.StreamMode {
 		original_request.Stream = false
 	}
@@ -164,6 +183,11 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 		continue_info = result.Continue
 		full_response += result.Text
 		full_thinking += result.ThinkingText
+		// 首个输出 token 到达时记录 TTFT（text chunk 已在 HandlerDetailedWithOptions 内写出）
+		if result.Text != "" && !ttftSet {
+			ttftSet = true
+			ttftMs = time.Since(startTime).Milliseconds()
+		}
 		if result.ConversationID != "" {
 			conversationID = result.ConversationID
 			h.sessions.Register(conversationID, clientState)
@@ -226,20 +250,8 @@ func (h *ChatHandler) Nightmare(c *gin.Context) {
 	} else {
 		if original_request.StreamOptions != nil && original_request.StreamOptions.IncludeUsage {
 			output_tokens := util.CountToken(full_response)
-			usageChunk := officialtypes.ChatCompletionChunk{
-				ID:      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-				Object:  "chat.completion.chunk",
-				Created: 0,
-				Model:   reqModel,
-				Choices: []officialtypes.Choices{},
-				Usage: &officialtypes.StreamUsage{
-					PromptTokens:     input_tokens,
-					CompletionTokens: output_tokens,
-					TotalTokens:      input_tokens + output_tokens,
-				},
-			}
-			c.Writer.WriteString("data: " + usageChunk.String() + "\n\n")
-			c.Writer.Flush()
+			msSinceStart := time.Since(startTime).Milliseconds()
+			httpstream.WriteUsageChunk(c, reqModel, input_tokens, output_tokens, cachedTokens, cacheWriteTokens, msSinceStart, ttftMs, ttftSet)
 		}
 		writeChatCompletionStreamDone(c, stopSent, reqModel, conversationID)
 	}
