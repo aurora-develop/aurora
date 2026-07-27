@@ -288,3 +288,74 @@ func appendToolDebugLog(path string, attempt int, text string, calls []officialt
 	callsJSON, _ := json.Marshal(calls)
 	fmt.Fprintf(f, "\n=== attempt %d ===\ntext: %s\ncalls: %s\n", attempt, text, string(callsJSON))
 }
+
+// ── Responses 流式事件构造器 ──
+
+func responsesCreatedEvent(respID, model string) string {
+	evt := map[string]interface{}{
+		"type": "response.created",
+		"response": map[string]interface{}{
+			"id": respID, "object": "response", "created_at": time.Now().Unix(),
+			"model": model, "status": "in_progress",
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesOutputItemAddedEvent(outputIndex int, itemID, itemType string) string {
+	evt := map[string]interface{}{
+		"type": "response.output_item.added",
+		"output_index": outputIndex,
+		"item": map[string]interface{}{
+			"id": itemID, "type": itemType, "status": "in_progress",
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesOutputItemDoneEvent(outputIndex int, itemID, itemType, text string) string {
+	item := map[string]interface{}{
+		"id": itemID, "type": itemType, "status": "completed",
+	}
+	if itemType == "message" {
+		item["role"] = "assistant"
+		item["content"] = []map[string]interface{}{
+			{"type": "output_text", "text": text},
+		}
+	} else if itemType == "reasoning" {
+		item["content"] = []map[string]interface{}{
+			{"type": "reasoning_text", "text": text},
+		}
+	}
+	evt := map[string]interface{}{
+		"type":         "response.output_item.done",
+		"output_index": outputIndex,
+		"item":         item,
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesFailedEvent(msg string) string {
+	evt := map[string]interface{}{
+		"type": "response.failed",
+		"response": map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": msg, "type": "server_error",
+			},
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesCompletedEvent(resp officialtypes.ResponsesResponse) string {
+	evt := map[string]interface{}{
+		"type":     "response.completed",
+		"response": resp,
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}

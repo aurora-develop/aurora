@@ -258,13 +258,22 @@ type ResponsesResponse struct {
 	OutputText       string                `json:"output_text"`
 	Usage            ResponsesUsage        `json:"usage"`
 	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	// MsSinceStart / MsTTFT 是流式响应的耗时信息（毫秒），嵌入 response.completed 事件。
+	MsSinceStart     int64                 `json:"ms_since_start,omitempty"`
+	MsTTFT           int64                 `json:"ms_ttft,omitempty"`
 }
 
 type ResponsesTextDeltaEvent struct {
-	Type         string `json:"type"`
-	Delta        string `json:"delta"`
+	Type         string `json:"type"` // "response.output_text.delta"
+	ItemID       string `json:"item_id,omitempty"`
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
+	Delta        string `json:"delta"`
+}
+
+func (e ResponsesTextDeltaEvent) String() string {
+	b, _ := json.Marshal(e)
+	return string(b)
 }
 
 type ResponsesCreatedEvent struct {
