@@ -25,7 +25,7 @@ func TestNewChatGPTRequestMatchesWebConversationShape(t *testing.T) {
 	if raw["model"] != "gpt-5-5-pro" {
 		t.Fatalf("model = %#v, want gpt-5-5-pro", raw["model"])
 	}
-	for _, key := range []string{"client_prepare_state", "force_use_sse", "force_rate_limit", "reset_rate_limits", "suggestions"} {
+	for _, key := range []string{"client_prepare_state", "force_use_sse", "force_rate_limit", "reset_rate_limits", "suggestions", "enable_message_followups", "supports_buffering", "supported_encodings", "client_contextual_info"} {
 		if _, ok := raw[key]; ok {
 			t.Fatalf("request unexpectedly includes %s: %s", key, string(data))
 		}

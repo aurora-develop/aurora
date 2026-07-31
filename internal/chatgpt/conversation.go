@@ -29,10 +29,10 @@ const (
 
 // conversationInitResponse 是 POST /conversation/init 的响应。
 type conversationInitResponse struct {
-	Type              string `json:"type"`
-	BannerInfo        any    `json:"banner_info"`
-	DefaultModelSlug  string `json:"default_model_slug"`
-	AtlasModeEnabled  any    `json:"atlas_mode_enabled"`
+	Type             string `json:"type"`
+	BannerInfo       any    `json:"banner_info"`
+	DefaultModelSlug string `json:"default_model_slug"`
+	AtlasModeEnabled any    `json:"atlas_mode_enabled"`
 }
 
 // POSTConversationInit 调用 /conversation/init 建立会话上下文。
@@ -235,6 +235,14 @@ func conversationPrepareClientContext(message chatgpt_types.ChatGPTRequest) map[
 	return info
 }
 
+func sanitizeConversationCompletionRequest(message chatgpt_types.ChatGPTRequest) chatgpt_types.ChatGPTRequest {
+	message.EnableMessageFollowups = false
+	message.SupportsBuffering = false
+	message.SupportedEncodings = nil
+	message.ClientContextualInfo = nil
+	return message
+}
+
 // POSTconversation 发送 /f/conversation（自动 prepare）。
 func POSTconversation(client httpclient.AuroraHttpClient, message chatgpt_types.ChatGPTRequest, account *accounts.Account, chat_token *TurnStile, proxy string) (*http.Response, error) {
 	if proxy != "" {
@@ -259,6 +267,7 @@ func POSTconversationPreparedWithState(client httpclient.AuroraHttpClient, messa
 		client.SetProxy(proxy)
 	}
 	message = requestWithClientState(message, state)
+	message = sanitizeConversationCompletionRequest(message)
 	apiUrl, targetPath := conversationURL(account, "/f/conversation")
 	if API_REVERSE_PROXY != "" {
 		apiUrl = API_REVERSE_PROXY

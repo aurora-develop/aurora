@@ -52,6 +52,7 @@ func (s *ChatClientState) ApplyToRequest(request *chatgpt_types.ChatGPTRequest) 
 	}
 	// 对齐浏览器: /f/conversation 主请求必须携带 client_prepare_state=success,
 	// 告知服务端客户端已完成三态 prepare 流程。缺此字段会被路由到 mini 池。
+	// ClientContextualInfo 仍用于 prepare 请求；普通主请求在发送前单独清理。
 	request.ClientPrepareState = "success"
 	ensureClientContextualInfo(request)
 	request.ClientContextualInfo["time_since_loaded"] = s.TimeSinceLoadedSeconds()

@@ -52,17 +52,17 @@ type ChatGPTRequest struct {
 func NewChatGPTRequest() ChatGPTRequest {
 	disable_history := os.Getenv("ENABLE_HISTORY") != "true"
 	return ChatGPTRequest{
-		Action:                           "next",
-		ParentMessageID:                  "client-created-root",
-		Model:                            "auto",
-		HistoryAndTrainingDisabled:       disable_history,
-		TimezoneOffsetMin:                420,
-		Timezone:                         "America/Los_Angeles",
-		ConversationMode:                 map[string]string{"kind": "primary_assistant"},
-		SystemHints:                      []string{},
-		EnableMessageFollowups:           true,
-		SupportsBuffering:                true,
-		SupportedEncodings:               []string{"v1"},
+		Action:                     "next",
+		ParentMessageID:            "client-created-root",
+		Model:                      "auto",
+		HistoryAndTrainingDisabled: disable_history,
+		TimezoneOffsetMin:          420,
+		Timezone:                   "America/Los_Angeles",
+		ConversationMode:           map[string]string{"kind": "primary_assistant"},
+		SystemHints:                []string{},
+		// 不在普通 /f/conversation 请求中声明 followups/buffering/encoding 能力。
+		// 这些字段会改变上游的流式交付路径，曾导致 completion 响应提前结束。
+		// /f/conversation/prepare 的协议字段由 prepare 请求单独构造。
 		ParagenCotSummaryDisplayOverride: "allow",
 		ForceParallelSwitch:              "auto",
 		ThinkingEffort:                   "standard",

@@ -15,6 +15,7 @@ tools/authenticator/.proxies.txt.swp
 .claude/
 .gocache
 .atomcode
+.workbuddy/
 CLAUDE.md
 MIGRATION_PLAN.md
 his.md
