@@ -197,6 +197,67 @@ curl --location 'http://你的服务器ip:8080/v1/responses' \
 }'
 ```
 
+### Responses 流式事件序列
+
+开启 `stream: true` 后，服务端以 SSE 返回以下事件：
+
+```
+event: response.created
+data: {"type":"response.created","response":{...,"status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning",...}}
+
+event: response.reasoning_text.delta     ← 思维链（仅思考模型）
+data: {"type":"response.reasoning_text.delta","delta":"..."}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"message",...}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"..."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"reasoning","status":"completed",...}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"message","status":"completed",...}}
+
+event: response.completed
+data: {"type":"response.completed","response":{...,"usage":{...}}}
+```
+
+### Responses 参数
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `reasoning.effort` | string | 思考强度：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，映射到 ChatGPT 上游的 `low` / `medium` / `high` |
+| `store` | bool | 是否存储响应（默认 false） |
+| `stream_options` | object | 流式选项 |
+
+### Usage 响应字段
+
+```json
+{
+  "usage": {
+    "input_tokens": 100,
+    "input_tokens_details": { "cached_tokens": 80, "cache_write_tokens": 20 },
+    "output_tokens": 50,
+    "output_tokens_details": { "reasoning_tokens": 30 },
+    "total_tokens": 150
+  }
+}
+```
+
+注意：`cached_tokens` / `cache_write_tokens` 为**模拟值**（按文本指纹 + 5 分钟 TTL），ChatGPT 上游不返回真实缓存数据。
+
+### 响应耗时信息
+
+流式 `response.completed` 事件附带耗时字段：
+
+- `ms_since_start`：请求开始到完成的毫秒数
+- `ms_ttft`：请求开始到首个 output_text delta 的毫秒数（首字延迟）
+
 ## 模型列表
 
 ```bash

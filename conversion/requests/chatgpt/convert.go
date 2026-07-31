@@ -26,21 +26,24 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 
 	// ── 映射 OpenAI 标准生成参数到 ChatGPT ──
 
-	// reasoning_effort → ThinkingEffort (直接映射)
+	// reasoning_effort → ThinkingEffort（OpenAI 7 档 → ChatGPT 3 档）
 	effort := strings.ToLower(strings.TrimSpace(api_request.ReasoningEffort))
 	if effort == "" {
-		// 兼容 Responses API reasoning.effort
 		effort = "standard"
 	}
 	switch effort {
+	case "none", "minimal":
+		chatgpt_request.ThinkingEffort = "low"
 	case "low":
 		chatgpt_request.ThinkingEffort = "low"
 	case "medium", "standard":
-		chatgpt_request.ThinkingEffort = "standard"
+		chatgpt_request.ThinkingEffort = "medium"
 	case "high":
 		chatgpt_request.ThinkingEffort = "high"
+	case "xhigh", "max":
+		chatgpt_request.ThinkingEffort = "high"
 	default:
-		chatgpt_request.ThinkingEffort = "standard"
+		chatgpt_request.ThinkingEffort = "medium"
 	}
 
 	// response_format: 通过 system prompt 注入指令
