@@ -30,6 +30,38 @@ func TestConvertAPIRequestNoToolsNoInjection(t *testing.T) {
 	}
 }
 
+func TestConvertAPIRequestMapsReasoningEffortToWebEnum(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort string
+		want   string
+	}{
+		{name: "default", effort: "", want: "standard"},
+		{name: "minimal", effort: "minimal", want: "standard"},
+		{name: "low", effort: "low", want: "standard"},
+		{name: "medium", effort: "medium", want: "extended"},
+		{name: "standard", effort: "standard", want: "standard"},
+		{name: "extended", effort: "extended", want: "extended"},
+		{name: "high", effort: "high", want: "max"},
+		{name: "xhigh", effort: "xhigh", want: "max"},
+		{name: "max", effort: "max", want: "max"},
+		{name: "unknown", effort: "turbo", want: "standard"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := testConvert(t, official.APIRequest{
+				Model:           "gpt-5",
+				ReasoningEffort: tt.effort,
+				Messages:        []official.APIMessage{official.NewTextMessage("user", "hi")},
+			})
+			if out.ThinkingEffort != tt.want {
+				t.Fatalf("ThinkingEffort = %q, want %q", out.ThinkingEffort, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 	req := official.APIRequest{
 		Model: "gpt-5",

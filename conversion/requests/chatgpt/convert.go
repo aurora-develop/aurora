@@ -1,12 +1,12 @@
 package chatgpt
 
 import (
-	backendchatgpt "aurora/internal/chatgpt"
+	"aurora/httpclient"
 	"aurora/internal/accounts"
+	backendchatgpt "aurora/internal/chatgpt"
 	"aurora/internal/toolcall"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
-	"aurora/httpclient"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -26,24 +26,18 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 
 	// ── 映射 OpenAI 标准生成参数到 ChatGPT ──
 
-	// reasoning_effort → ThinkingEffort（OpenAI 7 档 → ChatGPT 3 档）
-	effort := strings.ToLower(strings.TrimSpace(api_request.ReasoningEffort))
-	if effort == "" {
-		effort = "standard"
-	}
-	switch effort {
-	case "none", "minimal":
-		chatgpt_request.ThinkingEffort = "low"
-	case "low":
-		chatgpt_request.ThinkingEffort = "low"
-	case "medium", "standard":
-		chatgpt_request.ThinkingEffort = "medium"
-	case "high":
-		chatgpt_request.ThinkingEffort = "high"
-	case "xhigh", "max":
-		chatgpt_request.ThinkingEffort = "high"
+	// reasoning_effort → ChatGPT Web 的 thinking_effort 枚举。
+	// 上游只接受 standard / extended / max；发送 OpenAI 的 low / medium / high
+	// 会导致 /f/conversation 返回 422 "Invalid conversation body"。
+	switch strings.ToLower(strings.TrimSpace(api_request.ReasoningEffort)) {
+	case "none", "minimal", "low", "standard", "":
+		chatgpt_request.ThinkingEffort = "standard"
+	case "medium", "extended":
+		chatgpt_request.ThinkingEffort = "extended"
+	case "high", "xhigh", "max":
+		chatgpt_request.ThinkingEffort = "max"
 	default:
-		chatgpt_request.ThinkingEffort = "medium"
+		chatgpt_request.ThinkingEffort = "standard"
 	}
 
 	// response_format: 通过 system prompt 注入指令

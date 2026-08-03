@@ -728,6 +728,7 @@ func TestConversationCompletionOmitsRiskyCapabilityFields(t *testing.T) {
 	request.SupportsBuffering = true
 	request.SupportedEncodings = []string{"v1"}
 	request.ClientContextualInfo = map[string]interface{}{"app_name": "chatgpt.com"}
+	request.ThinkingEffort = "extended"
 
 	response, err := POSTconversationPreparedWithState(client, request, &accounts.Account{}, nil, "", "conduit", "trace", NewChatClientState())
 	if err != nil {
@@ -748,6 +749,45 @@ func TestConversationCompletionOmitsRiskyCapabilityFields(t *testing.T) {
 	}
 	if payload["client_prepare_state"] != "success" {
 		t.Fatalf("client_prepare_state = %#v, want success", payload["client_prepare_state"])
+	}
+	if payload["thinking_effort"] != "extended" {
+		t.Fatalf("thinking_effort = %#v, want extended", payload["thinking_effort"])
+	}
+}
+
+func TestConversationCompletionNormalizesThinkingEffort(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  string
+	}{
+		{input: "low", want: "standard"},
+		{input: "medium", want: "extended"},
+		{input: "high", want: "max"},
+		{input: "turbo", want: "standard"},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			client := &fakeAuroraClient{
+				response: &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("")),
+				},
+			}
+			request := chatGPTRequestForTest()
+			request.ThinkingEffort = tt.input
+
+			_, err := POSTconversationPreparedWithState(client, request, &accounts.Account{}, nil, "", "conduit", "trace", NewChatClientState())
+			if err != nil {
+				t.Fatalf("POSTconversationPreparedWithState returned error: %v", err)
+			}
+
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+				t.Fatalf("completion body is invalid json: %v", err)
+			}
+			if payload["thinking_effort"] != tt.want {
+				t.Fatalf("thinking_effort = %#v, want %q", payload["thinking_effort"], tt.want)
+			}
+		})
 	}
 }
 

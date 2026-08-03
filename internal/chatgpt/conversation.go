@@ -240,7 +240,21 @@ func sanitizeConversationCompletionRequest(message chatgpt_types.ChatGPTRequest)
 	message.SupportsBuffering = false
 	message.SupportedEncodings = nil
 	message.ClientContextualInfo = nil
+	message.ThinkingEffort = normalizeThinkingEffort(message.ThinkingEffort)
 	return message
+}
+
+func normalizeThinkingEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "", "none", "minimal", "low", "standard":
+		return "standard"
+	case "medium", "extended":
+		return "extended"
+	case "high", "xhigh", "max":
+		return "max"
+	default:
+		return "standard"
+	}
 }
 
 // POSTconversation 发送 /f/conversation（自动 prepare）。
