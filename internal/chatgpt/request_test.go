@@ -613,6 +613,31 @@ func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) 
 	}
 }
 
+func TestRequiresConversationWebsocket(t *testing.T) {
+	tests := []struct {
+		name           string
+		stream         bool
+		thinkingEffort string
+		want           bool
+	}{
+		{name: "streaming standard", stream: true, thinkingEffort: "standard", want: true},
+		{name: "non-streaming standard", thinkingEffort: "standard", want: false},
+		{name: "non-streaming low normalizes to standard", thinkingEffort: "low", want: false},
+		{name: "non-streaming extended", thinkingEffort: "extended", want: true},
+		{name: "non-streaming medium normalizes to extended", thinkingEffort: "medium", want: true},
+		{name: "non-streaming max", thinkingEffort: "max", want: true},
+		{name: "non-streaming high normalizes to max", thinkingEffort: "high", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RequiresConversationWebsocket(tt.stream, tt.thinkingEffort); got != tt.want {
+				t.Fatalf("RequiresConversationWebsocket(%v, %q) = %v, want %v", tt.stream, tt.thinkingEffort, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldUseWebsocketHandoffSkipsCatchupAfterHTTPBody(t *testing.T) {
 	if shouldUseWebsocketHandoff(false, "conversation-turn-abc", &websocket.Conn{}, "hello", nil) {
 		t.Fatalf("websocket handoff should be skipped when HTTP SSE already emitted text")

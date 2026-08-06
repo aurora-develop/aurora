@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
@@ -17,7 +18,6 @@ import (
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
-	chatgptrequestconverter "aurora/conversion/requests/chatgpt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -702,11 +702,8 @@ func (h *ChatHandler) handleToolCalling(c *gin.Context, originalRequest *officia
 			}})
 			return
 		}
-		_ = wsConn
-		_ = status
-
 		result := chatgpt.HandlerDetailedWithOptions(c, response, *client, account, *uid, translated, false, *reqModel, chatgpt.HandlerDetailedOptions{
-			Websocket:        nil,
+			Websocket:        wsConn,
 			ClientState:      *clientState,
 			ArtifactDelivery: originalRequest.ArtifactDelivery,
 			ProxyURL:         *proxyUrl,

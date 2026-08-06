@@ -13,15 +13,15 @@ import (
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
+	"aurora/internal/config"
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
-	"aurora/internal/config"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var ErrNoAvailable = errors.New("no available account of the requested type")
@@ -167,7 +167,7 @@ func conversationClientOrder(client **bogdanfinn.TlsClient, account *accounts.Ac
 	chatgpt.POSTConversationInit(*client, account, state)
 
 	var wsConn *websocket.Conn
-	if stream && account.Type.Satisfies(accounts.CapWebSocket) {
+	if chatgpt.RequiresConversationWebsocket(stream, translatedRequest.ThinkingEffort) && account.Type.Satisfies(accounts.CapWebSocket) {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, account, state, proxyUrl)
 		if err != nil {
 			return nil, nil, nil, http.StatusInternalServerError, err
@@ -305,7 +305,7 @@ func responsesCreatedEvent(respID, model string) string {
 
 func responsesOutputItemAddedEvent(outputIndex int, itemID, itemType string) string {
 	evt := map[string]interface{}{
-		"type": "response.output_item.added",
+		"type":         "response.output_item.added",
 		"output_index": outputIndex,
 		"item": map[string]interface{}{
 			"id": itemID, "type": itemType, "status": "in_progress",

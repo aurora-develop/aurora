@@ -17,9 +17,9 @@ import (
 	"aurora/httpclient"
 	"aurora/internal/accounts"
 	"aurora/internal/sseparser"
+	"aurora/typings"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
-	"aurora/typings"
 
 	"github.com/bogdanfinn/websocket"
 )
@@ -147,13 +147,15 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	max_tokens := false
 
 	reader := bufio.NewReader(response.Body)
-	if stream && client != nil && account != nil {
-		if wsConn == nil {
-			if conn, err := DialChatWebsocketWithStateAndProxy(client, account, options.ClientState, options.ProxyURL); err == nil {
-				wsConn = conn
-				defer wsConn.Close()
-			}
-		} else {
+	if wsConn != nil {
+		// The orchestration layer may establish this connection for a
+		// non-streaming extended/max request before posting the conversation.
+		defer wsConn.Close()
+	} else if stream && client != nil && account != nil {
+		// Preserve the fallback for streaming callers that did not establish a
+		// WebSocket before entering the response handler.
+		if conn, err := DialChatWebsocketWithStateAndProxy(client, account, options.ClientState, options.ProxyURL); err == nil {
+			wsConn = conn
 			defer wsConn.Close()
 		}
 	}

@@ -27,6 +27,21 @@ func nextChatWebsocketID() int64 {
 	return atomic.AddInt64(&chatWebsocketIDCounter, 1)
 }
 
+// RequiresConversationWebsocket reports whether the upstream conversation may
+// continue on a Conduit WebSocket topic. Extended and max reasoning can hand
+// off even when the downstream OpenAI-compatible request is non-streaming.
+func RequiresConversationWebsocket(stream bool, thinkingEffort string) bool {
+	if stream {
+		return true
+	}
+	switch normalizeThinkingEffort(thinkingEffort) {
+	case "extended", "max":
+		return true
+	default:
+		return false
+	}
+}
+
 func getChatWebsocketURL(client httpclient.AuroraHttpClient, account *accounts.Account) (string, error) {
 	return getChatWebsocketURLWithState(client, account, nil)
 }
