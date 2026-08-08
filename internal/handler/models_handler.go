@@ -26,6 +26,7 @@ func (h *ModelsHandler) ListModels(c *gin.Context) {
 
 	models := []string{
 		"auto",
+		"gpt-5-6",
 		"gpt-5-6-thinking",
 		"gpt-5-6-pro",
 		"gpt-5-5-instant",
