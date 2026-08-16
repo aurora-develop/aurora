@@ -11,6 +11,8 @@ import (
 	"aurora/internal/config"
 	"aurora/internal/handler"
 	"aurora/internal/proxy"
+	"aurora/httpclient"
+	bogdanfinn "aurora/httpclient/bogdanfinn"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -198,7 +200,12 @@ func exchangeRefreshToken(acct *accounts.Account) bool {
 	return false
 }
 
-// exchangeSessionToken 用 session_token 换 access_token，使用账号自身的 Client（已绑定代理）
+// exchangeSessionToken 用 session_token 换 access_token。
+// 必须全程使用普通 std client：指纹 TLS client 请求 /api/auth/session 时，
+// 即使响应被 Cloudflare 拦截无法解析，OpenAI 端也已消费掉一次性轮换的会话令牌，
+// 任何后续重试都会拿到匿名空会话。
+// OpenAI 会话令牌为一次性轮换，成功后必须把新令牌写回文件并更新账号，
+// 否则重启加载与 10 分钟健康续期都会拿已消费的旧令牌。
 func exchangeSessionToken(acct *accounts.Account) bool {
 	if acct.SessionToken == "" {
 		return false
@@ -206,25 +213,62 @@ func exchangeSessionToken(acct *accounts.Account) bool {
 	if acct.Client == nil {
 		_ = acct.InitClient()
 	}
-	result, _, err := chatgpt.GETTokenForSessionToken(acct.Client, acct.SessionToken, "")
-	if err != nil {
+	fetch := func(client httpclient.AuroraHttpClient) (string, string) {
+		result, _, err := chatgpt.GETTokenForSessionToken(client, acct.SessionToken, "")
+		if err != nil {
+			return "", ""
+		}
+		if r, ok := result.(interface {
+			GetAccessToken() string
+			GetSessionToken() string
+		}); ok {
+			return r.GetAccessToken(), r.GetSessionToken()
+		}
+		if data, ok := result.(map[string]interface{}); ok {
+			accessToken, _ := data["accessToken"].(string)
+			sessionToken, _ := data["session_token"].(string)
+			return accessToken, sessionToken
+		}
+		return "", ""
+	}
+	accessToken, rotated := fetch(bogdanfinn.NewStdClient())
+	if accessToken == "" {
 		return false
 	}
-	// 优先尝试 struct 形式 (*OpenAIAccessTokenWithSession)
-	if r, ok := result.(interface{ GetAccessToken() string }); ok {
-		if at := r.GetAccessToken(); at != "" {
-			acct.Token = at
-			return true
+	acct.Token = accessToken
+	if rotated != "" && rotated != acct.SessionToken {
+		oldToken := acct.SessionToken
+		acct.SessionToken = rotated
+		persistRotatedSessionToken(oldToken, rotated, acct.TeamUserID)
+	}
+	return true
+}
+
+// persistRotatedSessionToken 将轮换得到的新 session token 写回 session_tokens.txt，
+// 只替换旧令牌所在行，保留其它账号的行；文件不存在时直接写入。
+func persistRotatedSessionToken(oldToken, newToken, teamID string) {
+	value := newToken
+	if teamID != "" {
+		value += ":" + teamID
+	}
+	data, err := os.ReadFile("session_tokens.txt")
+	if err != nil {
+		_ = os.WriteFile("session_tokens.txt", []byte(value+"\n"), 0644)
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	replaced := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), oldToken) {
+			lines[i] = value
+			replaced = true
+			break
 		}
 	}
-	// fallback: map[string]interface{}
-	if data, ok := result.(map[string]interface{}); ok {
-		if accessToken, ok := data["accessToken"].(string); ok && accessToken != "" {
-			acct.Token = accessToken
-			return true
-		}
+	if !replaced {
+		lines = append(lines, value)
 	}
-	return false
+	_ = os.WriteFile("session_tokens.txt", []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
 
 // loadProxyList 从 proxies.txt / PROXY_URL / http_proxy 加载代理列表
