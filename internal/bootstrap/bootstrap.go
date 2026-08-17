@@ -2,17 +2,20 @@ package bootstrap
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
+	"aurora/httpclient"
+	bogdanfinn "aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/browserfp"
 	"aurora/internal/chatgpt"
 	"aurora/internal/config"
 	"aurora/internal/handler"
 	"aurora/internal/proxy"
-	"aurora/httpclient"
-	bogdanfinn "aurora/httpclient/bogdanfinn"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -99,6 +102,7 @@ func Init() (*App, error) {
 
 		acct := accounts.CreateAccount("", accounts.TypeFree, profiles)
 		acct.SessionToken = t.Token
+		acct.TeamUserID = t.TeamID
 		acct.Proxy = proxyPool.Allocate()
 		// 立即交换一次获取 access_token
 		if exchangeSessionToken(acct) {
@@ -210,11 +214,8 @@ func exchangeSessionToken(acct *accounts.Account) bool {
 	if acct.SessionToken == "" {
 		return false
 	}
-	if acct.Client == nil {
-		_ = acct.InitClient()
-	}
 	fetch := func(client httpclient.AuroraHttpClient) (string, string) {
-		result, _, err := chatgpt.GETTokenForSessionToken(client, acct.SessionToken, "")
+		result, _, err := chatgpt.GETTokenForSessionToken(client, acct.SessionToken, acct.Proxy)
 		if err != nil {
 			return "", ""
 		}
@@ -244,22 +245,33 @@ func exchangeSessionToken(acct *accounts.Account) bool {
 	return true
 }
 
+// sessionTokenFileMu 保护 session_tokens.txt 的读-改-写，避免并发续期互相覆盖。
+var sessionTokenFileMu sync.Mutex
+
 // persistRotatedSessionToken 将轮换得到的新 session token 写回 session_tokens.txt，
 // 只替换旧令牌所在行，保留其它账号的行；文件不存在时直接写入。
+// 写入经临时文件 + rename，避免中途失败把整个凭据文件截断。
 func persistRotatedSessionToken(oldToken, newToken, teamID string) {
+	const path = "session_tokens.txt"
+
 	value := newToken
 	if teamID != "" {
 		value += ":" + teamID
 	}
-	data, err := os.ReadFile("session_tokens.txt")
+
+	sessionTokenFileMu.Lock()
+	defer sessionTokenFileMu.Unlock()
+
+	data, err := os.ReadFile(path)
 	if err != nil {
-		_ = os.WriteFile("session_tokens.txt", []byte(value+"\n"), 0644)
+		writeFileAtomic(path, []byte(value+"\n"))
 		return
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
 	replaced := false
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), oldToken) {
+		// 与 accounts.LoadTokensFromFile 一致：token 在 ":" 前，其后为 team_id
+		if strings.TrimSpace(strings.SplitN(strings.TrimSpace(line), ":", 2)[0]) == oldToken {
 			lines[i] = value
 			replaced = true
 			break
@@ -268,7 +280,35 @@ func persistRotatedSessionToken(oldToken, newToken, teamID string) {
 	if !replaced {
 		lines = append(lines, value)
 	}
-	_ = os.WriteFile("session_tokens.txt", []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	writeFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"))
+}
+
+// writeFileAtomic 先写同目录临时文件再 rename，保证凭据文件不会被写成半截。
+func writeFileAtomic(path string, data []byte) {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp")
+	if err != nil {
+		_ = os.WriteFile(path, data, 0644)
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return
+	}
+	// Windows 下 rename 到已存在的文件需要先移除目标
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(path)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		_ = os.WriteFile(path, data, 0644)
+	}
 }
 
 // loadProxyList 从 proxies.txt / PROXY_URL / http_proxy 加载代理列表
