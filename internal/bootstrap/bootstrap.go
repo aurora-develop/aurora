@@ -2,9 +2,14 @@ package bootstrap
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
+	"aurora/httpclient"
+	bogdanfinn "aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/browserfp"
 	"aurora/internal/chatgpt"
@@ -97,6 +102,7 @@ func Init() (*App, error) {
 
 		acct := accounts.CreateAccount("", accounts.TypeFree, profiles)
 		acct.SessionToken = t.Token
+		acct.TeamUserID = t.TeamID
 		acct.Proxy = proxyPool.Allocate()
 		// 立即交换一次获取 access_token
 		if exchangeSessionToken(acct) {
@@ -198,33 +204,111 @@ func exchangeRefreshToken(acct *accounts.Account) bool {
 	return false
 }
 
-// exchangeSessionToken 用 session_token 换 access_token，使用账号自身的 Client（已绑定代理）
+// exchangeSessionToken 用 session_token 换 access_token。
+// 必须全程使用普通 std client：指纹 TLS client 请求 /api/auth/session 时，
+// 即使响应被 Cloudflare 拦截无法解析，OpenAI 端也已消费掉一次性轮换的会话令牌，
+// 任何后续重试都会拿到匿名空会话。
+// OpenAI 会话令牌为一次性轮换，成功后必须把新令牌写回文件并更新账号，
+// 否则重启加载与 10 分钟健康续期都会拿已消费的旧令牌。
 func exchangeSessionToken(acct *accounts.Account) bool {
 	if acct.SessionToken == "" {
 		return false
 	}
-	if acct.Client == nil {
-		_ = acct.InitClient()
+	fetch := func(client httpclient.AuroraHttpClient) (string, string) {
+		result, _, err := chatgpt.GETTokenForSessionToken(client, acct.SessionToken, acct.Proxy)
+		if err != nil {
+			return "", ""
+		}
+		if r, ok := result.(interface {
+			GetAccessToken() string
+			GetSessionToken() string
+		}); ok {
+			return r.GetAccessToken(), r.GetSessionToken()
+		}
+		if data, ok := result.(map[string]interface{}); ok {
+			accessToken, _ := data["accessToken"].(string)
+			sessionToken, _ := data["session_token"].(string)
+			return accessToken, sessionToken
+		}
+		return "", ""
 	}
-	result, _, err := chatgpt.GETTokenForSessionToken(acct.Client, acct.SessionToken, "")
-	if err != nil {
+	accessToken, rotated := fetch(bogdanfinn.NewStdClient())
+	if accessToken == "" {
 		return false
 	}
-	// 优先尝试 struct 形式 (*OpenAIAccessTokenWithSession)
-	if r, ok := result.(interface{ GetAccessToken() string }); ok {
-		if at := r.GetAccessToken(); at != "" {
-			acct.Token = at
-			return true
+	acct.Token = accessToken
+	if rotated != "" && rotated != acct.SessionToken {
+		oldToken := acct.SessionToken
+		acct.SessionToken = rotated
+		persistRotatedSessionToken(oldToken, rotated, acct.TeamUserID)
+	}
+	return true
+}
+
+// sessionTokenFileMu 保护 session_tokens.txt 的读-改-写，避免并发续期互相覆盖。
+var sessionTokenFileMu sync.Mutex
+
+// persistRotatedSessionToken 将轮换得到的新 session token 写回 session_tokens.txt，
+// 只替换旧令牌所在行，保留其它账号的行；文件不存在时直接写入。
+// 写入经临时文件 + rename，避免中途失败把整个凭据文件截断。
+func persistRotatedSessionToken(oldToken, newToken, teamID string) {
+	const path = "session_tokens.txt"
+
+	value := newToken
+	if teamID != "" {
+		value += ":" + teamID
+	}
+
+	sessionTokenFileMu.Lock()
+	defer sessionTokenFileMu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		writeFileAtomic(path, []byte(value+"\n"))
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	replaced := false
+	for i, line := range lines {
+		// 与 accounts.LoadTokensFromFile 一致：token 在 ":" 前，其后为 team_id
+		if strings.TrimSpace(strings.SplitN(strings.TrimSpace(line), ":", 2)[0]) == oldToken {
+			lines[i] = value
+			replaced = true
+			break
 		}
 	}
-	// fallback: map[string]interface{}
-	if data, ok := result.(map[string]interface{}); ok {
-		if accessToken, ok := data["accessToken"].(string); ok && accessToken != "" {
-			acct.Token = accessToken
-			return true
-		}
+	if !replaced {
+		lines = append(lines, value)
 	}
-	return false
+	writeFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"))
+}
+
+// writeFileAtomic 先写同目录临时文件再 rename，保证凭据文件不会被写成半截。
+func writeFileAtomic(path string, data []byte) {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp")
+	if err != nil {
+		_ = os.WriteFile(path, data, 0644)
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return
+	}
+	// Windows 下 rename 到已存在的文件需要先移除目标
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(path)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		_ = os.WriteFile(path, data, 0644)
+	}
 }
 
 // loadProxyList 从 proxies.txt / PROXY_URL / http_proxy 加载代理列表
