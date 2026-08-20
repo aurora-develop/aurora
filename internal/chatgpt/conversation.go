@@ -93,17 +93,20 @@ func getConduitTokenWithState(client httpclient.AuroraHttpClient, message chatgp
 		parentMessageID = "client-created-root"
 	}
 	payload := map[string]interface{}{
-		"action":                 "next",
-		"parent_message_id":      parentMessageID,
-		"model":                  conversationPrepareModel(message.Model),
-		"client_prepare_state":   string(prepareState),
-		"timezone_offset_min":    message.TimezoneOffsetMin,
-		"timezone":               "America/Los_Angeles",
-		"conversation_mode":      map[string]string{"kind": "primary_assistant"},
-		"system_hints":           []string{},
-		"supports_buffering":     true,
-		"supported_encodings":    []string{"v1"},
-		"client_contextual_info": conversationPrepareClientContext(message),
+		"action":                  "next",
+		"parent_message_id":       parentMessageID,
+		"model":                   conversationPrepareModel(message.Model),
+		"client_prepare_state":    string(prepareState),
+		"client_prepare_dispatch": "debounced",
+		"client_prepare_source":   "composer_editor_state",
+		"timezone_offset_min":     message.TimezoneOffsetMin,
+		"timezone":                "America/Los_Angeles",
+		"conversation_mode":       map[string]string{"kind": "primary_assistant"},
+		"system_hints":            append([]string(nil), message.SystemHints...),
+		"supports_buffering":      true,
+		"supported_encodings":     []string{"v1"},
+		"client_contextual_info":  conversationPrepareClientContext(message),
+		"local_function_names":    []string{"local.continue_in_work"},
 	}
 	if prepareState == PrepareStateSent || prepareState == PrepareStateSuccess {
 		payload["partial_query"] = map[string]interface{}{

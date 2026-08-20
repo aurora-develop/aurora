@@ -390,21 +390,27 @@ func imageModelSlug(model string) string {
 	return model
 }
 
+func imageSystemHints() []string {
+	return []string{"picture_v2"}
+}
+
 func prepareImageConversation(client httpclient.AuroraHttpClient, account *accounts.Account, turnStile *TurnStile, prompt, model string, state *ChatClientState) (string, error) {
 	parentMessageID := "client-created-root"
 	if state != nil && state.ParentMessageID != "" {
 		parentMessageID = state.ParentMessageID
 	}
 	payload := map[string]interface{}{
-		"action":                "next",
-		"fork_from_shared_post": false,
-		"parent_message_id":     parentMessageID,
-		"model":                 imageModelSlug(model),
-		"client_prepare_state":  "success",
-		"timezone_offset_min":   420,
-		"timezone":              "America/Los_Angeles",
-		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
-		"system_hints":          []string{"picture_v2"},
+		"action":                  "next",
+		"fork_from_shared_post":   false,
+		"parent_message_id":       parentMessageID,
+		"model":                   imageModelSlug(model),
+		"client_prepare_state":    "success",
+		"client_prepare_dispatch": "debounced",
+		"client_prepare_source":   "composer_editor_state",
+		"timezone_offset_min":     420,
+		"timezone":                "America/Los_Angeles",
+		"conversation_mode":       map[string]string{"kind": "primary_assistant"},
+		"system_hints":            imageSystemHints(),
 		"partial_query": map[string]interface{}{
 			"id":      uuid.NewString(),
 			"author":  map[string]string{"role": "user"},
@@ -413,6 +419,7 @@ func prepareImageConversation(client httpclient.AuroraHttpClient, account *accou
 		"supports_buffering":     true,
 		"supported_encodings":    []string{"v1"},
 		"client_contextual_info": state.ClientContextualInfo(),
+		"local_function_names":   []string{"local.continue_in_work"},
 	}
 	bodyJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -464,7 +471,7 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, accou
 					"developer_mode_connector_ids": []interface{}{},
 					"selected_github_repos":        []interface{}{},
 					"selected_all_github_repos":    false,
-					"system_hints":                 []string{"picture_v2"},
+					"system_hints":                 imageSystemHints(),
 					"serialization_metadata":       map[string]interface{}{"custom_symbol_offsets": []interface{}{}},
 				},
 			},
@@ -476,7 +483,7 @@ func GeneratePictureConversationImages(client httpclient.AuroraHttpClient, accou
 		"timezone":                             "America/Los_Angeles",
 		"conversation_mode":                    map[string]string{"kind": "primary_assistant"},
 		"enable_message_followups":             true,
-		"system_hints":                         []string{"picture_v2"},
+		"system_hints":                         imageSystemHints(),
 		"supports_buffering":                   true,
 		"supported_encodings":                  []string{"v1"},
 		"client_contextual_info":               state.ClientContextualInfo(),
@@ -573,7 +580,7 @@ func GeneratePictureConversationImagesWithReferences(client httpclient.AuroraHtt
 		"developer_mode_connector_ids": []interface{}{},
 		"selected_github_repos":        []interface{}{},
 		"selected_all_github_repos":    false,
-		"system_hints":                 []string{"picture_v2"},
+		"system_hints":                 imageSystemHints(),
 		"serialization_metadata":       map[string]interface{}{"custom_symbol_offsets": []interface{}{}},
 	}
 	if len(attachments) > 0 {
@@ -598,7 +605,7 @@ func GeneratePictureConversationImagesWithReferences(client httpclient.AuroraHtt
 		"timezone":                             "America/Los_Angeles",
 		"conversation_mode":                    map[string]string{"kind": "primary_assistant"},
 		"enable_message_followups":             true,
-		"system_hints":                         []string{"picture_v2"},
+		"system_hints":                         imageSystemHints(),
 		"supports_buffering":                   true,
 		"supported_encodings":                  []string{"v1"},
 		"client_contextual_info":               state.ClientContextualInfo(),

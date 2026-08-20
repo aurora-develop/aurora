@@ -31,3 +31,24 @@ func TestNewChatGPTRequestMatchesWebConversationShape(t *testing.T) {
 		}
 	}
 }
+
+func TestAddMessageCopiesRequestSystemHintsToUserMetadata(t *testing.T) {
+	request := NewChatGPTRequest()
+	request.SystemHints = []string{"reason"}
+	request.AddMessage("user", "hello")
+
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	messages := raw["messages"].([]interface{})
+	metadata := messages[0].(map[string]interface{})["metadata"].(map[string]interface{})
+	hints := metadata["system_hints"].([]interface{})
+	if len(hints) != 1 || hints[0] != "reason" {
+		t.Fatalf("message system_hints = %#v, want [reason]", metadata["system_hints"])
+	}
+}

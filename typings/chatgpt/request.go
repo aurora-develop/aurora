@@ -70,12 +70,16 @@ func NewChatGPTRequest() ChatGPTRequest {
 }
 
 func (c *ChatGPTRequest) AddMessage(role string, content string) {
+	metadata := defaultMessageMetadata()
+	if role == "user" {
+		metadata = mergeMessageMetadata(messageSystemHintsMetadata(c.SystemHints))
+	}
 	c.Messages = append(c.Messages, chatgpt_message{
 		ID:         uuid.New(),
 		Author:     chatgpt_author{Role: role},
 		CreateTime: messageCreateTime(),
 		Content:    chatgpt_content{ContentType: "text", Parts: []interface{}{content}},
-		Metadata:   defaultMessageMetadata(),
+		Metadata:   metadata,
 	})
 }
 
@@ -119,6 +123,13 @@ func isStringPart(part interface{}) bool {
 
 func messageCreateTime() float64 {
 	return float64(time.Now().UnixMilli()) / 1000.0
+}
+
+func messageSystemHintsMetadata(systemHints []string) map[string]interface{} {
+	if len(systemHints) == 0 {
+		return nil
+	}
+	return map[string]interface{}{"system_hints": append([]string(nil), systemHints...)}
 }
 
 func defaultMessageMetadata() map[string]interface{} {

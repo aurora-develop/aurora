@@ -380,6 +380,44 @@ func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
 	}
 }
 
+func TestPrepareConversationConduitPropagatesReasonSystemHint(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"conduit_token":"abc"}`)),
+		},
+	}
+	request := chatGPTRequestForTest()
+	request.Model = "auto"
+	request.SystemHints = []string{"reason"}
+
+	if _, err := PrepareConversationConduit(client, request, &accounts.Account{}, "", "trace-id"); err != nil {
+		t.Fatalf("PrepareConversationConduit returned error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("prepare body is invalid json: %v", err)
+	}
+	if payload["client_prepare_dispatch"] != "debounced" {
+		t.Fatalf("client_prepare_dispatch = %#v, want debounced", payload["client_prepare_dispatch"])
+	}
+	if payload["client_prepare_source"] != "composer_editor_state" {
+		t.Fatalf("client_prepare_source = %#v, want composer_editor_state", payload["client_prepare_source"])
+	}
+	localFunctions, ok := payload["local_function_names"].([]interface{})
+	if !ok || len(localFunctions) != 1 || localFunctions[0] != "local.continue_in_work" {
+		t.Fatalf("local_function_names = %#v, want [local.continue_in_work]", payload["local_function_names"])
+	}
+	if payload["model"] != "auto" {
+		t.Fatalf("model = %#v, want auto", payload["model"])
+	}
+	hints, ok := payload["system_hints"].([]interface{})
+	if !ok || len(hints) != 1 || hints[0] != "reason" {
+		t.Fatalf("system_hints = %#v, want [reason]", payload["system_hints"])
+	}
+}
+
 // sequentialAuroraClient 是一个按调用顺序返回不同响应的 fake client,
 // 用于验证 PrepareConversationConduitFull 的三态时序和 token 链路。
 type sequentialAuroraClient struct {
@@ -610,6 +648,56 @@ func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) 
 	}
 	if header["X-Conduit-Token"] != "" {
 		t.Fatalf("X-Conduit-Token = %q, want empty string", header["X-Conduit-Token"])
+	}
+}
+
+func TestImagePrepareUsesPictureV2AndComposerStateFields(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"conduit_token":"image-token"}`)),
+		},
+	}
+
+	token, err := prepareImageConversation(client, &accounts.Account{}, &TurnStile{}, "draw a cat", "gpt-image-2", NewChatClientState())
+	if err != nil {
+		t.Fatalf("prepareImageConversation returned error: %v", err)
+	}
+	if token != "image-token" {
+		t.Fatalf("token = %q, want image-token", token)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("image prepare body is invalid json: %v", err)
+	}
+	if payload["client_prepare_dispatch"] != "debounced" {
+		t.Fatalf("client_prepare_dispatch = %#v, want debounced", payload["client_prepare_dispatch"])
+	}
+	if payload["client_prepare_source"] != "composer_editor_state" {
+		t.Fatalf("client_prepare_source = %#v, want composer_editor_state", payload["client_prepare_source"])
+	}
+	if payload["timezone_offset_min"] != float64(420) || payload["timezone"] != "America/Los_Angeles" {
+		t.Fatalf("timezone fields changed: offset=%#v timezone=%#v", payload["timezone_offset_min"], payload["timezone"])
+	}
+	hints, ok := payload["system_hints"].([]interface{})
+	if !ok || len(hints) != 1 || hints[0] != "picture_v2" {
+		t.Fatalf("system_hints = %#v, want [picture_v2]", payload["system_hints"])
+	}
+	localFunctions, ok := payload["local_function_names"].([]interface{})
+	if !ok || len(localFunctions) != 1 || localFunctions[0] != "local.continue_in_work" {
+		t.Fatalf("local_function_names = %#v, want [local.continue_in_work]", payload["local_function_names"])
+	}
+}
+
+func TestImageSystemHintsUsePictureV2(t *testing.T) {
+	hints := imageSystemHints()
+	if len(hints) != 1 || hints[0] != "picture_v2" {
+		t.Fatalf("imageSystemHints() = %#v, want [picture_v2]", hints)
+	}
+	hints[0] = "changed"
+	if next := imageSystemHints(); len(next) != 1 || next[0] != "picture_v2" {
+		t.Fatalf("imageSystemHints() reused mutable slice: %#v", next)
 	}
 }
 

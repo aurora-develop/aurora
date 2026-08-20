@@ -17,12 +17,18 @@ import (
 func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.Account, proxy string, client httpclient.AuroraHttpClient) chatgpt_types.ChatGPTRequest {
 	chatgpt_request := chatgpt_types.NewChatGPTRequest()
 
-	// Model is passed directly to upstream; default to "auto" if not provided
+	// ChatGPT Web 使用 model=auto + system_hints=["reason"] 开启思考模式，
+	// 当前服务端会将其路由到 gpt-5-6-t-mini。对外仍保留调用方的模型名。
 	model := api_request.Model
 	if model == "" {
 		model = "auto"
 	}
-	chatgpt_request.Model = model
+	if usesReasonSystemHint(model) {
+		chatgpt_request.Model = "auto"
+		chatgpt_request.SystemHints = []string{"reason"}
+	} else {
+		chatgpt_request.Model = model
+	}
 
 	// ── 映射 OpenAI 标准生成参数到 ChatGPT ──
 
@@ -131,6 +137,9 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 				Content: official_types.MessageContent{TextValue: text},
 			}, client, account, proxy)
 			if len(metadata) > 0 {
+				if len(chatgpt_request.SystemHints) > 0 {
+					metadata["system_hints"] = append([]string(nil), chatgpt_request.SystemHints...)
+				}
 				chatgpt_request.AddMultimodalMessage(role, parts, metadata)
 			} else {
 				chatgpt_request.AddMessage(role, text)
@@ -139,6 +148,9 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 		}
 		parts, metadata := buildMessageParts(apiMessage, client, account, proxy)
 		if len(metadata) > 0 {
+			if len(chatgpt_request.SystemHints) > 0 {
+				metadata["system_hints"] = append([]string(nil), chatgpt_request.SystemHints...)
+			}
 			chatgpt_request.AddMultimodalMessage(role, parts, metadata)
 			continue
 		}
@@ -154,6 +166,15 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	}
 
 	return chatgpt_request
+}
+
+func usesReasonSystemHint(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5-6-t-mini", "gpt-5-6-thinking":
+		return true
+	default:
+		return false
+	}
 }
 
 func ConvertTTSAPIRequest(input string) chatgpt_types.ChatGPTRequest {

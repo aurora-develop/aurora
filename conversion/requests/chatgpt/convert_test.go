@@ -30,6 +30,46 @@ func TestConvertAPIRequestNoToolsNoInjection(t *testing.T) {
 	}
 }
 
+func TestConvertAPIRequestRoutesThinkingAliasThroughReasonHint(t *testing.T) {
+	for _, model := range []string{"gpt-5-6-t-mini", "gpt-5-6-thinking"} {
+		t.Run(model, func(t *testing.T) {
+			out := testConvert(t, official.APIRequest{
+				Model:    model,
+				Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+			})
+
+			if out.Model != "auto" {
+				t.Fatalf("Model = %q, want auto", out.Model)
+			}
+			if len(out.SystemHints) != 1 || out.SystemHints[0] != "reason" {
+				t.Fatalf("SystemHints = %#v, want [reason]", out.SystemHints)
+			}
+			metadata := out.Messages[0].Metadata
+			hints, ok := metadata["system_hints"].([]string)
+			if !ok || len(hints) != 1 || hints[0] != "reason" {
+				t.Fatalf("message system_hints = %#v, want [reason]", metadata["system_hints"])
+			}
+		})
+	}
+}
+
+func TestConvertAPIRequestKeepsExplicitModelWithoutReasonHint(t *testing.T) {
+	out := testConvert(t, official.APIRequest{
+		Model:    "gpt-5-6-pro",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+
+	if out.Model != "gpt-5-6-pro" {
+		t.Fatalf("Model = %q, want gpt-5-6-pro", out.Model)
+	}
+	if len(out.SystemHints) != 0 {
+		t.Fatalf("SystemHints = %#v, want empty", out.SystemHints)
+	}
+	if _, ok := out.Messages[0].Metadata["system_hints"]; ok {
+		t.Fatalf("message unexpectedly includes system_hints: %#v", out.Messages[0].Metadata)
+	}
+}
+
 func TestConvertAPIRequestMapsReasoningEffortToWebEnum(t *testing.T) {
 	tests := []struct {
 		name   string
