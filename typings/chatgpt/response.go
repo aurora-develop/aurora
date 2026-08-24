@@ -15,6 +15,9 @@ type Message struct {
 	Weight     float64     `json:"weight"`
 	Metadata   Metadata    `json:"metadata"`
 	Recipient  string      `json:"recipient"`
+	// Channel 区分消息通道: "final"(正文) / "commentary"(思考前导等) /
+	// null(旧格式或工具消息)。新版 SSE 用它区分正文与辅助内容。
+	Channel string `json:"channel,omitempty"`
 }
 
 type Content struct {
@@ -34,6 +37,9 @@ type Metadata struct {
 	MessageType   string         `json:"message_type"`
 	FinishDetails *FinishDetails `json:"finish_details"`
 	ModelSlug     string         `json:"model_slug"`
+	// IsThinkingPreambleMessage 标记"思考前导"消息(新版 SSE)。
+	// 这类消息是 assistant 在正式回答前的引导语,不应输出给用户。
+	IsThinkingPreambleMessage bool `json:"is_thinking_preamble_message,omitempty"`
 }
 type Citation struct {
 	Metadata CitaMeta `json:"metadata"`

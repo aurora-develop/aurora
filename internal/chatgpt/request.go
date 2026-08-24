@@ -1491,6 +1491,28 @@ func parseConversationEvent(line string, state *sseparser.PatchState, model stri
 		return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 	}
 
+	// 裸补丁数组: {"v":[{"p":"...","o":"append","v":"..."}, ...]}
+	// 新版 ChatGPT Web (2026-08) 把多个 patch 打包成顶层裸数组帧(无 p/o 字段)。
+	if _, ok := raw["v"].([]interface{}); ok && raw["p"] == nil && raw["o"] == nil {
+		batch, _ := raw["v"].([]interface{})
+		applied := false
+		sseparser.EnsurePatchDefaults(state)
+		for _, item := range batch {
+			op, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			subPath, _ := op["p"].(string)
+			subOp, _ := op["o"].(string)
+			if sseparser.ApplyPatch(state, subPath, subOp, op["v"]) {
+				applied = true
+			}
+		}
+		if applied {
+			return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
+		}
+	}
+
 	if patchPath, ok := raw["p"].(string); ok {
 		patchOperation, _ := raw["o"].(string)
 		// 处理批量 patch: {"p": "", "o": "patch", "v": [{"p": "...", "o": "append", "v": "..."}, ...]}
@@ -2545,6 +2567,14 @@ readLoop:
 				continue
 			}
 			if !(original_response.Message.Author.Role == "assistant" || (original_response.Message.Author.Role == "tool" && original_response.Message.Content.ContentType != "text")) || original_response.Message.Content.Parts == nil {
+				continue
+			}
+			// 新版 SSE (2026-08): 思考前导消息(is_thinking_preamble_message)与
+			// commentary 通道内容都是 assistant 角色的辅助文本,不应输出给用户。
+			if original_response.Message.Metadata.IsThinkingPreambleMessage {
+				continue
+			}
+			if original_response.Message.Channel == "commentary" {
 				continue
 			}
 			if original_response.Message.Metadata.MessageType == "" && activeChannel != "final" {
