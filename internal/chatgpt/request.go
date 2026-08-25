@@ -2424,6 +2424,8 @@ readLoop:
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
 				deltaText := sseparser.NormalizeContentDelta(previous_text.Text, streamEvent.text)
+				// 替换 cite 标记为 content_references 的 alt 链接(无 alt 则删除)
+				deltaText = sseparser.ReplaceCiteMarkers(deltaText, patchState.CiteAlts)
 				if streamEvent.channel != "" {
 					activeChannel = streamEvent.channel
 				}
@@ -2647,6 +2649,10 @@ readLoop:
 				response_string = "data: " + translated_response.String() + "\n\n"
 			}
 			if response_string == "" {
+				// 替换正文中的 cite 标记为 content_references 的 alt 链接
+				if text, ok := original_response.Message.Content.Parts[0].(string); ok {
+					original_response.Message.Content.Parts[0] = sseparser.ReplaceCiteMarkers(text, patchState.CiteAlts)
+				}
 				response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
 			}
 			if response_string == "" {

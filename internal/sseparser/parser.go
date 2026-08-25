@@ -344,6 +344,12 @@ func collectSentinelsFromValue(value interface{}, sentinel *[]map[string]interfa
 type PatchState struct {
 	Response chatgpt_types.ChatGPTResponse
 	Channel  string
+	// CiteAlts 记录 cite 标记(matched_text) → alt Markdown 链接 的映射。
+	// 新版 SSE (2026-08) 通过 /message/metadata/content_references patch 下发,
+	// 用于把正文中的 cite...<ref> 标记替换为可读链接。
+	CiteAlts map[string]string
+	// nextRefIdx assigns the next index for content_references objects.
+	nextRefIdx int
 }
 
 // EnsurePatchDefaults 确保 patch state 的默认值。
@@ -362,6 +368,9 @@ func EnsurePatchDefaults(state *PatchState) {
 	}
 	if state.Response.Message.Metadata.MessageType == "" {
 		state.Response.Message.Metadata.MessageType = "next"
+	}
+	if state.CiteAlts == nil {
+		state.CiteAlts = make(map[string]string)
 	}
 }
 
@@ -439,9 +448,153 @@ func ApplyPatch(state *PatchState, patchPath string, operation string, value int
 	case patchPath == "/message/end_turn":
 		state.Response.Message.EndTurn = value
 	default:
+		// 新版 SSE (2026-08): /message/metadata/content_references[/N][/field]
+		// 携带 cite 标记的引用数据。我们只关心 matched_text(标记) 和 alt(替换链接),
+		// 其余字段(safe_urls/type/items 等)忽略。
+		if strings.HasPrefix(patchPath, "/message/metadata/content_references") {
+			return applyContentReferencePatch(state, patchPath, operation, value)
+		}
 		return false
 	}
 	return true
+}
+
+// applyContentReferencePatch 处理 content_references 相关 patch,
+// 提取 matched_text → alt 映射到 state.CiteAlts。
+//
+// 支持的路径形式:
+//   /message/metadata/content_references            (append 整个引用对象)
+//   /message/metadata/content_references/N          (append/replace 引用对象)
+//   /message/metadata/content_references/N/alt      (replace alt 字符串)
+//   /message/metadata/content_references/N/matched_text (append/replace 标记)
+func applyContentReferencePatch(state *PatchState, patchPath string, operation string, value interface{}) bool {
+	EnsurePatchDefaults(state)
+
+	switch {
+	case patchPath == "/message/metadata/content_references":
+		// append 引用对象或对象数组: {"matched_text":"...", "alt":"..."}
+		// 对象字段后续还会通过 /N/matched_text append 增量到达,
+		// 所以这里同时记录 partial 值作为拼接起点。
+		switch v := value.(type) {
+		case map[string]interface{}:
+			recordRefObject(state, v)
+			return true
+		case []interface{}:
+			for _, item := range v {
+				if obj, ok := item.(map[string]interface{}); ok {
+					recordRefObject(state, obj)
+				}
+			}
+			return true
+		}
+	case strings.HasSuffix(patchPath, "/matched_text"):
+		idx := contentRefIndex(patchPath)
+		if idx < 0 {
+			return false
+		}
+		if text, ok := value.(string); ok {
+			key := fmt.Sprintf("ref:%d:matched", idx)
+			// matched_text 可能分多帧 append 到达,需要拼接
+			if operation == "append" {
+				state.CiteAlts[key] += text
+			} else {
+				state.CiteAlts[key] = text
+			}
+			// 如果 alt 已到齐,建立最终映射
+			if alt := state.CiteAlts[fmt.Sprintf("ref:%d:alt", idx)]; alt != "" {
+				state.CiteAlts[state.CiteAlts[key]] = alt
+			}
+			return true
+		}
+	case strings.HasSuffix(patchPath, "/alt"):
+		idx := contentRefIndex(patchPath)
+		if idx < 0 {
+			return false
+		}
+		if text, ok := value.(string); ok && text != "" {
+			state.CiteAlts[fmt.Sprintf("ref:%d:alt", idx)] = text
+			// 如果 matched 已到齐,建立最终映射
+			if matched := state.CiteAlts[fmt.Sprintf("ref:%d:matched", idx)]; matched != "" {
+				state.CiteAlts[matched] = text
+			}
+			return true
+		}
+	default:
+		// 整个引用对象的 append/replace: .../content_references/N 或带其他后缀的对象值
+		if obj, ok := value.(map[string]interface{}); ok {
+			recordRefObject(state, obj)
+			return true
+		}
+	}
+	return false
+}
+
+// recordRefObject 记录一个 content_references 引用对象:
+// 1. matched_text 作为 ref:N:matched 的拼接起点
+// 2. matched 和 alt 都非空时建立最终映射
+func recordRefObject(state *PatchState, obj map[string]interface{}) {
+	matched, _ := obj["matched_text"].(string)
+	alt, _ := obj["alt"].(string)
+	if matched != "" {
+		idx := state.nextRefIdx
+		state.nextRefIdx++
+		state.CiteAlts[fmt.Sprintf("ref:%d:matched", idx)] = matched
+	}
+	if matched != "" && alt != "" {
+		state.CiteAlts[matched] = alt
+	}
+}
+
+// contentRefIndex 从路径中解析 content_references/N 的 N。
+func contentRefIndex(path string) int {
+	const prefix = "/message/metadata/content_references/"
+	rest := strings.TrimPrefix(path, prefix)
+	// rest 应该以数字开头
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return -1
+	}
+	n := 0
+	for _, c := range rest[:end] {
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+// ReplaceCiteMarkers 把正文中的 cite 标记替换为对应的 alt Markdown 链接。
+// 没有 alt 的标记直接删除(兜底,避免乱码透传给调用方)。
+// 标记格式: citeturnNNNsearchM... (私有区控制符包裹)。
+func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
+	if text == "" || !strings.ContainsRune(text, '') {
+		return text
+	}
+	var b strings.Builder
+	i := 0
+	runes := []rune(text)
+	for i < len(runes) {
+		if runes[i] == '' {
+			// 找结束符 
+			j := i + 1
+			for j < len(runes) && runes[j] != '' {
+				j++
+			}
+			if j < len(runes) {
+				marker := string(runes[i : j+1])
+				if alt, ok := citeAlts[marker]; ok && alt != "" {
+					b.WriteString(alt)
+				}
+				// 无 alt 则丢弃标记
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteRune(runes[i])
+		i++
+	}
+	return b.String()
 }
 
 // NormalizeContentDelta 规范化 OpenAI content delta。

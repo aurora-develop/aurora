@@ -86,3 +86,73 @@ func TestPreambleFilterFields(t *testing.T) {
 		t.Fatal("filter fields should identify preamble")
 	}
 }
+
+// 验证 content_references patch 提取 + cite 标记替换 (方案 B)。
+// 数据来自 2026-08 真实抓包: Inflection Pi 回答带 web 搜索引用。
+func TestCiteMarkerReplacement(t *testing.T) {
+	state := &sseparser.PatchState{}
+
+	seg1 := "\ue200cite\ue202turn543019search0\ue202turn543"      // 对象初始 matched_text(截断)
+	full := "\ue200cite\ue202turn543019search0\ue202turn543019search1\ue201" // 补齐后的完整标记
+
+	// 1. 批量 patch: 正文 append(含截断的 cite 标记) + content_references append
+	frame1 := `{"p":"","o":"patch","v":[
+		{"p":"/message/content/parts/0","o":"append","v":"定位为 Personal Intelligence partner。\ue200cite\ue202turn543019search0\ue202turn543"},
+		{"p":"/message/metadata/content_references","o":"append","v":[{"matched_text":"\ue200cite\ue202turn543019search0\ue202turn543","start_idx":298,"type":"hidden","invalid":true}]}
+	]}`
+	if _, ok := parseConversationEvent(frame1, state, "auto"); !ok {
+		t.Fatal("frame1 should parse")
+	}
+	if state.CiteAlts["ref:0:matched"] != seg1 {
+		t.Fatalf("frame1 matched = %q, want %q", state.CiteAlts["ref:0:matched"], seg1)
+	}
+
+	// 2. 裸数组帧: 正文补齐 + matched_text 补齐
+	frame2 := `{"v":[
+		{"p":"/message/content/parts/0","o":"append","v":"019search1"},
+		{"p":"/message/metadata/content_references/0/matched_text","o":"append","v":"019search1"}
+	]}`
+	if _, ok := parseConversationEvent(frame2, state, "auto"); !ok {
+		t.Fatal("frame2 should parse")
+	}
+	if state.CiteAlts["ref:0:matched"] != full {
+		t.Fatalf("frame2 matched = %q, want full %q", state.CiteAlts["ref:0:matched"], full)
+	}
+
+	// 3. alt 到齐 → 应建立 完整标记→alt 映射
+	frame3 := `{"v":[
+		{"p":"/message/metadata/content_references/0/safe_urls","o":"append","v":["https://inflection.ai/"]},
+		{"p":"/message/metadata/content_references/0/alt","o":"replace","v":"([inflection.ai](https://inflection.ai/?utm_source=chatgpt.com))"},
+		{"p":"/message/metadata/content_references/0/type","o":"replace","v":"grouped_webpages"}
+	]}`
+	if _, ok := parseConversationEvent(frame3, state, "auto"); !ok {
+		t.Fatal("frame3 should parse")
+	}
+
+	wantAlt := "([inflection.ai](https://inflection.ai/?utm_source=chatgpt.com))"
+	if got := state.CiteAlts[full]; got != wantAlt {
+		t.Fatalf("full marker mapping = %q, want %q; map=%#v", got, wantAlt, state.CiteAlts)
+	}
+
+	// 4. ReplaceCiteMarkers: 有 alt 替换,无 alt 删除
+	text := "前文" + full + "中段" + "\ue200citeturn999\ue201" + "尾"
+	got := sseparser.ReplaceCiteMarkers(text, state.CiteAlts)
+	want := "前文" + wantAlt + "中段尾"
+	if got != want {
+		t.Fatalf("ReplaceCiteMarkers = %q, want %q", got, want)
+	}
+}
+
+func TestApplyPatchContentRefDirect(t *testing.T) {
+	state := &sseparser.PatchState{}
+	obj := map[string]interface{}{
+		"matched_text": "citeturn543019search0turn543",
+		"start_idx":    float64(298),
+		"type":         "hidden",
+	}
+	ok := sseparser.ApplyPatch(state, "/message/metadata/content_references", "append", obj)
+	t.Logf("ApplyPatch direct: ok=%v map=%#v", ok, state.CiteAlts)
+	if !ok {
+		t.Fatal("direct ApplyPatch failed")
+	}
+}
