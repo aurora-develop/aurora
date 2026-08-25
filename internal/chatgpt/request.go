@@ -2297,6 +2297,7 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	artifactState := newArtifactAccumulator()
 	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
 	var patchState sseparser.PatchState
+	var citePipeline sseparser.CiteStreamPipeline
 	var handoffTopicID string
 	var currentEvent string
 	var readingWebsocket bool
@@ -2424,8 +2425,9 @@ readLoop:
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
 				deltaText := sseparser.NormalizeContentDelta(previous_text.Text, streamEvent.text)
-				// 替换 cite 标记为 content_references 的 alt 链接(无 alt 则删除)
-				deltaText = sseparser.ReplaceCiteMarkers(deltaText, patchState.CiteAlts)
+				// cite 标记流式处理: 未闭合/alt 未到的尾部暂存(hold-back),
+				// 避免半截标记透传或 alt 晚到导致链接丢失。
+				deltaText = citePipeline.Feed(patchState.CiteAlts, deltaText)
 				if streamEvent.channel != "" {
 					activeChannel = streamEvent.channel
 				}
@@ -2507,6 +2509,15 @@ readLoop:
 					previous_text.Text += deltaText
 				}
 				if streamEvent.isStop {
+					// 流结束: 冲刷 cite hold-back 暂存(有 alt 替换,无 alt 删除)
+					if flushed := citePipeline.Flush(patchState.CiteAlts); flushed != "" {
+						if stream {
+							flushChunk := official_types.NewChatCompletionChunk(flushed, model)
+							flushChunk.ConversationID = convId
+							c.Writer.WriteString("data: " + flushChunk.String() + "\n\n")
+						}
+						previous_text.Text += flushed
+					}
 					if max_tokens && convId != "" && assistantMessageID != "" {
 						finalizeArtifacts()
 						return HandlerResult{
@@ -2649,11 +2660,37 @@ readLoop:
 				response_string = "data: " + translated_response.String() + "\n\n"
 			}
 			if response_string == "" {
-				// 替换正文中的 cite 标记为 content_references 的 alt 链接
-				if text, ok := original_response.Message.Content.Parts[0].(string); ok {
-					original_response.Message.Content.Parts[0] = sseparser.ReplaceCiteMarkers(text, patchState.CiteAlts)
+				// cite 标记替换: 在最终输出前对"替换后域"做差量,再发增量。
+				// 不能提前改 Parts[0] —— alt 可能晚到,提前替换会让差量计算
+				// 错位导致全文重发。做法:
+				//   replaced     = ReplaceCiteMarkers(全文原文)
+				//   prevReplaced = ReplaceCiteMarkers(previous_text)  (previous_text 始终存原文)
+				// 两者同域比较,前缀匹配则发尾部增量; 不匹配(alt 中途变化)跳过本帧。
+				if text, ok := original_response.Message.Content.Parts[0].(string); ok && strings.ContainsRune(text, '') {
+					replaced := sseparser.ReplaceCiteMarkers(text, patchState.CiteAlts)
+					prevReplaced := sseparser.ReplaceCiteMarkers(previous_text.Text, patchState.CiteAlts)
+					var delta string
+					switch {
+					case prevReplaced != "" && strings.HasPrefix(replaced, prevReplaced):
+						delta = replaced[len(prevReplaced):]
+					case prevReplaced == "":
+						delta = replaced
+					}
+					if delta != "" || replaced == "" {
+						chunk := official_types.NewChatCompletionChunk(delta, model)
+						if isRole {
+							chunk.Choices[0].Delta.Role = original_response.Message.Author.Role
+							isRole = false
+						}
+						response_string = "data: " + chunk.String() + "\n\n"
+						previous_text.Text = text
+					}
+					// delta == "" 且 replaced != "": 无新增内容,不发帧;
+					// 替换域不一致: 跳过本帧,等下一帧全文对齐。
 				}
-				response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
+				if response_string == "" {
+					response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
+				}
 			}
 			if response_string == "" {
 				if isEnd {

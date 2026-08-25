@@ -565,8 +565,9 @@ func contentRefIndex(path string) int {
 }
 
 // ReplaceCiteMarkers 把正文中的 cite 标记替换为对应的 alt Markdown 链接。
-// 没有 alt 的标记直接删除(兜底,避免乱码透传给调用方)。
-// 标记格式: citeturnNNNsearchM... (私有区控制符包裹)。
+// 没有 alt 的标记直接删除(兜底,避免乱码透传给调用方);
+// 未闭合的残缺标记(流式截断产生)同样删除。
+// 标记格式: citeturnNNNsearchM... (私有区控制符包裹)。
 func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
 	if text == "" || !strings.ContainsRune(text, '') {
 		return text
@@ -581,20 +582,97 @@ func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
 			for j < len(runes) && runes[j] != '' {
 				j++
 			}
-			if j < len(runes) {
-				marker := string(runes[i : j+1])
-				if alt, ok := citeAlts[marker]; ok && alt != "" {
-					b.WriteString(alt)
-				}
-				// 无 alt 则丢弃标记
-				i = j + 1
-				continue
+			if j >= len(runes) {
+				// 未闭合的残缺标记: 直接丢弃,不透传私有区乱码
+				break
 			}
+			marker := string(runes[i : j+1])
+			if alt, ok := citeAlts[marker]; ok && alt != "" {
+				b.WriteString(alt)
+			}
+			// 无 alt 则丢弃标记
+			i = j + 1
+			continue
 		}
 		b.WriteRune(runes[i])
 		i++
 	}
 	return b.String()
+}
+
+// ── 流式 cite 处理管道 ──
+
+// MaxCiteHoldBytes 暂存区字节上限: 超过后强制放行(未解析标记由 ReplaceCiteMarkers 删除),
+// 兜底防止 alt 迟迟不到导致正文被无限期扣住。
+const MaxCiteHoldBytes = 4096
+
+// CiteStreamPipeline 流式输出时的 cite 标记 hold-back 缓冲。
+//
+// 新版 SSE (2026-08) 中 cite 标记会被切到两帧到达、且 alt 链接
+// 晚于正文 1~2 帧。逐帧直接替换会导致:
+//  1. 半截标记当帧透传(私有区乱码);
+//  2. 完整但 alt 未到的标记被误删,链接永久丢失。
+//
+// 因此未解析完成的尾部必须暂存,等闭合且 alt 到达后再输出。
+type CiteStreamPipeline struct {
+	hold string
+}
+
+// Feed 追加一段原始增量,返回当前可安全输出的替换后文本。
+// citeAlts 每次传入最新映射(alt 可能随新 patch 到达)。
+func (p *CiteStreamPipeline) Feed(citeAlts map[string]string, delta string) string {
+	if delta != "" {
+		p.hold += delta
+	}
+	flush, remain := SplitCiteHold(p.hold, citeAlts)
+	p.hold = remain
+	if flush == "" {
+		return ""
+	}
+	return ReplaceCiteMarkers(flush, citeAlts)
+}
+
+// Flush 流结束时冲刷剩余暂存: 有 alt 替换,无 alt 删除。
+func (p *CiteStreamPipeline) Flush(citeAlts map[string]string) string {
+	if p.hold == "" {
+		return ""
+	}
+	text := ReplaceCiteMarkers(p.hold, citeAlts)
+	p.hold = ""
+	return text
+}
+
+// SplitCiteHold 把待发文本切成 (可立即处理部分, 继续暂存尾部)。
+// 暂存规则:
+//  1. 未闭合的 ... 区间: 从标记起点开始暂存;
+//  2. 已闭合但 alt 未到的标记: 同样暂存(等待后续 alt patch);
+//  3. 暂存量超过 MaxCiteHoldBytes 时整体放行(由 ReplaceCiteMarkers 删除残缺标记)。
+func SplitCiteHold(text string, citeAlts map[string]string) (string, string) {
+	runes := []rune(text)
+	holdStart := -1
+	for i := 0; i < len(runes); {
+		if runes[i] != '' {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(runes) && runes[j] != '' {
+			j++
+		}
+		if j >= len(runes) || citeAlts[string(runes[i:j+1])] == "" {
+			holdStart = i
+			break
+		}
+		i = j + 1
+	}
+	if holdStart < 0 {
+		return text, ""
+	}
+	headBytes := len(string(runes[:holdStart]))
+	if len(text)-headBytes > MaxCiteHoldBytes {
+		return text, ""
+	}
+	return string(runes[:holdStart]), string(runes[holdStart:])
 }
 
 // NormalizeContentDelta 规范化 OpenAI content delta。

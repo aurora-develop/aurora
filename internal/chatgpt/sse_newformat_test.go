@@ -92,8 +92,8 @@ func TestPreambleFilterFields(t *testing.T) {
 func TestCiteMarkerReplacement(t *testing.T) {
 	state := &sseparser.PatchState{}
 
+full := "\ue200cite\ue202turn543019search0\ue202turn543019search1\ue201"
 	seg1 := "\ue200cite\ue202turn543019search0\ue202turn543"      // 对象初始 matched_text(截断)
-	full := "\ue200cite\ue202turn543019search0\ue202turn543019search1\ue201" // 补齐后的完整标记
 
 	// 1. 批量 patch: 正文 append(含截断的 cite 标记) + content_references append
 	frame1 := `{"p":"","o":"patch","v":[
@@ -154,5 +154,85 @@ func TestApplyPatchContentRefDirect(t *testing.T) {
 	t.Logf("ApplyPatch direct: ok=%v map=%#v", ok, state.CiteAlts)
 	if !ok {
 		t.Fatal("direct ApplyPatch failed")
+	}
+}
+
+// 验证流式 hold-back 管道: 标记跨帧切分 + alt 晚到,不再透传乱码/丢失链接。
+func TestCiteStreamPipelineSplitMarker(t *testing.T) {
+	state := &sseparser.PatchState{}
+	pipeline := &sseparser.CiteStreamPipeline{}
+
+	alt := "([inflection.ai](https://inflection.ai/?utm_source=chatgpt.com))"
+
+	// 帧1: 正文含半截标记(有头无尾) —— 应整体暂存,不输出乱码
+	out1 := pipeline.Feed(state.CiteAlts, "定位为 Personal Intelligence partner。citeturn543019search0turn543")
+	if strings.ContainsRune(out1, '') {
+		t.Fatalf("frame1 leaked unclosed marker: %q", out1)
+	}
+	if out1 != "定位为 Personal Intelligence partner。" {
+		t.Fatalf("frame1 = %q", out1)
+	}
+
+	// 帧2: 补齐正文 + matched_text append
+	out2 := pipeline.Feed(state.CiteAlts, "019search1")
+	if out2 != "" {
+		t.Fatalf("frame2 should hold (marker complete but no alt yet), got %q", out2)
+	}
+
+	// patch: matched_text 到齐
+	frameMatched := `{"p":"/message/metadata/content_references/0/matched_text","o":"append","v":"citeturn543019search0turn543"}`
+	parseConversationEvent(frameMatched, state, "auto")
+	frameMatched2 := `{"p":"/message/metadata/content_references/0/matched_text","o":"append","v":"019search1"}`
+	parseConversationEvent(frameMatched2, state, "auto")
+
+	// 帧3: alt 到达 → 暂存的完整标记应替换为链接输出
+	frameAlt := `{"v":[
+		{"p":"/message/metadata/content_references/0/alt","o":"replace","v":"([inflection.ai](https://inflection.ai/?utm_source=chatgpt.com))"},
+		{"p":"/message/content/parts/0","o":"append","v":""}
+	]}`
+	if _, ok := parseConversationEvent(frameAlt, state, "auto"); !ok {
+		t.Fatal("frameAlt should parse")
+	}
+	// 帧3 的正文补丁(闭合符)也进入管道; alt 已在映射中 → 暂存标记应替换输出
+	out3 := pipeline.Feed(state.CiteAlts, string([]rune{0xE201}))
+	if !strings.Contains(out3, alt) {
+		t.Fatalf("alt not flushed after arrival, got %q; map=%#v", out3, state.CiteAlts)
+	}
+	if strings.ContainsRune(out3, '') {
+		t.Fatalf("marker residue in flush: %q", out3)
+	}
+}
+
+// 验证 Flush: 流结束时无 alt 的标记被删除(不残留私有区字符)。
+func TestCiteStreamPipelineFlushNoAlt(t *testing.T) {
+	state := &sseparser.PatchState{}
+	pipeline := &sseparser.CiteStreamPipeline{}
+
+	marker := string([]rune{0xE200}) + "citeturn999search0" + string([]rune{0xE201})
+	out1 := pipeline.Feed(state.CiteAlts, "前文" + marker + "尾")
+	// 无 alt → 从标记起点暂存; 标记前的正文照常放行
+	if out1 != "前文" {
+		t.Fatalf("head before marker should flush, got %q", out1)
+	}
+	// 流结束: Flush 删除无 alt 的标记,保留剩余正文
+	flushed := pipeline.Flush(state.CiteAlts)
+	if flushed != "尾" {
+		t.Fatalf("flush = %q, want 尾", flushed)
+	}
+}
+
+// 验证 SplitCiteHold: 正常文本直接放行。
+func TestSplitCiteHoldPlainText(t *testing.T) {
+	flush, remain := sseparser.SplitCiteHold("普通文本没有标记", nil)
+	if flush != "普通文本没有标记" || remain != "" {
+		t.Fatalf("plain text split wrong: flush=%q remain=%q", flush, remain)
+	}
+}
+
+// 验证 ReplaceCiteMarkers: 未闭合残缺标记直接删除。
+func TestReplaceCiteMarkersUnclosed(t *testing.T) {
+	got := sseparser.ReplaceCiteMarkers("开头citeturn1search0没有闭合", nil)
+	if got != "开头" {
+		t.Fatalf("unclosed marker not dropped: %q", got)
 	}
 }
