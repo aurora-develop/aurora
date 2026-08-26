@@ -236,3 +236,51 @@ func TestReplaceCiteMarkersUnclosed(t *testing.T) {
 		t.Fatalf("unclosed marker not dropped: %q", got)
 	}
 }
+
+// 验证无 alt 标记的类型感知兜底: entity 卡片保留显示名,其余删除。
+func TestMarkerFallbackEntity(t *testing.T) {
+	E200 := string([]rune{0xE200})
+	E201 := string([]rune{0xE201})
+	E202 := string([]rune{0xE202})
+
+	// entity 人物卡片 -> 保留显示名
+	text := "创始团队包括 " + E200 + "entity" + E202 + "[\"people\",\"Mustafa Suleyman\",\"co-founder of DeepMind\"]" + E201 + " 等"
+	got := sseparser.ReplaceCiteMarkers(text, nil)
+	if got != "创始团队包括 Mustafa Suleyman 等" {
+		t.Fatalf("entity fallback = %q", got)
+	}
+
+	// cite 引用残留(无 alt) -> 整体删除
+	text2 := "前文" + E200 + "cite" + E202 + "turn0search1" + E202 + "turn0search7" + E201 + "后文"
+	got2 := sseparser.ReplaceCiteMarkers(text2, nil)
+	if got2 != "前文后文" {
+		t.Fatalf("cite no-alt = %q", got2)
+	}
+
+	// image_group 指令 -> 删除
+	text3 := E200 + "image_group" + E202 + `{"layout":"bento","query":["logo"]}` + E201
+	got3 := sseparser.ReplaceCiteMarkers(text3, nil)
+	if got3 != "" {
+		t.Fatalf("image_group should drop, got %q", got3)
+	}
+}
+
+// 验证第三种批量帧形态: {"o":"patch","v":[...]} (省略顶层 p)。
+// 真实抓包中 image_group 首帧即此形态,之前被整体丢弃导致正文缺头。
+func TestBatchPatchFrameWithoutPath(t *testing.T) {
+	state := &sseparser.PatchState{}
+
+	frame := `{"o":"patch","v":[
+		{"p":"/message/content/parts/0","o":"append","v":"开头文本"},
+		{"p":"/message/status","o":"replace","v":"in_progress"}
+	]}`
+	ev, ok := parseConversationEvent(frame, state, "auto")
+	if !ok {
+		t.Fatal("o-patch-no-p frame should parse")
+	}
+	got, _ := state.Response.Message.Content.Parts[0].(string)
+	if got != "开头文本" {
+		t.Fatalf("accumulated = %q", got)
+	}
+	_ = ev
+}

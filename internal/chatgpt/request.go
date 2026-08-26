@@ -1492,9 +1492,10 @@ func parseConversationEvent(line string, state *sseparser.PatchState, model stri
 	}
 
 	// 裸补丁数组: {"v":[{"p":"...","o":"append","v":"..."}, ...]}
-	// 新版 ChatGPT Web (2026-08) 把多个 patch 打包成顶层裸数组帧(无 p/o 字段)。
-	if _, ok := raw["v"].([]interface{}); ok && raw["p"] == nil && raw["o"] == nil {
-		batch, _ := raw["v"].([]interface{})
+	// 以及省略 p 的变体: {"o":"patch","v":[...]}
+	// 新版 ChatGPT Web (2026-08) 把多个 patch 打包成顶层帧,共三种形态:
+	//   {"p":"","o":"patch","v":[...]} / {"v":[...]} / {"o":"patch","v":[...]}
+	if batch, ok := raw["v"].([]interface{}); ok && raw["p"] == nil {
 		applied := false
 		sseparser.EnsurePatchDefaults(state)
 		for _, item := range batch {
@@ -2298,6 +2299,11 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
 	var patchState sseparser.PatchState
 	var citePipeline sseparser.CiteStreamPipeline
+	// finalText 汇总最终正文: cite 标记统一在此替换(非流式输出 = 该值;
+	// 流式已逐帧替换,此值仅作为 HandlerResult.Text 的完整快照)。
+	finalText := func() string {
+		return sseparser.ReplaceCiteMarkers(previous_text.Text, patchState.CiteAlts)
+	}
 	var handoffTopicID string
 	var currentEvent string
 	var readingWebsocket bool
@@ -2387,6 +2393,16 @@ readLoop:
 						continue readLoop
 					}
 				}
+				// 流结束: 冲刷 cite hold-back 暂存(有 alt 替换,无 alt 删除/兜底)
+				if flushed := citePipeline.Flush(patchState.CiteAlts); flushed != "" {
+					if stream {
+						flushChunk := official_types.NewChatCompletionChunk(flushed, model)
+						flushChunk.ConversationID = convId
+						c.Writer.WriteString("data: " + flushChunk.String() + "\n\n")
+						c.Writer.Flush()
+					}
+					previous_text.Text += flushed
+				}
 				finalizeArtifacts()
 				break readLoop
 			}
@@ -2449,7 +2465,7 @@ readLoop:
 						if max_tokens && convId != "" && assistantMessageID != "" {
 							finalizeArtifacts()
 							return HandlerResult{
-								Text:              strings.Join(imgSource, "") + previous_text.Text,
+								Text:              strings.Join(imgSource, "") + finalText(),
 								ThinkingText:      thinkingText,
 								ConversationID:    convId,
 								ParentMessageID:   assistantMessageID,
@@ -2467,7 +2483,7 @@ readLoop:
 						}
 						finalizeArtifacts()
 						return HandlerResult{
-							Text:              strings.Join(imgSource, "") + previous_text.Text,
+							Text:              strings.Join(imgSource, "") + finalText(),
 							ThinkingText:      thinkingText,
 							ConversationID:    convId,
 							ParentMessageID:   assistantMessageID,
@@ -2521,7 +2537,7 @@ readLoop:
 					if max_tokens && convId != "" && assistantMessageID != "" {
 						finalizeArtifacts()
 						return HandlerResult{
-							Text:              strings.Join(imgSource, "") + previous_text.Text,
+							Text:              strings.Join(imgSource, "") + finalText(),
 							ThinkingText:      thinkingText,
 							ConversationID:    convId,
 							ParentMessageID:   assistantMessageID,
@@ -2539,7 +2555,7 @@ readLoop:
 					}
 					finalizeArtifacts()
 					return HandlerResult{
-						Text:              strings.Join(imgSource, "") + previous_text.Text,
+						Text:              strings.Join(imgSource, "") + finalText(),
 						ThinkingText:      thinkingText,
 						ConversationID:    convId,
 						ParentMessageID:   assistantMessageID,
@@ -2660,36 +2676,21 @@ readLoop:
 				response_string = "data: " + translated_response.String() + "\n\n"
 			}
 			if response_string == "" {
-				// cite 标记替换: 在最终输出前对"替换后域"做差量,再发增量。
-				// 不能提前改 Parts[0] —— alt 可能晚到,提前替换会让差量计算
-				// 错位导致全文重发。做法:
-				//   replaced     = ReplaceCiteMarkers(全文原文)
-				//   prevReplaced = ReplaceCiteMarkers(previous_text)  (previous_text 始终存原文)
-				// 两者同域比较,前缀匹配则发尾部增量; 不匹配(alt 中途变化)跳过本帧。
-				if text, ok := original_response.Message.Content.Parts[0].(string); ok && strings.ContainsRune(text, '') {
-					replaced := sseparser.ReplaceCiteMarkers(text, patchState.CiteAlts)
-					prevReplaced := sseparser.ReplaceCiteMarkers(previous_text.Text, patchState.CiteAlts)
-					var delta string
-					switch {
-					case prevReplaced != "" && strings.HasPrefix(replaced, prevReplaced):
-						delta = replaced[len(prevReplaced):]
-					case prevReplaced == "":
-						delta = replaced
-					}
-					if delta != "" || replaced == "" {
-						chunk := official_types.NewChatCompletionChunk(delta, model)
-						if isRole {
-							chunk.Choices[0].Delta.Role = original_response.Message.Author.Role
-							isRole = false
-						}
+				// cite/entity 标记处理:
+				//   - 流式: 经 citePipeline hold-back(未闭合/无 alt 的标记暂存,
+				//     防止半截标记或未替换标记透传给客户端);
+				//   - 非流式: 不做逐帧替换,最终输出 HandlerResult.Text = previous_text.Text,
+				//     在 return 处由 finalText() 统一 ReplaceCiteMarkers 一次。
+				response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
+				if stream && response_string != "" && strings.HasPrefix(response_string, "data: ") {
+					// 从 SSE 帧中取出 content delta,过 hold-back 管道后重组
+					var chunk official_types.ChatCompletionChunk
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(response_string, "data: ")), &chunk); err == nil {
+						delta := chunk.Choices[0].Delta.Content
+						replaced := citePipeline.Feed(patchState.CiteAlts, delta)
+						chunk.Choices[0].Delta.Content = replaced
 						response_string = "data: " + chunk.String() + "\n\n"
-						previous_text.Text = text
 					}
-					// delta == "" 且 replaced != "": 无新增内容,不发帧;
-					// 替换域不一致: 跳过本帧,等下一帧全文对齐。
-				}
-				if response_string == "" {
-					response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
 				}
 			}
 			if response_string == "" {
@@ -2727,7 +2728,7 @@ readLoop:
 				}
 				finalizeArtifacts()
 				return HandlerResult{
-					Text:              strings.Join(imgSource, "") + previous_text.Text,
+					Text:              strings.Join(imgSource, "") + finalText(),
 					ThinkingText:      thinkingText,
 					ConversationID:    convId,
 					ParentMessageID:   assistantMessageID,
@@ -2746,9 +2747,18 @@ readLoop:
 		}
 	}
 	if !max_tokens {
+		// 流在 [DONE]/EOF 结束(未走 isStop 路径): 冲刷 cite hold-back 暂存
+		if stream {
+			if flushed := citePipeline.Flush(patchState.CiteAlts); flushed != "" {
+				flushChunk := official_types.NewChatCompletionChunk(flushed, model)
+				flushChunk.ConversationID = convId
+				c.Writer.WriteString("data: " + flushChunk.String() + "\n\n")
+				c.Writer.Flush()
+			}
+		}
 		finalizeArtifacts()
 		return HandlerResult{
-			Text:              strings.Join(imgSource, "") + previous_text.Text,
+			Text:              strings.Join(imgSource, "") + finalText(),
 			ThinkingText:      thinkingText,
 			ConversationID:    convId,
 			ParentMessageID:   assistantMessageID,
@@ -2761,7 +2771,7 @@ readLoop:
 	}
 	finalizeArtifacts()
 	return HandlerResult{
-		Text:              strings.Join(imgSource, "") + previous_text.Text,
+		Text:              strings.Join(imgSource, "") + finalText(),
 		ThinkingText:      thinkingText,
 		ConversationID:    convId,
 		ParentMessageID:   assistantMessageID,

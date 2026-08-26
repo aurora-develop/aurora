@@ -564,10 +564,14 @@ func contentRefIndex(path string) int {
 	return n
 }
 
-// ReplaceCiteMarkers 把正文中的 cite 标记替换为对应的 alt Markdown 链接。
-// 没有 alt 的标记直接删除(兜底,避免乱码透传给调用方);
-// 未闭合的残缺标记(流式截断产生)同样删除。
-// 标记格式: citeturnNNNsearchM... (私有区控制符包裹)。
+// ReplaceCiteMarkers 把正文中的 cite/entity 等私有区标记转换为可读文本。
+// 处理规则:
+//   - 有 alt 映射的标记(搜索引用) -> 替换为 Markdown 链接;
+//   - entity 标记(人物/公司卡片) -> 提取显示名(数组第 2 个元素);
+//   - 其余无 alt 的标记(cite 残留/image_group 等) -> 删除;
+//   - 未闭合的残缺标记(流式截断产生) -> 删除。
+//
+// 标记格式: typepayload... (私有区控制符包裹)。
 func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
 	if text == "" || !strings.ContainsRune(text, '') {
 		return text
@@ -589,8 +593,10 @@ func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
 			marker := string(runes[i : j+1])
 			if alt, ok := citeAlts[marker]; ok && alt != "" {
 				b.WriteString(alt)
+			} else if fallback := markerFallback(marker); fallback != "" {
+				b.WriteString(fallback)
 			}
-			// 无 alt 则丢弃标记
+			// 其余无 alt 的标记丢弃
 			i = j + 1
 			continue
 		}
@@ -600,6 +606,35 @@ func ReplaceCiteMarkers(text string, citeAlts map[string]string) string {
 	return b.String()
 }
 
+// markerFallback 为无 alt 的标记提供兜底文本。
+// entity 卡片携带 ["类型","显示名","描述"] 数组,显示名对用户可读,应保留;
+// 其他类型(cite 引用残留、image_group 图片指令等)内容是内部协议,删除。
+func markerFallback(marker string) string {
+	runes := []rune(marker)
+	if len(runes) < 3 {
+		return ""
+	}
+	inner := string(runes[1 : len(runes)-1]) // 去掉首尾控制符(按 rune,PUA 是多字节)
+	if !strings.HasPrefix(inner, "entity") {
+		return ""
+	}
+	payload := inner[len("entity"):]
+	arrStart := strings.Index(payload, "[")
+	arrEnd := strings.LastIndex(payload, "]")
+	if arrStart < 0 || arrEnd <= arrStart {
+		return ""
+	}
+	var arr []interface{}
+	if json.Unmarshal([]byte(payload[arrStart:arrEnd+1]), &arr) != nil {
+		return ""
+	}
+	if len(arr) >= 2 {
+		if name, ok := arr[1].(string); ok && name != "" {
+			return name
+		}
+	}
+	return ""
+}
 // ── 流式 cite 处理管道 ──
 
 // MaxCiteHoldBytes 暂存区字节上限: 超过后强制放行(未解析标记由 ReplaceCiteMarkers 删除),
