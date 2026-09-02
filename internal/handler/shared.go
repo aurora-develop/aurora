@@ -13,15 +13,15 @@ import (
 	"aurora/httpclient/bogdanfinn"
 	"aurora/internal/accounts"
 	"aurora/internal/chatgpt"
+	"aurora/internal/config"
 	chatgpt_types "aurora/typings/chatgpt"
 	officialtypes "aurora/typings/official"
 	"aurora/util"
-	"aurora/internal/config"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var ErrNoAvailable = errors.New("no available account of the requested type")
@@ -167,7 +167,7 @@ func conversationClientOrder(client **bogdanfinn.TlsClient, account *accounts.Ac
 	chatgpt.POSTConversationInit(*client, account, state)
 
 	var wsConn *websocket.Conn
-	if stream && account.Type.Satisfies(accounts.CapWebSocket) {
+	if chatgpt.RequiresConversationWebsocket(stream, translatedRequest.ThinkingEffort) && account.Type.Satisfies(accounts.CapWebSocket) {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(*client, account, state, proxyUrl)
 		if err != nil {
 			return nil, nil, nil, http.StatusInternalServerError, err
@@ -287,4 +287,75 @@ func appendToolDebugLog(path string, attempt int, text string, calls []officialt
 	defer f.Close()
 	callsJSON, _ := json.Marshal(calls)
 	fmt.Fprintf(f, "\n=== attempt %d ===\ntext: %s\ncalls: %s\n", attempt, text, string(callsJSON))
+}
+
+// ── Responses 流式事件构造器 ──
+
+func responsesCreatedEvent(respID, model string) string {
+	evt := map[string]interface{}{
+		"type": "response.created",
+		"response": map[string]interface{}{
+			"id": respID, "object": "response", "created_at": time.Now().Unix(),
+			"model": model, "status": "in_progress",
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesOutputItemAddedEvent(outputIndex int, itemID, itemType string) string {
+	evt := map[string]interface{}{
+		"type":         "response.output_item.added",
+		"output_index": outputIndex,
+		"item": map[string]interface{}{
+			"id": itemID, "type": itemType, "status": "in_progress",
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesOutputItemDoneEvent(outputIndex int, itemID, itemType, text string) string {
+	item := map[string]interface{}{
+		"id": itemID, "type": itemType, "status": "completed",
+	}
+	if itemType == "message" {
+		item["role"] = "assistant"
+		item["content"] = []map[string]interface{}{
+			{"type": "output_text", "text": text},
+		}
+	} else if itemType == "reasoning" {
+		item["content"] = []map[string]interface{}{
+			{"type": "reasoning_text", "text": text},
+		}
+	}
+	evt := map[string]interface{}{
+		"type":         "response.output_item.done",
+		"output_index": outputIndex,
+		"item":         item,
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesFailedEvent(msg string) string {
+	evt := map[string]interface{}{
+		"type": "response.failed",
+		"response": map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": msg, "type": "server_error",
+			},
+		},
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
+func responsesCompletedEvent(resp officialtypes.ResponsesResponse) string {
+	evt := map[string]interface{}{
+		"type":     "response.completed",
+		"response": resp,
+	}
+	b, _ := json.Marshal(evt)
+	return string(b)
 }

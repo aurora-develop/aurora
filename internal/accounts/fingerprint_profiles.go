@@ -15,23 +15,23 @@ type FingerprintProfile struct {
 // TLS 指纹、UA、视窗各维度绑定成一套
 var DefaultProfiles = []FingerprintProfile{
 	{
-		Name: "chrome_win_high", TLSProfileName: "chrome_146",
-		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		Name: "chrome_win_high", TLSProfileName: "chrome_150",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		ScreenWidth: 2560, ScreenHeight: 1440, HardwareConcurrency: 16, Platform: "Win32",
 	},
 	{
-		Name: "chrome_win_medium", TLSProfileName: "chrome_146",
-		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		Name: "chrome_win_medium", TLSProfileName: "chrome_150",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		ScreenWidth: 1920, ScreenHeight: 1080, HardwareConcurrency: 8, Platform: "Win32",
 	},
 	{
-		Name: "chrome_win_low", TLSProfileName: "chrome_146",
-		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		Name: "chrome_win_low", TLSProfileName: "chrome_150",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		ScreenWidth: 1366, ScreenHeight: 768, HardwareConcurrency: 4, Platform: "Win32",
 	},
 	{
-		Name: "chrome_mac", TLSProfileName: "chrome_146",
-		UserAgent:           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		Name: "chrome_mac", TLSProfileName: "chrome_150",
+		UserAgent:           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		ScreenWidth: 3024, ScreenHeight: 1964, HardwareConcurrency: 12, Platform: "MacIntel",
 	},
 	{

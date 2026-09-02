@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestSolveProofOfWorkRejectsOversizedDifficulty(t *testing.T) {
+	tok := (&Config{}).SolveProofOfWork("seed", "123456789")
+	if !strings.HasPrefix(tok, PrefixProof+ErrorPrefix) {
+		t.Fatalf("oversized difficulty should return failure token, got %q", tok)
+	}
+}
+
 // TestSolveProofOfWork_FallbackFormat 验证 fallback 格式对齐 SDK:
 //   "gAAAAAB" + ErrorPrefix + base64(JSON.stringify("e")) + "~S"
 //

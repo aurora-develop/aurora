@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/bogdanfinn/fhttp v0.6.8
-	github.com/bogdanfinn/tls-client v1.15.1
+	github.com/bogdanfinn/tls-client v1.15.2-0.20260702071810-b790a311273f
 	github.com/bogdanfinn/websocket v1.5.5-barnius
 	github.com/g-utils/endless v0.0.0-20260127124332-65b1b93e1c96
 	github.com/gin-gonic/gin v1.12.0

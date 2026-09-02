@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const FixedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+const FixedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 
 // userAgentSpec 描述一个主流桌面浏览器的 User-Agent 模板
 // 模板中可使用 %d 作为版本占位符
@@ -23,8 +23,8 @@ type userAgentSpec struct {
 var userAgentSpecs = []userAgentSpec{
 	{
 		Template:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36",
-		MinVersion: 148,
-		MaxVersion: 148,
+		MinVersion: 150,
+		MaxVersion: 150,
 		Family:     "Chrome-Win",
 	},
 }

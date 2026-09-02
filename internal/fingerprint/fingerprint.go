@@ -75,36 +75,41 @@ func Build25(opts Options) []any {
 		r = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 
+	profile := browserfp.Get()
+
 	ua := opts.UserAgent
 	if ua == "" {
-		ua = browserfp.UserAgents[r.Intn(len(browserfp.UserAgents))]
+		ua = profile.UserAgent
 	}
 
 	langs := opts.Languages
 	if len(langs) == 0 {
-		slices := browserfp.LanguageSlices()
-		langs = slices[r.Intn(len(slices))]
+		langs = strings.Split(browserfp.LanguageJoin(profile.Language), ",")
 	}
 	primaryLang := langs[0]
 
 	platform := opts.Platform
 	if platform == "" {
-		platform = browserfp.Platforms[r.Intn(len(browserfp.Platforms))]
+		platform = profile.Platform
 	}
 
 	w, h := opts.ScreenWidth, opts.ScreenHeight
 	if w == 0 {
-		w = 1920
+		w = profile.ScreenWidth
 	}
 	if h == 0 {
-		h = 1080
+		h = profile.ScreenHeight
 	}
 
 	screenSum := w + h
 
+	timezone := opts.Timezone
+	if timezone == "" {
+		timezone = profile.Timezone
+	}
 	var dateStr string
-	if opts.Timezone != "" {
-		if loc, err := time.LoadLocation(opts.Timezone); err == nil {
+	if timezone != "" {
+		if loc, err := time.LoadLocation(timezone); err == nil {
 			dateStr = jsDateToString(time.Now().In(loc))
 		}
 	}
@@ -114,7 +119,7 @@ func Build25(opts Options) []any {
 
 	jsHeap := opts.JSHeapSizeLimit
 	if jsHeap == 0 {
-		jsHeap = 4294967296
+		jsHeap = profile.JSHeapSizeLimit
 	}
 
 	r4 := r.Float64()
@@ -142,7 +147,7 @@ func Build25(opts Options) []any {
 
 	hwConc := opts.HardwareConcurrency
 	if hwConc == 0 {
-		hwConc = 8
+		hwConc = profile.HardwareConcurrency
 	}
 
 	timeOrigin := float64(time.Now().UnixMilli()) - perfNow
@@ -185,7 +190,7 @@ func Build25(opts Options) []any {
 // ─── 时区辅助 ──────────────────────────────────────────────────────────────
 
 func jsDateToString(t time.Time) string {
-	head := t.Format("Mon Jan 2 2006 15:04:05")
+	head := t.Format("Mon Jan 02 2006 15:04:05")
 	_, offset := t.Zone()
 	sign := "+"
 	if offset < 0 {

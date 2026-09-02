@@ -2,6 +2,7 @@ package official
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,40 @@ func TestNewChatCompletionWithMetadata(t *testing.T) {
 	}
 	if sentinel[0].(map[string]interface{})["event"] != "artifact" {
 		t.Fatalf("first sentinel = %#v, want artifact", sentinel[0])
+	}
+}
+
+func TestNewResponsesResponseWithReasoning(t *testing.T) {
+	resp := NewResponsesResponse("hello", "thinking...", 100, 50, 30, 80, 20, "auto")
+	if resp.Object != "response" {
+		t.Fatalf("object = %q, want response", resp.Object)
+	}
+	if resp.OutputText != "hello" {
+		t.Fatalf("output_text = %q, want hello", resp.OutputText)
+	}
+	b, _ := json.Marshal(resp)
+	s := string(b)
+	for _, want := range []string{
+		`"input_tokens":100`,
+		`"cached_tokens":80`,
+		`"cache_write_tokens":20`,
+		`"reasoning_tokens":30`,
+		`"type":"reasoning"`,
+		`"reasoning_text"`,
+		`"reasoning_content":"thinking..."`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in %s", want, s)
+		}
+	}
+}
+
+func TestNewResponsesResponseWithoutReasoning(t *testing.T) {
+	resp := NewResponsesResponse("hi", "", 10, 5, 0, 0, 0, "auto")
+	if len(resp.Output) != 1 {
+		t.Fatalf("output len = %d, want 1", len(resp.Output))
+	}
+	if resp.Output[0].Type != "message" {
+		t.Fatalf("first output type = %q, want message", resp.Output[0].Type)
 	}
 }

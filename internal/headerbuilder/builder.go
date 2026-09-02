@@ -38,7 +38,7 @@ func (b *Builder) WithBaseHeaders(conversationID string) *Builder {
 	} else {
 		b.header.Set("Referer", "https://chatgpt.com/")
 	}
-	b.header.Set("Sec-Ch-Ua", `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`)
+	b.header.Set("Sec-Ch-Ua", `"Chromium";v="150", "Google Chrome";v="150", "Not/A)Brand";v="99"`)
 	b.header.Set("Sec-Ch-Ua-Mobile", "?0")
 	b.header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
 	b.header.Set("Priority", "u=1, i")

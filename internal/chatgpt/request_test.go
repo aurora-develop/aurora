@@ -2,8 +2,8 @@ package chatgpt
 
 import (
 	"aurora/httpclient"
-	"aurora/internal/sseparser"
 	"aurora/internal/accounts"
+	"aurora/internal/sseparser"
 	"aurora/typings/chatgpt"
 	"encoding/json"
 	"fmt"
@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/websocket"
+	"github.com/gin-gonic/gin"
 )
 
 type fakeAuroraClient struct {
@@ -380,6 +380,44 @@ func TestPrepareConversationConduitDoesNotUseSentinelHeaders(t *testing.T) {
 	}
 }
 
+func TestPrepareConversationConduitPropagatesReasonSystemHint(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"conduit_token":"abc"}`)),
+		},
+	}
+	request := chatGPTRequestForTest()
+	request.Model = "auto"
+	request.SystemHints = []string{"reason"}
+
+	if _, err := PrepareConversationConduit(client, request, &accounts.Account{}, "", "trace-id"); err != nil {
+		t.Fatalf("PrepareConversationConduit returned error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("prepare body is invalid json: %v", err)
+	}
+	if payload["client_prepare_dispatch"] != "debounced" {
+		t.Fatalf("client_prepare_dispatch = %#v, want debounced", payload["client_prepare_dispatch"])
+	}
+	if payload["client_prepare_source"] != "composer_editor_state" {
+		t.Fatalf("client_prepare_source = %#v, want composer_editor_state", payload["client_prepare_source"])
+	}
+	localFunctions, ok := payload["local_function_names"].([]interface{})
+	if !ok || len(localFunctions) != 1 || localFunctions[0] != "local.continue_in_work" {
+		t.Fatalf("local_function_names = %#v, want [local.continue_in_work]", payload["local_function_names"])
+	}
+	if payload["model"] != "auto" {
+		t.Fatalf("model = %#v, want auto", payload["model"])
+	}
+	hints, ok := payload["system_hints"].([]interface{})
+	if !ok || len(hints) != 1 || hints[0] != "reason" {
+		t.Fatalf("system_hints = %#v, want [reason]", payload["system_hints"])
+	}
+}
+
 // sequentialAuroraClient 是一个按调用顺序返回不同响应的 fake client,
 // 用于验证 PrepareConversationConduitFull 的三态时序和 token 链路。
 type sequentialAuroraClient struct {
@@ -410,7 +448,7 @@ func (s *sequentialAuroraClient) Request(method httpclient.HttpMethod, url strin
 	return s.responses[idx], nil
 }
 
-func (s *sequentialAuroraClient) SetProxy(url string) error { return nil }
+func (s *sequentialAuroraClient) SetProxy(url string) error                        { return nil }
 func (s *sequentialAuroraClient) SetCookies(rawUrl string, cookies []*http.Cookie) {}
 func (s *sequentialAuroraClient) GetCookies(rawUrl string) []*http.Cookie {
 	// 返回一个 cf_clearance,让 ensureBootstrapped 直接走 fast-path
@@ -613,6 +651,81 @@ func TestConversationHeadersKeepEmptyConduitHeaderForConversation(t *testing.T) 
 	}
 }
 
+func TestImagePrepareUsesPictureV2AndComposerStateFields(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"conduit_token":"image-token"}`)),
+		},
+	}
+
+	token, err := prepareImageConversation(client, &accounts.Account{}, &TurnStile{}, "draw a cat", "gpt-image-2", NewChatClientState())
+	if err != nil {
+		t.Fatalf("prepareImageConversation returned error: %v", err)
+	}
+	if token != "image-token" {
+		t.Fatalf("token = %q, want image-token", token)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("image prepare body is invalid json: %v", err)
+	}
+	if payload["client_prepare_dispatch"] != "debounced" {
+		t.Fatalf("client_prepare_dispatch = %#v, want debounced", payload["client_prepare_dispatch"])
+	}
+	if payload["client_prepare_source"] != "composer_editor_state" {
+		t.Fatalf("client_prepare_source = %#v, want composer_editor_state", payload["client_prepare_source"])
+	}
+	if payload["timezone_offset_min"] != float64(420) || payload["timezone"] != "America/Los_Angeles" {
+		t.Fatalf("timezone fields changed: offset=%#v timezone=%#v", payload["timezone_offset_min"], payload["timezone"])
+	}
+	hints, ok := payload["system_hints"].([]interface{})
+	if !ok || len(hints) != 1 || hints[0] != "picture_v2" {
+		t.Fatalf("system_hints = %#v, want [picture_v2]", payload["system_hints"])
+	}
+	localFunctions, ok := payload["local_function_names"].([]interface{})
+	if !ok || len(localFunctions) != 1 || localFunctions[0] != "local.continue_in_work" {
+		t.Fatalf("local_function_names = %#v, want [local.continue_in_work]", payload["local_function_names"])
+	}
+}
+
+func TestImageSystemHintsUsePictureV2(t *testing.T) {
+	hints := imageSystemHints()
+	if len(hints) != 1 || hints[0] != "picture_v2" {
+		t.Fatalf("imageSystemHints() = %#v, want [picture_v2]", hints)
+	}
+	hints[0] = "changed"
+	if next := imageSystemHints(); len(next) != 1 || next[0] != "picture_v2" {
+		t.Fatalf("imageSystemHints() reused mutable slice: %#v", next)
+	}
+}
+
+func TestRequiresConversationWebsocket(t *testing.T) {
+	tests := []struct {
+		name           string
+		stream         bool
+		thinkingEffort string
+		want           bool
+	}{
+		{name: "streaming standard", stream: true, thinkingEffort: "standard", want: true},
+		{name: "non-streaming standard", thinkingEffort: "standard", want: false},
+		{name: "non-streaming low normalizes to standard", thinkingEffort: "low", want: false},
+		{name: "non-streaming extended", thinkingEffort: "extended", want: true},
+		{name: "non-streaming medium normalizes to extended", thinkingEffort: "medium", want: true},
+		{name: "non-streaming max", thinkingEffort: "max", want: true},
+		{name: "non-streaming high normalizes to max", thinkingEffort: "high", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RequiresConversationWebsocket(tt.stream, tt.thinkingEffort); got != tt.want {
+				t.Fatalf("RequiresConversationWebsocket(%v, %q) = %v, want %v", tt.stream, tt.thinkingEffort, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldUseWebsocketHandoffSkipsCatchupAfterHTTPBody(t *testing.T) {
 	if shouldUseWebsocketHandoff(false, "conversation-turn-abc", &websocket.Conn{}, "hello", nil) {
 		t.Fatalf("websocket handoff should be skipped when HTTP SSE already emitted text")
@@ -639,10 +752,10 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 	if first["Accept-Language"] != "en-US,en;q=0.9" {
 		t.Fatalf("Accept-Language = %q, want en-US,en;q=0.9", first["Accept-Language"])
 	}
-	// UA must be the Chrome 148 variant to match sec-ch-ua="Google Chrome";"v="148"
+	// UA must be the Chrome 150 variant to match sec-ch-ua="Google Chrome";"v="150"
 	ua := first["User-Agent"]
-	if !strings.Contains(ua, "Chrome/148.") {
-		t.Fatalf("User-Agent = %q, want Chrome 148 to match sec-ch-ua=Chrome 148", ua)
+	if !strings.Contains(ua, "Chrome/150.") {
+		t.Fatalf("User-Agent = %q, want Chrome 150 to match sec-ch-ua=Chrome 150", ua)
 	}
 	if strings.Contains(ua, "Edg/") {
 		t.Fatalf("User-Agent = %q, must not be Edge variant (conversation.txt uses Chrome)", ua)
@@ -654,15 +767,15 @@ func TestCreateBaseHeaderMatchesWebClientShape(t *testing.T) {
 		t.Fatalf("Oai-Session-Id should be stable across headers: first=%q second=%q", first["Oai-Session-Id"], second["Oai-Session-Id"])
 	}
 	// 对齐 2026-06-26 浏览器抓包
-	if first["Oai-Client-Version"] != "prod-dbbd612ddb47498515c3eecf8579bcafa0066e07" {
-		t.Fatalf("Oai-Client-Version = %q, want prod-dbbd612ddb47498515c3eecf8579bcafa0066e07", first["Oai-Client-Version"])
+	if first["Oai-Client-Version"] != "prod-46437587156517d920436051cb9ab60a95f0503a" {
+		t.Fatalf("Oai-Client-Version = %q, want prod-46437587156517d920436051cb9ab60a95f0503a", first["Oai-Client-Version"])
 	}
 	if first["Oai-Client-Build-Number"] != "7823760" {
 		t.Fatalf("Oai-Client-Build-Number = %q, want 7823760", first["Oai-Client-Build-Number"])
 	}
-	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 148)
-	if first["Sec-Ch-Ua"] != `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"` {
-		t.Fatalf("Sec-Ch-Ua = %q, want Chrome 148", first["Sec-Ch-Ua"])
+	// sec-ch-ua 必须跟 UA 一致(都是 Chrome 150)
+	if first["Sec-Ch-Ua"] != `"Chromium";v="150", "Google Chrome";v="150", "Not/A)Brand";v="99"` {
+		t.Fatalf("Sec-Ch-Ua = %q, want Chrome 150", first["Sec-Ch-Ua"])
 	}
 }
 
@@ -700,6 +813,12 @@ func TestPrepareConversationConduitUsesClientState(t *testing.T) {
 	if payload["parent_message_id"] != "parent-state" {
 		t.Fatalf("parent_message_id = %#v, want parent-state", payload["parent_message_id"])
 	}
+	if payload["supports_buffering"] != true {
+		t.Fatalf("supports_buffering = %#v, want prepare capability", payload["supports_buffering"])
+	}
+	if _, ok := payload["supported_encodings"].([]interface{}); !ok {
+		t.Fatalf("supported_encodings missing: %#v", payload)
+	}
 	contextInfo, ok := payload["client_contextual_info"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("client_contextual_info missing: %#v", payload)
@@ -707,6 +826,81 @@ func TestPrepareConversationConduitUsesClientState(t *testing.T) {
 	loaded, ok := contextInfo["time_since_loaded"].(float64)
 	if !ok || loaded < 2 || loaded > 5 {
 		t.Fatalf("time_since_loaded = %#v, want dynamic seconds around 3", contextInfo["time_since_loaded"])
+	}
+}
+
+func TestConversationCompletionOmitsRiskyCapabilityFields(t *testing.T) {
+	client := &fakeAuroraClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+		},
+	}
+	request := chatGPTRequestForTest()
+	request.EnableMessageFollowups = true
+	request.SupportsBuffering = true
+	request.SupportedEncodings = []string{"v1"}
+	request.ClientContextualInfo = map[string]interface{}{"app_name": "chatgpt.com"}
+	request.ThinkingEffort = "extended"
+
+	response, err := POSTconversationPreparedWithState(client, request, &accounts.Account{}, nil, "", "conduit", "trace", NewChatClientState())
+	if err != nil {
+		t.Fatalf("POSTconversationPreparedWithState returned error: %v", err)
+	}
+	if response == nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("response = %#v, want HTTP 200", response)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("completion body is invalid json: %v", err)
+	}
+	for _, key := range []string{"enable_message_followups", "supports_buffering", "supported_encodings", "client_contextual_info"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("completion request unexpectedly includes %s: %#v", key, payload[key])
+		}
+	}
+	if payload["client_prepare_state"] != "success" {
+		t.Fatalf("client_prepare_state = %#v, want success", payload["client_prepare_state"])
+	}
+	if payload["thinking_effort"] != "extended" {
+		t.Fatalf("thinking_effort = %#v, want extended", payload["thinking_effort"])
+	}
+}
+
+func TestConversationCompletionNormalizesThinkingEffort(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  string
+	}{
+		{input: "low", want: "standard"},
+		{input: "medium", want: "extended"},
+		{input: "high", want: "max"},
+		{input: "turbo", want: "standard"},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			client := &fakeAuroraClient{
+				response: &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("")),
+				},
+			}
+			request := chatGPTRequestForTest()
+			request.ThinkingEffort = tt.input
+
+			_, err := POSTconversationPreparedWithState(client, request, &accounts.Account{}, nil, "", "conduit", "trace", NewChatClientState())
+			if err != nil {
+				t.Fatalf("POSTconversationPreparedWithState returned error: %v", err)
+			}
+
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+				t.Fatalf("completion body is invalid json: %v", err)
+			}
+			if payload["thinking_effort"] != tt.want {
+				t.Fatalf("thinking_effort = %#v, want %q", payload["thinking_effort"], tt.want)
+			}
+		})
 	}
 }
 

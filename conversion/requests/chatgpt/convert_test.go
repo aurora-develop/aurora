@@ -1,24 +1,104 @@
 package chatgpt
 
 import (
-	"aurora/internal/tokens"
+	"aurora/internal/accounts"
+	chatgpt_types "aurora/typings/chatgpt"
 	"aurora/typings/official"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
+var testAccount = accounts.NewAccount("test", accounts.TypeNoAuth, "")
+
+func testConvert(t *testing.T, req official.APIRequest) chatgpt_types.ChatGPTRequest {
+	t.Helper()
+	return ConvertAPIRequest(req, testAccount, "", nil)
+}
+
 func TestConvertAPIRequestNoToolsNoInjection(t *testing.T) {
 	req := official.APIRequest{
 		Model:    "gpt-5",
 		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	if len(out.Messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(out.Messages))
 	}
 	if out.Messages[0].Author.Role != "user" {
 		t.Fatalf("role = %q", out.Messages[0].Author.Role)
+	}
+}
+
+func TestConvertAPIRequestRoutesThinkingAliasThroughReasonHint(t *testing.T) {
+	for _, model := range []string{"gpt-5-6-t-mini", "gpt-5-6-thinking"} {
+		t.Run(model, func(t *testing.T) {
+			out := testConvert(t, official.APIRequest{
+				Model:    model,
+				Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+			})
+
+			if out.Model != "auto" {
+				t.Fatalf("Model = %q, want auto", out.Model)
+			}
+			if len(out.SystemHints) != 1 || out.SystemHints[0] != "reason" {
+				t.Fatalf("SystemHints = %#v, want [reason]", out.SystemHints)
+			}
+			metadata := out.Messages[0].Metadata
+			hints, ok := metadata["system_hints"].([]string)
+			if !ok || len(hints) != 1 || hints[0] != "reason" {
+				t.Fatalf("message system_hints = %#v, want [reason]", metadata["system_hints"])
+			}
+		})
+	}
+}
+
+func TestConvertAPIRequestKeepsExplicitModelWithoutReasonHint(t *testing.T) {
+	out := testConvert(t, official.APIRequest{
+		Model:    "gpt-5-6-pro",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+
+	if out.Model != "gpt-5-6-pro" {
+		t.Fatalf("Model = %q, want gpt-5-6-pro", out.Model)
+	}
+	if len(out.SystemHints) != 0 {
+		t.Fatalf("SystemHints = %#v, want empty", out.SystemHints)
+	}
+	if _, ok := out.Messages[0].Metadata["system_hints"]; ok {
+		t.Fatalf("message unexpectedly includes system_hints: %#v", out.Messages[0].Metadata)
+	}
+}
+
+func TestConvertAPIRequestMapsReasoningEffortToWebEnum(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort string
+		want   string
+	}{
+		{name: "default", effort: "", want: "standard"},
+		{name: "minimal", effort: "minimal", want: "standard"},
+		{name: "low", effort: "low", want: "standard"},
+		{name: "medium", effort: "medium", want: "extended"},
+		{name: "standard", effort: "standard", want: "standard"},
+		{name: "extended", effort: "extended", want: "extended"},
+		{name: "high", effort: "high", want: "max"},
+		{name: "xhigh", effort: "xhigh", want: "max"},
+		{name: "max", effort: "max", want: "max"},
+		{name: "unknown", effort: "turbo", want: "standard"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := testConvert(t, official.APIRequest{
+				Model:           "gpt-5",
+				ReasoningEffort: tt.effort,
+				Messages:        []official.APIMessage{official.NewTextMessage("user", "hi")},
+			})
+			if out.ThinkingEffort != tt.want {
+				t.Fatalf("ThinkingEffort = %q, want %q", out.ThinkingEffort, tt.want)
+			}
+		})
 	}
 }
 
@@ -36,7 +116,7 @@ func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 			official.NewTextMessage("user", "list files"),
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	if len(out.Messages) < 2 {
 		t.Fatalf("messages = %d, want ≥ 2 (system + user + nudge)", len(out.Messages))
 	}
@@ -63,7 +143,7 @@ func TestConvertAPIRequestAppendsFinalNudgeForUserTurn(t *testing.T) {
 			official.NewTextMessage("user", "Working directory: /home/x\nlist"),
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	last := out.Messages[len(out.Messages)-1]
 	if last.Author.Role != "user" {
 		t.Fatalf("last role = %q, want user (nudge)", last.Author.Role)
@@ -91,7 +171,7 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 			{Role: "tool", ToolCallID: "c1", Name: "bash", Content: official.MessageContent{TextValue: "file1.py\nfile2.py"}},
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	// 找到 tool 消息
 	var toolMsg string
 	for _, m := range out.Messages {
@@ -122,7 +202,7 @@ func TestConvertAPIRequestSerializesHistoryToolCalls(t *testing.T) {
 			}{Name: "bash", Arguments: `{"command":"ls"}`}}}},
 		},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	// 找到 assistant 消息,确认 <tool_call> 标签已序列化
 	var found bool
 	for _, m := range out.Messages {
@@ -148,7 +228,7 @@ func TestConvertAPIRequestForcedToolChoice(t *testing.T) {
 		ToolChoice: choice,
 		Messages:   []official.APIMessage{official.NewTextMessage("user", "x")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	text, _ := out.Messages[0].Content.Parts[0].(string)
 	if !strings.Contains(text, `MUST call the tool "bash"`) {
 		t.Fatalf("missing forced-call line: %s", text)
@@ -164,7 +244,7 @@ func TestConvertAPIRequestToolChoiceNoneStripsProtocol(t *testing.T) {
 		ToolChoice: &official.ToolChoice{Type: "none"},
 		Messages:   []official.APIMessage{official.NewTextMessage("user", "just answer in text")},
 	}
-	out := ConvertAPIRequest(req, &tokens.Secret{}, "", nil)
+	out := testConvert(t, req)
 	text, _ := out.Messages[0].Content.Parts[0].(string)
 	if !strings.Contains(text, "DISABLED tool calling") {
 		t.Fatalf("missing none-warning: %s", text)

@@ -1,8 +1,12 @@
 package browserfp
 
 import (
-	"math/rand"
+	cryptorand "crypto/rand"
+	"encoding/binary"
+	mathrand "math/rand"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,13 +42,9 @@ func LanguageSlices() [][]string {
 
 // ─── 通用数据池 ──────────────────────────────────────────────────────────
 
-// UserAgents 真实 Chrome UA 池。
+// UserAgents 与 Chrome 150 TLS profile 对齐的桌面 UA 池。
 var UserAgents = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 }
 
 // Languages 浏览器 navigator.languages 组合。
@@ -59,8 +59,8 @@ var Languages = []Language{
 	{"ko", "ko,en"},
 }
 
-// Platforms 浏览器 navigator.platform 值。
-var Platforms = []string{"Win32", "Win32", "MacIntel", "Linux x86_64", "Linux armv8l", "Linux i686"}
+// Platforms 当前启用的 Chrome 150 平台。
+var Platforms = []string{"Win32"}
 
 // DocumentKeys document 上 own-enumerable 属性名池。
 var DocumentKeys = []string{
@@ -113,13 +113,10 @@ var ScriptURLs = []string{
 }
 
 // DefaultBuildID 当前 chatgpt.com 的 data-build 属性。
-const DefaultBuildID = "prod-dbbd612ddb47498515c3eecf8579bcafa0066e07"
+const DefaultBuildID = "prod-46437587156517d920436051cb9ab60a95f0503a"
 
-// VendorForPlatform 返回给定平台的 navigator.vendor 值。
-func VendorForPlatform(platform string) string {
-	if platform == "MacIntel" {
-		return "Apple Computer, Inc."
-	}
+// VendorForPlatform 返回 Chrome 的 navigator.vendor 值。
+func VendorForPlatform(string) string {
 	return "Google Inc."
 }
 
@@ -127,11 +124,13 @@ func VendorForPlatform(platform string) string {
 
 // Profile 浏览器指纹配置。
 type Profile struct {
+	UserAgent             string
 	WebGLUnmaskedRenderer string
 	WebGLUnmaskedVendor   string
 	Language              string
 	BuildID               string
 	Platform              string
+	Timezone              string
 	ScreenWidth           int
 	ScreenHeight          int
 	ScreenAvailHeight     int
@@ -145,63 +144,188 @@ type Profile struct {
 	DevicePixelRatio      float64
 }
 
+type screenProfile struct {
+	width      int
+	height     int
+	availInset int
+	pixelRatio float64
+}
+
+type deviceProfile struct {
+	userAgent           string
+	platform            string
+	language            Language
+	timezone            string
+	screens             []screenProfile
+	hardwareConcurrency []int
+	deviceMemory        []int
+	jsHeapSizeLimit     []int64
+}
+
+var deviceProfiles = []deviceProfile{
+	{
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+		platform:  "Win32",
+		language:  Language{"en-US", "en-US,en"},
+		timezone:  "America/Los_Angeles",
+		screens: []screenProfile{
+			{1920, 1080, 40, 1.0},
+			{1920, 1080, 40, 1.25},
+			{2560, 1440, 40, 1.0},
+			{1536, 864, 40, 1.25},
+			{1366, 768, 40, 1.0},
+		},
+		hardwareConcurrency: []int{4, 8, 12, 16},
+		deviceMemory:        []int{4, 8},
+		jsHeapSizeLimit:     []int64{2_147_483_648, 4_294_967_296},
+	},
+}
+
 // ─── 全局单例 ──────────────────────────────────────────────────────────────
 
-var current *Profile
+var (
+	current  atomic.Pointer[Profile]
+	initOnce sync.Once
+)
 
 // Init 启动时调用一次，生成全局唯一的 Profile。
-func Init() { current = Generate(nil) }
+func Init() {
+	initOnce.Do(func() {
+		current.Store(Generate(nil))
+	})
+}
 
-// Get 返回全局唯一的 Profile。
-func Get() *Profile { return current }
+// Get 返回全局唯一 Profile 的副本。未显式初始化时会惰性初始化。
+func Get() *Profile {
+	Init()
+	profile := current.Load()
+	if profile == nil {
+		profile = Generate(nil)
+		current.Store(profile)
+	}
+	clone := *profile
+	return &clone
+}
 
-// Generate 从真实数据池中随机生成 Profile。
-func Generate(rng *rand.Rand) *Profile {
+// Generate 从成套设备画像中随机生成 Profile。
+func Generate(rng *mathrand.Rand) *Profile {
+	return generateAt(rng, time.Now())
+}
+
+func generateAt(rng *mathrand.Rand, now time.Time) *Profile {
 	if rng == nil {
-		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+		rng = newRand()
 	}
 
-	lang := Languages[rng.Intn(len(Languages))]
-	platform := Platforms[rng.Intn(len(Platforms))]
-	sr := screenResolutions[rng.Intn(len(screenResolutions))]
-	sw, sh := sr[0]+rng.Intn(101)-50, sr[1]+rng.Intn(101)-50
-	if sw < 1024 {
-		sw = 1024
-	}
-	if sh < 600 {
-		sh = 600
-	}
-
-	vendorIdx := rng.Intn(len(webglUnmaskedVendors))
+	device := deviceProfiles[rng.Intn(len(deviceProfiles))]
+	screen := device.screens[rng.Intn(len(device.screens))]
+	webGLVendor, webGLRenderer := pickWebGL(rng, device.platform)
 
 	return &Profile{
-		WebGLUnmaskedVendor:   webglUnmaskedVendors[vendorIdx],
-		WebGLUnmaskedRenderer: webglUnmaskedRenderersMap[vendorIdx][rng.Intn(len(webglUnmaskedRenderersMap[vendorIdx]))],
-
-		Language: lang.Code,
-		BuildID:  DefaultBuildID,
-		Platform: platform,
-
-		ScreenWidth:       sw,
-		ScreenHeight:      sh,
-		ScreenAvailHeight: sh - (20 + rng.Intn(40)),
-		ScreenColorDepth:  24,
-
-		HardwareConcurrency: pickInt(rng, []int{4, 8, 12, 16, 20, 24, 32}),
-		DeviceMemory:        pickInt(rng, []int{4, 8, 16, 32}),
-		JSHeapSizeLimit:     pickInt64(rng, []int64{2_147_483_648, 4_294_967_296, 8_589_934_592, 17_179_869_184}),
-
-		NetworkDownlink: networkDownlinks[rng.Intn(len(networkDownlinks))],
-		NetworkRTT:      networkRTTs[rng.Intn(len(networkRTTs))],
-
-			DevicePixelRatio: devicePixelRatios[rng.Intn(len(devicePixelRatios))],
-
-		TimezoneOffset: (rng.Intn(23) - 12) * 60,
+		UserAgent:             device.userAgent,
+		WebGLUnmaskedVendor:   webGLVendor,
+		WebGLUnmaskedRenderer: webGLRenderer,
+		Language:              device.language.Code,
+		BuildID:               DefaultBuildID,
+		Platform:              device.platform,
+		Timezone:              device.timezone,
+		ScreenWidth:           screen.width,
+		ScreenHeight:          screen.height,
+		ScreenAvailHeight:     screen.height - screen.availInset,
+		ScreenColorDepth:      24,
+		HardwareConcurrency:   pickInt(rng, device.hardwareConcurrency),
+		DeviceMemory:          pickInt(rng, device.deviceMemory),
+		JSHeapSizeLimit:       pickInt64(rng, device.jsHeapSizeLimit),
+		NetworkDownlink:       pickFloat(rng, networkDownlinks, 10),
+		NetworkRTT:            pickRealisticRTT(rng),
+		TimezoneOffset:        timezoneOffsetMinutes(device.timezone, now),
+		DevicePixelRatio:      screen.pixelRatio,
 	}
 }
 
-// ─── 内部辅助 ──────────────────────────────────────────────────────────────
+func newRand() *mathrand.Rand {
+	var seedBytes [8]byte
+	if _, err := cryptorand.Read(seedBytes[:]); err == nil {
+		return mathrand.New(mathrand.NewSource(int64(binary.LittleEndian.Uint64(seedBytes[:]))))
+	}
+	return mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+}
 
-func pickStr(rng *rand.Rand, opts []string) string { return opts[rng.Intn(len(opts))] }
-func pickInt(rng *rand.Rand, opts []int) int        { return opts[rng.Intn(len(opts))] }
-func pickInt64(rng *rand.Rand, opts []int64) int64  { return opts[rng.Intn(len(opts))] }
+func pickWebGL(rng *mathrand.Rand, platform string) (string, string) {
+	type candidate struct {
+		vendor   string
+		renderer string
+	}
+
+	candidates := make([]candidate, 0, 32)
+	for vendorIndex, vendor := range webglUnmaskedVendors {
+		if vendorIndex >= len(webglUnmaskedRenderersMap) {
+			break
+		}
+		for _, renderer := range webglUnmaskedRenderersMap[vendorIndex] {
+			if webGLMatchesPlatform(platform, renderer) {
+				candidates = append(candidates, candidate{vendor: vendor, renderer: renderer})
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return "Google Inc. (Google)", "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+	}
+	selected := candidates[rng.Intn(len(candidates))]
+	return selected.vendor, selected.renderer
+}
+
+func webGLMatchesPlatform(platform, renderer string) bool {
+	switch platform {
+	case "Win32":
+		return strings.Contains(renderer, "Direct3D11") || strings.Contains(renderer, "SwiftShader")
+	case "MacIntel":
+		return strings.Contains(renderer, "Metal Renderer")
+	case "Linux x86_64":
+		return strings.Contains(renderer, "Mesa ") ||
+			strings.Contains(renderer, "radeonsi") ||
+			strings.Contains(renderer, "NVIDIA Corporation")
+	default:
+		return false
+	}
+}
+
+func timezoneOffsetMinutes(timezone string, now time.Time) int {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return 480
+	}
+	_, offsetSeconds := now.In(location).Zone()
+	return -offsetSeconds / 60
+}
+
+func pickRealisticRTT(rng *mathrand.Rand) int {
+	candidates := make([]int, 0, len(networkRTTs))
+	for _, rtt := range networkRTTs {
+		if rtt >= 50 && rtt <= 1000 {
+			candidates = append(candidates, rtt)
+		}
+	}
+	return pickInt(rng, candidates)
+}
+
+func pickFloat(rng *mathrand.Rand, opts []float64, fallback float64) float64 {
+	if len(opts) == 0 {
+		return fallback
+	}
+	return opts[rng.Intn(len(opts))]
+}
+
+func pickInt(rng *mathrand.Rand, opts []int) int {
+	if len(opts) == 0 {
+		return 0
+	}
+	return opts[rng.Intn(len(opts))]
+}
+
+func pickInt64(rng *mathrand.Rand, opts []int64) int64 {
+	if len(opts) == 0 {
+		return 0
+	}
+	return opts[rng.Intn(len(opts))]
+}

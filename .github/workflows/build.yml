@@ -1,34 +1,15 @@
 name: Build and Release
 
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - 'VERSION'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read version
-        id: version
-        shell: bash
-        run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
-
   build:
-    needs: version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,15 +35,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if [ -z "${version}" ] || [ "${version}" = "${tag}" ]; then
+            echo "Expected a tag in the form v<version>, got: ${tag}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-          VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_NAME: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
-          artifact="aurora-${VERSION}-${GOOS}-${GOARCH}"
+          artifact="aurora-${RELEASE_NAME}-${GOOS}-${GOARCH}"
           mkdir -p "${artifact}"
           output="aurora"
           if [ "${GOOS}" = "windows" ]; then
@@ -74,14 +67,12 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-${{ needs.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: aurora-${{ needs.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          name: aurora-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: aurora-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
           if-no-files-found: error
 
   release:
-    needs:
-      - version
-      - build
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -93,6 +84,6 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: ${{ needs.version.outputs.tag }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: dist/*.tar.gz

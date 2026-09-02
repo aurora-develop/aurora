@@ -107,7 +107,7 @@ REFUSAL_RETRIES=3
 # DEBUG_TOOL_LOG=tool_debug.log
 
 # External access token (accept ChatGPT access_token from request header)
-ENABLE_EXTERNAL_TOKEN=false
+ENABLE_EXTERNAL_TOKEN=true
 ```
 
 Details:
@@ -124,7 +124,7 @@ Details:
 - `ENABLE_HISTORY`: Set to `true` to preserve conversation history context in requests.
 - `TOOL_CALLING_ENABLED`: Set to `false` to ignore the `tools` field in requests and disable tool calling emulation.
 - `REFUSAL_RETRIES`: Maximum retry attempts when the model enters a "sandbox refusal" loop; defaults to `3`.
-- `ENABLE_EXTERNAL_TOKEN`: When set to `true`, accept externally provided ChatGPT access_tokens. A temporary account (with isolated TLS Client, UA, proxy, and browser fingerprint) is created per token, automatically released after 10 minutes of inactivity. Default `false`.
+- `ENABLE_EXTERNAL_TOKEN`: When set to `true`, accept externally provided ChatGPT access_tokens. A temporary account (with isolated TLS Client, UA, proxy, and browser fingerprint) is created per token, automatically released after 10 minutes of inactivity. Default `true`.
 - `DEBUG_TOOL_LOG`: Set to a file path to write detailed trace logs for each tool call parsing (for debugging).
 
 Local account files:

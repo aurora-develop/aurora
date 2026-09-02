@@ -390,7 +390,9 @@ type ResponseFormatText struct {
 
 // ReasoningConfig 对应 Responses API 的 reasoning 参数。
 type ReasoningConfig struct {
-	Effort string `json:"effort,omitempty"` // "low" | "medium" | "high"
+	Effort  string `json:"effort,omitempty"`  // "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+	Summary string `json:"summary,omitempty"` // "auto" | "concise" | "detailed"
+	Context string `json:"context,omitempty"` // "auto" | "current_turn" | "all_turns"
 }
 
 type responseInputMessage struct {

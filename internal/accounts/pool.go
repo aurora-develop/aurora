@@ -202,11 +202,11 @@ func (p *Pool) GetOrCreateTempAccount(token, userAgent string, proxyURL string) 
 		ScreenHeight:        1080,
 		HardwareConcurrency: 8,
 		Platform:            "Win32",
-		TLSProfileName:      "chrome_146",
+		TLSProfileName:      "chrome_150",
 	}
 	// 如果请求没传 User-Agent,用默认
 	if fp.UserAgent == "" {
-		fp.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+		fp.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 	}
 	// 解析 JWT 拿 chatgpt_account_id
 	chatGPTID := ExtractChatGPTAccountID(token)

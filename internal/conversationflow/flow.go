@@ -2,10 +2,10 @@ package conversationflow
 
 import (
 	"aurora/httpclient/bogdanfinn"
+	"aurora/internal/accounts"
 	"aurora/internal/authresolver"
 	"aurora/internal/chatgpt"
 	"aurora/internal/proxy"
-	"aurora/internal/accounts"
 	chatgpt_types "aurora/typings/chatgpt"
 	official_types "aurora/typings/official"
 	"aurora/util"
@@ -26,9 +26,9 @@ type SessionRegistry interface {
 
 // FlowOrchestrator 会话编排器，封装 chatGPT conversation 的完整执行链。
 type FlowOrchestrator struct {
-	Proxy           *proxy.Pool
-	Token           *accounts.Pool
-	Sessions        SessionRegistry
+	Proxy    *proxy.Pool
+	Token    *accounts.Pool
+	Sessions SessionRegistry
 }
 
 // ExecuteRequest 会话执行请求。
@@ -215,10 +215,8 @@ func (f *FlowOrchestrator) HandleToolCalling(c *gin.Context, req ExecuteRequest)
 			f.writeError(c, status, err)
 			return ExecuteResult{}
 		}
-		_ = wsConn
-
 		result := chatgpt.HandlerDetailedWithOptions(c, response, client, account, req.UID, translated, false, req.ReqModel, chatgpt.HandlerDetailedOptions{
-			Websocket:        nil,
+			Websocket:        wsConn,
 			ClientState:      clientState,
 			ArtifactDelivery: req.OriginalRequest.ArtifactDelivery,
 			ProxyURL:         proxyURL,
@@ -299,7 +297,7 @@ func (f *FlowOrchestrator) postConversationOrder(
 	chatgpt.POSTConversationInit(client, account, state)
 
 	var wsConn *websocket.Conn
-	if stream && !(account.Type == accounts.TypeNoAuth) {
+	if chatgpt.RequiresConversationWebsocket(stream, translatedRequest.ThinkingEffort) && account.Type.Satisfies(accounts.CapWebSocket) {
 		wsConn, err = chatgpt.DialChatWebsocketWithStateAndProxy(client, account, state, proxyURL)
 		if err != nil {
 			return nil, nil, nil, http.StatusInternalServerError, err

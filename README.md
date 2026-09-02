@@ -109,7 +109,7 @@ REFUSAL_RETRIES=3
 # DEBUG_TOOL_LOG=tool_debug.log
 
 # 外部 access_token（接受外部传入的 ChatGPT access_token）
-ENABLE_EXTERNAL_TOKEN=false
+ENABLE_EXTERNAL_TOKEN=true
 ```
 
 说明：
@@ -126,7 +126,7 @@ ENABLE_EXTERNAL_TOKEN=false
 - `ENABLE_HISTORY`：设为 `true` 时在请求中保留对话历史上下文。
 - `TOOL_CALLING_ENABLED`：设为 `false` 时忽略请求中的 `tools` 字段，关闭工具调用模拟。
 - `REFUSAL_RETRIES`：模型陷入 "sandbox 拒绝" 循环时的最大重试次数，默认 `3`。
-- `ENABLE_EXTERNAL_TOKEN`：设为 `true` 时接受外部传入的 ChatGPT access_token，自动创建隔离的临时账号（含独立 TLS Client、UA、代理、指纹），10 分钟无请求自动释放。默认 `false`。
+- `ENABLE_EXTERNAL_TOKEN`：设为 `true` 时接受外部传入的 ChatGPT access_token，自动创建隔离的临时账号（含独立 TLS Client、UA、代理、指纹），10 分钟无请求自动释放。默认 `true`。
 - `DEBUG_TOOL_LOG`：设为文件路径时，将每次工具解析的详细 trace 写入该文件（调试用）。
 
 本地账号文件：

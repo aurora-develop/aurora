@@ -76,7 +76,9 @@ func WriteChatCompletionDone(c *gin.Context, stopSent bool, model string, conver
 }
 
 // WriteUsageChunk 写入 token usage 的 SSE chunk。
-func WriteUsageChunk(c *gin.Context, model string, inputTokens, outputTokens int) {
+// cachedTokens / cacheWriteTokens 用于填充 prompt_tokens_details（缓存命中/写入 token 数）。
+// msSinceStart / msTTFT 为耗时信息（毫秒），嵌入 chunk 的元字段（HTTP headers 在首次 Flush 后不可写）。
+func WriteUsageChunk(c *gin.Context, model string, inputTokens, outputTokens, cachedTokens, cacheWriteTokens int, msSinceStart, msTTFT int64, ttftSet bool) {
 	chunk := map[string]interface{}{
 		"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
 		"object":  "chat.completion.chunk",
@@ -87,7 +89,15 @@ func WriteUsageChunk(c *gin.Context, model string, inputTokens, outputTokens int
 			"prompt_tokens":     inputTokens,
 			"completion_tokens": outputTokens,
 			"total_tokens":      inputTokens + outputTokens,
+			"prompt_tokens_details": map[string]interface{}{
+				"cached_tokens":      cachedTokens,
+				"cache_write_tokens": cacheWriteTokens,
+			},
 		},
+		"ms_since_start": msSinceStart,
+	}
+	if ttftSet {
+		chunk["ms_ttft"] = msTTFT
 	}
 	data, _ := json.Marshal(chunk)
 	c.Writer.WriteString("data: " + string(data) + "\n\n")

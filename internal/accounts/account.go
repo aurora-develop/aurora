@@ -154,8 +154,8 @@ func (a *Account) InitClient() error {
 // resolveTLSProfile 映射指纹画像名到 tls-client profile
 func resolveTLSProfile(name string) profiles.ClientProfile {
 	switch name {
-	case "chrome_146":
-		return profiles.Chrome_146
+	case "chrome_150":
+		return profiles.Chrome_150
 	case "safari_16_0":
 		return profiles.Safari_16_0
 	case "safari_ios_18_5":
@@ -165,6 +165,6 @@ func resolveTLSProfile(name string) profiles.ClientProfile {
 	case "safari_ipad_15_6":
 		return profiles.Safari_Ipad_15_6
 	default:
-		return profiles.Chrome_146
+		return profiles.Chrome_150
 	}
 }
