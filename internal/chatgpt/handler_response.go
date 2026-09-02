@@ -74,29 +74,11 @@ func parseConversationEvent(line string, state *sseparser.PatchState, model stri
 		}
 		return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
 	}
-	if text, ok := raw["v"].(string); ok && raw["p"] == nil {
+	if text, ok := raw["v"].(string); ok && raw["p"] == nil && raw["o"] == nil {
 		sseparser.EnsurePatchDefaults(state)
 		current, _ := state.Response.Message.Content.Parts[0].(string)
 		state.Response.Message.Content.Parts[0] = current + text
 		return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
-	}
-
-	// 裸补丁数组: {"v":[...]} 或省略 p 的变体 {"o":"patch","v":[...]}
-	if batch, ok := raw["v"].([]interface{}); ok && raw["p"] == nil {
-		applied := false
-		sseparser.EnsurePatchDefaults(state)
-		for _, item := range batch {
-			op, ok := item.(map[string]interface{})
-			if !ok { continue }
-			subPath, _ := op["p"].(string)
-			subOp, _ := op["o"].(string)
-			if sseparser.ApplyPatch(state, subPath, subOp, op["v"]) {
-				applied = true
-			}
-		}
-		if applied {
-			return conversationStreamEvent{response: state.Response, messageID: state.Response.Message.ID, channel: state.Channel}, true
-		}
 	}
 
 	if patchPath, ok := raw["p"].(string); ok {
@@ -201,7 +183,6 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	artifactState := newArtifactAccumulator()
 	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
 	var patchState sseparser.PatchState
-	var citePipeline sseparser.CiteStreamPipeline
 	var handoffTopicID string
 	var currentEvent string
 	var readingWebsocket bool
@@ -263,7 +244,6 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	finalizeArtifacts := func() {
 		emitSentinels(materializeArtifactEvents(client, account, convId, artifactState.Finalize(), artifactConfig))
 	}
-	finalText := func() string { return sseparser.ReplaceCiteMarkers(previous_text.Text, patchState.CiteAlts) }
 readLoop:
 	for {
 		line, err := reader.ReadString('\n')
@@ -290,15 +270,6 @@ readLoop:
 						currentEvent = ""
 						continue readLoop
 					}
-				}
-				if flushed := citePipeline.Flush(patchState.CiteAlts); flushed != "" {
-					if stream {
-						flushChunk := official_types.NewChatCompletionChunk(flushed, model)
-						flushChunk.ConversationID = convId
-						c.Writer.WriteString("data: " + flushChunk.String() + "\n\n")
-						c.Writer.Flush()
-					}
-					previous_text.Text += flushed
 				}
 				finalizeArtifacts()
 				break readLoop
@@ -337,8 +308,6 @@ readLoop:
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
 				deltaText := sseparser.NormalizeContentDelta(previous_text.Text, streamEvent.text)
-				// cite 标记流式处理
-				deltaText = citePipeline.Feed(patchState.CiteAlts, deltaText)
 				if streamEvent.channel != "" {
 					activeChannel = streamEvent.channel
 				}
@@ -360,7 +329,7 @@ readLoop:
 						if max_tokens && convId != "" && assistantMessageID != "" {
 							finalizeArtifacts()
 							return HandlerResult{
-								Text:              strings.Join(imgSource, "") + finalText(),
+								Text:              strings.Join(imgSource, "") + previous_text.Text,
 								ThinkingText:      thinkingText,
 								ConversationID:    convId,
 								ParentMessageID:   assistantMessageID,
@@ -378,7 +347,7 @@ readLoop:
 						}
 						finalizeArtifacts()
 						return HandlerResult{
-							Text:              strings.Join(imgSource, "") + finalText(),
+							Text:              strings.Join(imgSource, "") + previous_text.Text,
 							ThinkingText:      thinkingText,
 							ConversationID:    convId,
 							ParentMessageID:   assistantMessageID,
@@ -423,7 +392,7 @@ readLoop:
 					if max_tokens && convId != "" && assistantMessageID != "" {
 						finalizeArtifacts()
 						return HandlerResult{
-							Text:              strings.Join(imgSource, "") + finalText(),
+							Text:              strings.Join(imgSource, "") + previous_text.Text,
 							ThinkingText:      thinkingText,
 							ConversationID:    convId,
 							ParentMessageID:   assistantMessageID,
@@ -441,7 +410,7 @@ readLoop:
 					}
 					finalizeArtifacts()
 					return HandlerResult{
-						Text:              strings.Join(imgSource, "") + finalText(),
+						Text:              strings.Join(imgSource, "") + previous_text.Text,
 						ThinkingText:      thinkingText,
 						ConversationID:    convId,
 						ParentMessageID:   assistantMessageID,
@@ -482,12 +451,6 @@ readLoop:
 				continue
 			}
 			if !(original_response.Message.Author.Role == "assistant" || (original_response.Message.Author.Role == "tool" && original_response.Message.Content.ContentType != "text")) || original_response.Message.Content.Parts == nil {
-				continue
-			}
-			if original_response.Message.Metadata.IsThinkingPreambleMessage {
-				continue
-			}
-			if original_response.Message.Channel == "commentary" {
 				continue
 			}
 			if original_response.Message.Metadata.MessageType == "" && activeChannel != "final" {
@@ -561,15 +524,6 @@ readLoop:
 			}
 			if response_string == "" {
 				response_string = chatgpt.ConvertToString(&original_response, &previous_text, isRole, model)
-				if stream && response_string != "" && strings.HasPrefix(response_string, "data: ") {
-					var chunk official_types.ChatCompletionChunk
-					if err := json.Unmarshal([]byte(strings.TrimPrefix(response_string, "data: ")), &chunk); err == nil {
-						delta := chunk.Choices[0].Delta.Content
-						replaced := citePipeline.Feed(patchState.CiteAlts, delta)
-						chunk.Choices[0].Delta.Content = replaced
-						response_string = "data: " + chunk.String() + "\n\n"
-					}
-				}
 			}
 			if response_string == "" {
 				if isEnd {
@@ -606,7 +560,7 @@ readLoop:
 				}
 				finalizeArtifacts()
 				return HandlerResult{
-					Text:              strings.Join(imgSource, "") + finalText(),
+					Text:              strings.Join(imgSource, "") + previous_text.Text,
 					ThinkingText:      thinkingText,
 					ConversationID:    convId,
 					ParentMessageID:   assistantMessageID,
@@ -627,7 +581,7 @@ readLoop:
 	if !max_tokens {
 		finalizeArtifacts()
 		return HandlerResult{
-			Text:              strings.Join(imgSource, "") + finalText(),
+			Text:              strings.Join(imgSource, "") + previous_text.Text,
 			ThinkingText:      thinkingText,
 			ConversationID:    convId,
 			ParentMessageID:   assistantMessageID,
@@ -640,7 +594,7 @@ readLoop:
 	}
 	finalizeArtifacts()
 	return HandlerResult{
-		Text:              strings.Join(imgSource, "") + finalText(),
+		Text:              strings.Join(imgSource, "") + previous_text.Text,
 		ThinkingText:      thinkingText,
 		ConversationID:    convId,
 		ParentMessageID:   assistantMessageID,

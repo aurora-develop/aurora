@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -110,10 +109,8 @@ func Init() (*App, error) {
 			// exchange 成功后从 access_token 解析 chatgpt_account_id
 			acct.ChatGPTAccountID = accounts.ExtractChatGPTAccountID(acct.Token)
 			acct.Status = accounts.StatusActive
-			fmt.Printf("[bootstrap] session_token exchanged OK, token_len=%d\n", len(acct.Token))
 		} else {
 			acct.Status = accounts.StatusExpired
-			fmt.Printf("[bootstrap] session_token exchange FAILED\n")
 		}
 		accs = append(accs, acct)
 	}
