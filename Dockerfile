@@ -38,8 +38,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags='-s -w -buildid=' -o /out/aurora .
 
-# ---- 阶段 2: 运行镜像(distroless,~2MB,无 shell 更安全)----
+# ---- 阶段 2: 运行镜像(distroless,~2MB,无 shell更安全)----
 FROM gcr.io/distroless/static-debian12:nonroot
+# 应用使用相对路径读取凭据文件；固定到 / 以匹配 Docker Compose 的根目录挂载。
+WORKDIR /
 COPY --from=build /out/aurora /aurora
 EXPOSE 8080
 USER nonroot:nonroot
