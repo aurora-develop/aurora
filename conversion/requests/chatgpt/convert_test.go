@@ -134,26 +134,38 @@ func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 }
 
 func TestConvertAPIRequestAppendsFinalNudgeForUserTurn(t *testing.T) {
+	// FinalNudge removed: capability folded into the <tool_calling_protocol> block.
+	// This test now verifies: no trailing nudge message, protocol tag wrapping,
+	// and the user's own system prompt staying first.
 	req := official.APIRequest{
 		Model: "gpt-5",
 		Tools: []official.Tool{
 			{Type: "function", Function: official.ToolFunction{Name: "bash"}},
 		},
 		Messages: []official.APIMessage{
-			official.NewTextMessage("user", "Working directory: /home/x\nlist"),
+			official.NewTextMessage("system", "You are a helpful assistant."),
+			official.NewTextMessage("user", "list files in /home/x"),
 		},
 	}
 	out := testConvert(t, req)
 	last := out.Messages[len(out.Messages)-1]
 	if last.Author.Role != "user" {
-		t.Fatalf("last role = %q, want user (nudge)", last.Author.Role)
+		t.Fatalf("last role = %q, want user", last.Author.Role)
 	}
 	lastText, _ := last.Content.Parts[0].(string)
-	if !strings.Contains(lastText, "READ CAREFULLY") {
-		t.Fatalf("nudge missing READ CAREFULLY: %s", lastText)
+	if !strings.Contains(lastText, "list files in /home/x") {
+		t.Fatalf("last message should be original user text, got: %s", lastText)
 	}
-	if !strings.Contains(lastText, "working directory: /home/x") {
-		t.Fatalf("nudge missing wd: %s", lastText)
+	if strings.Contains(lastText, "READ CAREFULLY") {
+		t.Fatal("nudge should not be appended to the user message")
+	}
+	first := out.Messages[0]
+	firstText, _ := first.Content.Parts[0].(string)
+	if !strings.HasPrefix(firstText, "You are a helpful assistant.") {
+		t.Fatalf("user system prompt should come first, got: %s", firstText[:60])
+	}
+	if !strings.Contains(firstText, "<tool_calling_protocol>") {
+		t.Fatal("protocol block should be wrapped in <tool_calling_protocol>")
 	}
 }
 
@@ -178,13 +190,13 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 			continue
 		}
 		text, _ := m.Content.Parts[0].(string)
-		if strings.HasPrefix(text, "[tool result of bash]:") {
+		if strings.Contains(text, "[tool result of") {
 			toolMsg = text
 			break
 		}
 	}
-	if toolMsg == "" {
-		t.Fatalf("converted tool result message not found: %#v", out.Messages)
+	if !strings.Contains(toolMsg, "[tool result of bash]") {
+		t.Fatalf("tool message missing  prefix: %q", toolMsg)
 	}
 	if !strings.Contains(toolMsg, "file1.py") {
 		t.Fatalf("tool message missing content: %q", toolMsg)
