@@ -102,6 +102,38 @@ func TestConvertAPIRequestMapsReasoningEffortToWebEnum(t *testing.T) {
 	}
 }
 
+// 验证 reasoning_effort 也会触发 system_hints:["reason"](不只是模型名)。
+func TestConvertAPIRequestReasoningEffortTriggersSystemHint(t *testing.T) {
+	// high effort + 普通模型名 → 应注入 system_hints
+	out := testConvert(t, official.APIRequest{
+		Model:           "gpt-5-6",
+		ReasoningEffort: "high",
+		Messages:        []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if out.Model != "auto" {
+		t.Fatalf("Model = %q, want auto (reason hint should remap)", out.Model)
+	}
+	if len(out.SystemHints) != 1 || out.SystemHints[0] != "reason" {
+		t.Fatalf("SystemHints = %#v, want [\"reason\"]", out.SystemHints)
+	}
+	// extended 也应触发
+	out2 := testConvert(t, official.APIRequest{
+		Model: "gpt-4o-mini", ReasoningEffort: "extended",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if len(out2.SystemHints) != 1 || out2.SystemHints[0] != "reason" {
+		t.Fatalf("extended: SystemHints = %#v, want [\"reason\"]", out2.SystemHints)
+	}
+	// 无 effort + 普通模型 → 不注入
+	out3 := testConvert(t, official.APIRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if len(out3.SystemHints) != 0 {
+		t.Fatalf("no effort: SystemHints = %#v, want empty", out3.SystemHints)
+	}
+}
+
 func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 	req := official.APIRequest{
 		Model: "gpt-5",

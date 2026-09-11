@@ -23,7 +23,7 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	if model == "" {
 		model = "auto"
 	}
-	if usesReasonSystemHint(model) {
+	if usesReasonSystemHint(model, api_request.ReasoningEffort) {
 		chatgpt_request.Model = "auto"
 		chatgpt_request.SystemHints = []string{"reason"}
 	} else {
@@ -167,13 +167,20 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	return chatgpt_request
 }
 
-func usesReasonSystemHint(model string) bool {
+// usesReasonSystemHint 判断是否应向上游注入 system_hints:["reason"] 开启思考模式。
+// 触发条件(任一):
+//   - 模型名为显式思考模型(gpt-5-6-t-mini / gpt-5-6-thinking)
+//   - reasoning_effort 表明用户要思考(extended / max 等,高于 standard)
+func usesReasonSystemHint(model string, reasoningEffort string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gpt-5-6-t-mini", "gpt-5-6-thinking":
 		return true
-	default:
-		return false
 	}
+	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
+	case "medium", "extended", "high", "xhigh", "max":
+		return true
+	}
+	return false
 }
 
 func ConvertTTSAPIRequest(input string) chatgpt_types.ChatGPTRequest {
