@@ -23,7 +23,7 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	if model == "" {
 		model = "auto"
 	}
-	if usesReasonSystemHint(model) {
+	if usesReasonSystemHint(model, api_request.ReasoningEffort) {
 		chatgpt_request.Model = "auto"
 		chatgpt_request.SystemHints = []string{"reason"}
 	} else {
@@ -86,28 +86,34 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	hasTools := toolsBlock != ""
 
 	// 收集所有 system 消息(用于 system 头部聚合)
-	var systemMessages []string
-	if hasTools {
-		systemMessages = append(systemMessages, toolsBlock)
-	}
-	if responseFormatHint != "" {
-		systemMessages = append(systemMessages, responseFormatHint)
-	}
-	if stopHint != "" {
-		systemMessages = append(systemMessages, stopHint)
-	}
-	if maxTokenHint != "" {
-		systemMessages = append(systemMessages, maxTokenHint)
-	}
+	var systemParts []string
 	for _, apiMessage := range api_request.Messages {
 		if apiMessage.Role == "system" {
-			systemMessages = append(systemMessages, apiMessage.Text())
+			if text := apiMessage.Text(); text != "" {
+				systemParts = append(systemParts, text)
+			}
 		}
 	}
+	if hasTools {
+		systemParts = append(systemParts, "<tool_calling_protocol>"+"\n"+toolsBlock+"\n"+"</tool_calling_protocol>")
+	}
+	if responseFormatHint != "" {
+		systemParts = append(systemParts, responseFormatHint)
+	}
+	if stopHint != "" {
+		systemParts = append(systemParts, stopHint)
+	}
+	if maxTokenHint != "" {
+		systemParts = append(systemParts, maxTokenHint)
+	}
+	// 协议块在用户 prompt 之后时,加一句衔接说明,声明协议优先级
+	if hasTools && len(systemParts) > 1 {
+		systemParts = append(systemParts, "Note: The <tool_calling_protocol> block above is a runtime-injected capability layer. It does not override your identity or instructions — it only defines HOW to emit tool calls when you decide to use a tool.")
+	}
 
-	if len(systemMessages) > 0 {
+	if len(systemParts) > 0 {
 		// 拼成单个 system 文本,作为首条 system 消息
-		chatgpt_request.AddMessage("system", strings.Join(systemMessages, "\n\n"))
+		chatgpt_request.AddMessage("system", strings.Join(systemParts, "\n\n"))
 	}
 
 	for _, apiMessage := range api_request.Messages {
@@ -158,23 +164,23 @@ func ConvertAPIRequest(api_request official_types.APIRequest, account *accounts.
 	}
 
 	// 末尾追加 FinalNudge(取决于最后一条消息的角色),仅在启用工具调用时
-	if hasTools {
-		nudge := toolcall.FinalNudge(api_request.Tools, api_request.Messages)
-		if nudge != "" {
-			chatgpt_request.AddMessage("user", nudge)
-		}
-	}
-
 	return chatgpt_request
 }
 
-func usesReasonSystemHint(model string) bool {
+// usesReasonSystemHint 判断是否应向上游注入 system_hints:["reason"] 开启思考模式。
+// 触发条件(任一):
+//   - 模型名为显式思考模型(gpt-5-6-t-mini / gpt-5-6-thinking)
+//   - reasoning_effort 表明用户要思考(extended / max 等,高于 standard)
+func usesReasonSystemHint(model string, reasoningEffort string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gpt-5-6-t-mini", "gpt-5-6-thinking":
 		return true
-	default:
-		return false
 	}
+	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
+	case "medium", "extended", "high", "xhigh", "max":
+		return true
+	}
+	return false
 }
 
 func ConvertTTSAPIRequest(input string) chatgpt_types.ChatGPTRequest {

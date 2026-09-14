@@ -102,6 +102,38 @@ func TestConvertAPIRequestMapsReasoningEffortToWebEnum(t *testing.T) {
 	}
 }
 
+// 验证 reasoning_effort 也会触发 system_hints:["reason"](不只是模型名)。
+func TestConvertAPIRequestReasoningEffortTriggersSystemHint(t *testing.T) {
+	// high effort + 普通模型名 → 应注入 system_hints
+	out := testConvert(t, official.APIRequest{
+		Model:           "gpt-5-6",
+		ReasoningEffort: "high",
+		Messages:        []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if out.Model != "auto" {
+		t.Fatalf("Model = %q, want auto (reason hint should remap)", out.Model)
+	}
+	if len(out.SystemHints) != 1 || out.SystemHints[0] != "reason" {
+		t.Fatalf("SystemHints = %#v, want [\"reason\"]", out.SystemHints)
+	}
+	// extended 也应触发
+	out2 := testConvert(t, official.APIRequest{
+		Model: "gpt-4o-mini", ReasoningEffort: "extended",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if len(out2.SystemHints) != 1 || out2.SystemHints[0] != "reason" {
+		t.Fatalf("extended: SystemHints = %#v, want [\"reason\"]", out2.SystemHints)
+	}
+	// 无 effort + 普通模型 → 不注入
+	out3 := testConvert(t, official.APIRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []official.APIMessage{official.NewTextMessage("user", "hi")},
+	})
+	if len(out3.SystemHints) != 0 {
+		t.Fatalf("no effort: SystemHints = %#v, want empty", out3.SystemHints)
+	}
+}
+
 func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 	req := official.APIRequest{
 		Model: "gpt-5",
@@ -134,26 +166,38 @@ func TestConvertAPIRequestInjectsToolInstructions(t *testing.T) {
 }
 
 func TestConvertAPIRequestAppendsFinalNudgeForUserTurn(t *testing.T) {
+	// FinalNudge removed: capability folded into the <tool_calling_protocol> block.
+	// This test now verifies: no trailing nudge message, protocol tag wrapping,
+	// and the user's own system prompt staying first.
 	req := official.APIRequest{
 		Model: "gpt-5",
 		Tools: []official.Tool{
 			{Type: "function", Function: official.ToolFunction{Name: "bash"}},
 		},
 		Messages: []official.APIMessage{
-			official.NewTextMessage("user", "Working directory: /home/x\nlist"),
+			official.NewTextMessage("system", "You are a helpful assistant."),
+			official.NewTextMessage("user", "list files in /home/x"),
 		},
 	}
 	out := testConvert(t, req)
 	last := out.Messages[len(out.Messages)-1]
 	if last.Author.Role != "user" {
-		t.Fatalf("last role = %q, want user (nudge)", last.Author.Role)
+		t.Fatalf("last role = %q, want user", last.Author.Role)
 	}
 	lastText, _ := last.Content.Parts[0].(string)
-	if !strings.Contains(lastText, "READ CAREFULLY") {
-		t.Fatalf("nudge missing READ CAREFULLY: %s", lastText)
+	if !strings.Contains(lastText, "list files in /home/x") {
+		t.Fatalf("last message should be original user text, got: %s", lastText)
 	}
-	if !strings.Contains(lastText, "working directory: /home/x") {
-		t.Fatalf("nudge missing wd: %s", lastText)
+	if strings.Contains(lastText, "READ CAREFULLY") {
+		t.Fatal("nudge should not be appended to the user message")
+	}
+	first := out.Messages[0]
+	firstText, _ := first.Content.Parts[0].(string)
+	if !strings.HasPrefix(firstText, "You are a helpful assistant.") {
+		t.Fatalf("user system prompt should come first, got: %s", firstText[:60])
+	}
+	if !strings.Contains(firstText, "<tool_calling_protocol>") {
+		t.Fatal("protocol block should be wrapped in <tool_calling_protocol>")
 	}
 }
 
@@ -178,13 +222,13 @@ func TestConvertAPIRequestHandlesToolResult(t *testing.T) {
 			continue
 		}
 		text, _ := m.Content.Parts[0].(string)
-		if strings.HasPrefix(text, "[tool result of bash]:") {
+		if strings.Contains(text, "[tool result of") {
 			toolMsg = text
 			break
 		}
 	}
-	if toolMsg == "" {
-		t.Fatalf("converted tool result message not found: %#v", out.Messages)
+	if !strings.Contains(toolMsg, "[tool result of bash]") {
+		t.Fatalf("tool message missing  prefix: %q", toolMsg)
 	}
 	if !strings.Contains(toolMsg, "file1.py") {
 		t.Fatalf("tool message missing content: %q", toolMsg)
