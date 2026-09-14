@@ -535,7 +535,7 @@ readLoop:
 			if (original_response.Message.Metadata.MessageType != "next" && original_response.Message.Metadata.MessageType != "continue" && activeChannel != "final") || !strings.HasSuffix(original_response.Message.Content.ContentType, "text") {
 				continue
 			}
-			if original_response.Message.EndTurn != nil {
+			if endTurn, ok := original_response.Message.EndTurn.(bool); ok && endTurn {
 				if waitSource {
 					waitSource = false
 				}
@@ -632,12 +632,16 @@ readLoop:
 			}
 
 			if original_response.Message.Metadata.FinishDetails != nil {
-				if original_response.Message.Metadata.FinishDetails.Type == "max_tokens" {
-					max_tokens = true
-				}
 				finish_reason = original_response.Message.Metadata.FinishDetails.Type
+				if finish_reason == "max_tokens" {
+					max_tokens = true
+					finish_reason = "length"
+				}
 			}
 			if isEnd {
+				if finish_reason == "" {
+					finish_reason = "stop"
+				}
 				flushCites()
 				if streamOutput {
 					final_line := official_types.StopChunkWithConversation(finish_reason, model, convId)
