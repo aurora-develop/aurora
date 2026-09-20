@@ -136,7 +136,15 @@ ENABLE_EXTERNAL_TOKEN=true
 - `refresh_tokens.txt`：每行一个 OpenAI `refresh_token`（支持 `token:team_id` 格式），启动时自动交换为 `access_token`，过期后自动续期。
 - `session_tokens.txt`：每行一个 ChatGPT `session_token`（支持 `token:team_id` 格式），启动时自动交换为 `access_token`，过期后自动续期。
 - `proxies.txt`：每行一个代理 URL（需要包含端口），与 `PROXY_URL` 一起组成代理池。
+## 项目趋势
 
+<div align="center">
+
+<a href="https://trendshift.io/repositories/9094?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-9094" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/9094" alt="aurora-develop%2Faurora | Trendshift" width="250" height="55"/></a>
+
+</div>
+
+---
 ## 注意事项
 
 - 图片、TTS、文件能力依赖登录态 access token，免费 UUID 账号不可用。
