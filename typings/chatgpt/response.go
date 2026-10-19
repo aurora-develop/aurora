@@ -37,9 +37,16 @@ type Metadata struct {
 	MessageType   string         `json:"message_type"`
 	FinishDetails *FinishDetails `json:"finish_details"`
 	ModelSlug     string         `json:"model_slug"`
+	ModelDILV2    *ModelDILV2    `json:"model_dil_v2,omitempty"`
 	// IsThinkingPreambleMessage 标记"思考前导"消息(新版 SSE)。
 	// 这类消息是 assistant 在正式回答前的引导语,不应输出给用户。
 	IsThinkingPreambleMessage bool `json:"is_thinking_preamble_message,omitempty"`
+}
+
+// ModelDILV2 是 ChatGPT 为支持 GenUI/DIL 的客户端下发的降级元数据。
+// fallbackMarkdown 面向无法渲染交互式组件的客户端，可直接作为纯文本输出。
+type ModelDILV2 struct {
+	FallbackMarkdown string `json:"fallbackMarkdown"`
 }
 type Citation struct {
 	Metadata CitaMeta `json:"metadata"`

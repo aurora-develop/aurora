@@ -454,6 +454,26 @@ func ApplyPatch(state *PatchState, patchPath string, operation string, value int
 		if text, ok := value.(string); ok {
 			state.Response.Message.Metadata.ModelSlug = text
 		}
+	case patchPath == "/message/metadata/model_dil_v2":
+		data, err := json.Marshal(value)
+		if err != nil {
+			break
+		}
+		var modelDIL chatgpt_types.ModelDILV2
+		if json.Unmarshal(data, &modelDIL) == nil {
+			state.Response.Message.Metadata.ModelDILV2 = &modelDIL
+		}
+	case patchPath == "/message/metadata/model_dil_v2/fallbackMarkdown":
+		if text, ok := value.(string); ok {
+			if state.Response.Message.Metadata.ModelDILV2 == nil {
+				state.Response.Message.Metadata.ModelDILV2 = &chatgpt_types.ModelDILV2{}
+			}
+			if operation == "append" {
+				state.Response.Message.Metadata.ModelDILV2.FallbackMarkdown += text
+			} else {
+				state.Response.Message.Metadata.ModelDILV2.FallbackMarkdown = text
+			}
+		}
 	case patchPath == "/message/metadata/finish_details":
 		if value == nil {
 			state.Response.Message.Metadata.FinishDetails = nil

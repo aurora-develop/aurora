@@ -210,6 +210,7 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 	artifactState := newArtifactAccumulator()
 	artifactConfig := ArtifactStreamConfig{Delivery: options.ArtifactDelivery}
 	var patchState sseparser.PatchState
+	var dilPipeline sseparser.DILStreamPipeline
 	var citePipeline sseparser.CiteStreamPipeline
 	var handoffTopicID string
 	var currentEvent string
@@ -273,13 +274,27 @@ func HandlerDetailedWithOptions(c *gin.Context, response *http.Response, client 
 		emitSentinels(materializeArtifactEvents(client, account, convId, artifactState.Finalize(), artifactConfig))
 	}
 	finalText := func() string {
+		text := previous_text.Text
 		if usedChunkEvents {
-			return visibleText.String()
+			text = visibleText.String()
 		}
-		return sseparser.ReplaceCiteMarkers(previous_text.Text, patchState.CiteAlts)
+		// 非流式输出以及 Responses API 的抑制输出路径可以直接使用上游
+		// 为不支持 GenUI 的客户端生成的 fallbackMarkdown。Chat Completions
+		// 真流式路径已经逐块做了语法级降级，必须保持最终文本与已发送内容一致。
+		if !streamOutput {
+			fallback := sseparser.ModelDILFallback(original_response)
+			if fallback == "" {
+				fallback = sseparser.ModelDILFallback(patchState.Response)
+			}
+			if fallback != "" {
+				text = fallback
+			}
+		}
+		return sseparser.NormalizeAssistantText(text, patchState.CiteAlts)
 	}
 	flushCites := func() {
-		flushed := citePipeline.Flush(patchState.CiteAlts)
+		flushed := citePipeline.Feed(patchState.CiteAlts, dilPipeline.Flush())
+		flushed += citePipeline.Flush(patchState.CiteAlts)
 		if flushed == "" {
 			return
 		}
@@ -359,8 +374,6 @@ readLoop:
 					sentinel = append(sentinel, streamEvent.chunk.Sentinel)
 				}
 				deltaText := sseparser.NormalizeContentDelta(previous_text.Text, streamEvent.text)
-				// cite 标记流式处理
-				deltaText = citePipeline.Feed(patchState.CiteAlts, deltaText)
 				if streamEvent.channel != "" {
 					activeChannel = streamEvent.channel
 				}
@@ -415,6 +428,10 @@ readLoop:
 					currentEvent = ""
 					continue
 				}
+				// 先剥离跨帧 DIL/GenUI 语法，再处理引用标记，避免任意新组件
+				// 直接泄漏到标准 OpenAI 文本响应。analysis 通道不会进入正文管道。
+				deltaText = dilPipeline.Feed(deltaText)
+				deltaText = citePipeline.Feed(patchState.CiteAlts, deltaText)
 				var terminalChunk *official_types.ChatCompletionChunk
 				if streamOutput {
 					outChunk := *streamEvent.chunk
@@ -604,6 +621,7 @@ readLoop:
 					var chunk official_types.ChatCompletionChunk
 					if err := json.Unmarshal([]byte(strings.TrimPrefix(response_string, "data: ")), &chunk); err == nil {
 						delta := chunk.Choices[0].Delta.Content
+						delta = dilPipeline.Feed(delta)
 						replaced := citePipeline.Feed(patchState.CiteAlts, delta)
 						chunk.Choices[0].Delta.Content = replaced
 						response_string = "data: " + chunk.String() + "\n\n"
