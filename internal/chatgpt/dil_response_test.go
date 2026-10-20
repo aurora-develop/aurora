@@ -33,6 +33,29 @@ func TestHandlerPrefersModelDILFallbackMarkdown(t *testing.T) {
 	}
 }
 
+func TestHandlerPreservesLinksFromModelDILFallbackMarkdown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-links"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-links"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"<box>原始组件</box>"}`,
+		`data: {"p":"/message/metadata/model_dil_v2/fallbackMarkdown","o":"append","v":"观看入口：\n- <Link url=\"https://example.com/watch\" title=\"立即观看\"/>"}`,
+		`data: {"p":"/message/metadata/finish_details","o":"replace","v":{"type":"stop"}}`,
+		`data: {"p":"/message/end_turn","o":"replace","v":true}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	result, output := runDILHandler(t, body, false, false)
+	want := "观看入口：\n- [立即观看](https://example.com/watch)"
+	if result.Text != want {
+		t.Fatalf("text = %q, want %q", result.Text, want)
+	}
+	if output != "" {
+		t.Fatalf("non-stream handler wrote output: %s", output)
+	}
+}
+
 func TestHandlerSuppressedStreamPrefersModelDILFallbackMarkdown(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := `data: {"conversation_id":"conv-dil","message":{"id":"msg-dil","author":{"role":"assistant"},"recipient":"all","content":{"content_type":"text","parts":["<box>原始组件</box>"]},"end_turn":true,"metadata":{"message_type":"next","finish_details":{"type":"stop"},"model_dil_v2":{"fallbackMarkdown":"Responses 普通文本"}}}}` + "\n\ndata: [DONE]\n\n"
@@ -80,6 +103,40 @@ func TestHandlerStreamDegradesUnknownDILComponents(t *testing.T) {
 	}
 	if strings.ContainsAny(streamed.String(), "<>{}") {
 		t.Fatalf("stream leaked DIL syntax: %q", streamed.String())
+	}
+}
+
+func TestHandlerStreamPreservesSplitLink(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.Join([]string{
+		`data: {"p":"/conversation_id","o":"replace","v":"conv-links"}`,
+		`data: {"p":"/message/id","o":"replace","v":"msg-links"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"观看入口：\n- <FutureLink ur"}`,
+		`data: {"p":"/message/content/parts/0","o":"append","v":"l=\"https://example.com/watch\" title=\"立即观看\"/>"}`,
+		`data: {"p":"/message/metadata/finish_details","o":"replace","v":{"type":"stop"}}`,
+		`data: {"p":"/message/end_turn","o":"replace","v":true}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	result, output := runDILHandler(t, body, true, false)
+	want := "观看入口：\n- [立即观看](https://example.com/watch)"
+	if result.Text != want {
+		t.Fatalf("text = %q, want %q", result.Text, want)
+	}
+	chunks := parseSSEChunks(t, output)
+	var streamed strings.Builder
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]interface{})
+		if len(choices) == 0 {
+			continue
+		}
+		delta, _ := choices[0].(map[string]interface{})["delta"].(map[string]interface{})
+		content, _ := delta["content"].(string)
+		streamed.WriteString(content)
+	}
+	if streamed.String() != want {
+		t.Fatalf("streamed text = %q, want %q; output=%s", streamed.String(), want, output)
 	}
 }
 

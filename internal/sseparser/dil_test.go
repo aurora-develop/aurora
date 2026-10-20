@@ -78,6 +78,52 @@ func TestDegradeDILToMarkdownGeneric(t *testing.T) {
 	}
 }
 
+func TestDegradeDILPreservesLinkAttributes(t *testing.T) {
+	input := `**观看入口：**
+
+- <Link url="https://www.netflix.com/jp/title/70184207" title="Netflix 日本"/>
+- <FutureCard href={'https://www.justwatch.com/jp/tv-show/shameless'} label="JustWatch"/>
+- <a href="https://example.com/a_(b)">成对链接</a>
+- <Link url={turn1product0.product_page.uri} title="查看商品及购买"/>
+- <Link href="javascript:alert(1)" title="不安全链接"/>
+`
+
+	want := `**观看入口：**
+
+- [Netflix 日本](https://www.netflix.com/jp/title/70184207)
+- [JustWatch](https://www.justwatch.com/jp/tv-show/shameless)
+- [成对链接](https://example.com/a_\(b\))
+- 查看商品及购买
+- 不安全链接
+`
+	if got := DegradeDILToMarkdown(input); got != want {
+		t.Fatalf("link degradation:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestDegradeDILPairedLinkUsesTitleWhenEmpty(t *testing.T) {
+	input := `<Card href={"https://example.com"} title="入口"></Card>`
+	if got, want := DegradeDILToMarkdown(input), `[入口](https://example.com)`; got != want {
+		t.Fatalf("empty paired link = %q, want %q", got, want)
+	}
+}
+
+func TestDILStreamPipelinePreservesSplitLink(t *testing.T) {
+	pipeline := &DILStreamPipeline{}
+	var got strings.Builder
+
+	got.WriteString(pipeline.Feed("入口：\n- <Future href={`htt"))
+	got.WriteString(pipeline.Feed("ps://example.com/watch?a=1&amp;b=2`} title=\"观看\"/>\n"))
+	got.WriteString(pipeline.Feed("- <a href=\"https://example.com/details\">详"))
+	got.WriteString(pipeline.Feed("情</a>"))
+	got.WriteString(pipeline.Flush())
+
+	want := "入口：\n- [观看](https://example.com/watch?a=1&b=2)\n- [详情](https://example.com/details)"
+	if got.String() != want {
+		t.Fatalf("stream link degradation = %q, want %q", got.String(), want)
+	}
+}
+
 func TestDegradeDILLeavesOrdinaryMarkdownUnchanged(t *testing.T) {
 	input := "普通 **Markdown**，集合 {x, y}，小数 {3.14}，比较 3 < 5。\n\n`<Widget/>`\n\n~~~html\n<Widget>{value}</Widget>\n~~~\n"
 	if got := DegradeDILToMarkdown(input); got != input {

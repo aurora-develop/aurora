@@ -2,6 +2,9 @@ package sseparser
 
 import (
 	"encoding/json"
+	"html"
+	neturl "net/url"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -69,6 +72,7 @@ func (p *DILStreamPipeline) Flush() string {
 func degradeDIL(text string, final bool) (string, bool) {
 	var out strings.Builder
 	out.Grow(len(text))
+	var tagStack []dilTagFrame
 
 	inlineTicks := 0
 	fenceTicks := 0
@@ -131,6 +135,9 @@ func degradeDIL(text string, final bool) (string, bool) {
 			}
 			token := text[i:end]
 			if isMarkupTag(token) {
+				if tag, ok := parseMarkupTag(token); ok {
+					degradeMarkupTag(&out, &tagStack, tag)
+				}
 				i = end
 				continue
 			}
@@ -170,8 +177,266 @@ func degradeDIL(text string, final bool) (string, bool) {
 		lineStart = text[i] == '\n'
 		i++
 	}
+	if final {
+		closeDILTagFrames(&out, tagStack, 0)
+	}
 
 	return out.String(), true
+}
+
+type dilTagAttribute struct {
+	literal string
+	static  bool
+}
+
+type dilMarkupTag struct {
+	name        string
+	closing     bool
+	selfClosing bool
+	attributes  map[string]dilTagAttribute
+}
+
+type dilTagFrame struct {
+	name            string
+	linkDestination string
+	fallbackLabel   string
+	contentStart    int
+	openedLink      bool
+	preserveIfEmpty bool
+}
+
+func degradeMarkupTag(out *strings.Builder, stack *[]dilTagFrame, tag dilMarkupTag) {
+	if tag.closing {
+		for i := len(*stack) - 1; i >= 0; i-- {
+			if (*stack)[i].name != tag.name {
+				continue
+			}
+			closeDILTagFrames(out, (*stack)[i:], 0)
+			*stack = (*stack)[:i]
+			return
+		}
+		return
+	}
+
+	destination, hasLinkAttribute := tagLinkDestination(tag.attributes)
+	label := tagLinkLabel(tag.attributes)
+	if tag.selfClosing {
+		switch {
+		case destination != "":
+			out.WriteString(markdownLink(label, destination))
+		case hasLinkAttribute && label != "":
+			out.WriteString(escapeMarkdownLabel(label))
+		}
+		return
+	}
+
+	frame := dilTagFrame{
+		name:            tag.name,
+		fallbackLabel:   label,
+		contentStart:    out.Len(),
+		preserveIfEmpty: hasLinkAttribute && label != "",
+	}
+	if destination != "" {
+		out.WriteByte('[')
+		frame.linkDestination = destination
+		frame.contentStart = out.Len()
+		frame.openedLink = true
+	}
+	*stack = append(*stack, frame)
+}
+
+func closeDILTagFrames(out *strings.Builder, frames []dilTagFrame, start int) {
+	for i := len(frames) - 1; i >= start; i-- {
+		frame := frames[i]
+		if frame.openedLink {
+			if out.Len() == frame.contentStart {
+				label := frame.fallbackLabel
+				if label == "" {
+					label = frame.linkDestination
+				}
+				out.WriteString(escapeMarkdownLabel(label))
+			}
+			out.WriteString("](")
+			out.WriteString(escapeMarkdownDestination(frame.linkDestination))
+			out.WriteByte(')')
+			continue
+		}
+		if frame.preserveIfEmpty && out.Len() == frame.contentStart {
+			out.WriteString(escapeMarkdownLabel(frame.fallbackLabel))
+		}
+	}
+}
+
+func parseMarkupTag(token string) (dilMarkupTag, bool) {
+	var tag dilMarkupTag
+	if len(token) < 3 || token[0] != '<' || token[len(token)-1] != '>' {
+		return tag, false
+	}
+	inner := strings.TrimSpace(token[1 : len(token)-1])
+	if inner == "" || strings.HasPrefix(inner, "!") || strings.HasPrefix(inner, "?") {
+		return tag, false
+	}
+	if inner[0] == '/' {
+		tag.closing = true
+		inner = strings.TrimSpace(inner[1:])
+	}
+	if strings.HasSuffix(inner, "/") {
+		tag.selfClosing = true
+		inner = strings.TrimSpace(inner[:len(inner)-1])
+	}
+	if inner == "" || !isTagNameStart(rune(inner[0])) {
+		return tag, false
+	}
+	nameEnd := 1
+	for nameEnd < len(inner) && isTagNameContinue(rune(inner[nameEnd])) {
+		nameEnd++
+	}
+	tag.name = strings.ToLower(inner[:nameEnd])
+	if tag.closing {
+		return tag, true
+	}
+	tag.attributes = parseTagAttributes(inner[nameEnd:])
+	return tag, true
+}
+
+func parseTagAttributes(text string) map[string]dilTagAttribute {
+	attributes := make(map[string]dilTagAttribute)
+	for i := 0; i < len(text); {
+		for i < len(text) && unicode.IsSpace(rune(text[i])) {
+			i++
+		}
+		if i >= len(text) {
+			break
+		}
+		nameStart := i
+		for i < len(text) && !unicode.IsSpace(rune(text[i])) && text[i] != '=' {
+			i++
+		}
+		if nameStart == i {
+			i++
+			continue
+		}
+		name := strings.ToLower(text[nameStart:i])
+		for i < len(text) && unicode.IsSpace(rune(text[i])) {
+			i++
+		}
+		if i >= len(text) || text[i] != '=' {
+			attributes[name] = dilTagAttribute{}
+			continue
+		}
+		i++
+		for i < len(text) && unicode.IsSpace(rune(text[i])) {
+			i++
+		}
+		value, end, static := parseTagAttributeValue(text, i)
+		attributes[name] = dilTagAttribute{literal: value, static: static}
+		i = end
+	}
+	return attributes
+}
+
+func parseTagAttributeValue(text string, start int) (string, int, bool) {
+	if start >= len(text) {
+		return "", start, false
+	}
+	if text[start] == '"' || text[start] == '\'' || text[start] == '`' {
+		quote := text[start]
+		for i := start + 1; i < len(text); i++ {
+			if text[i] == '\\' {
+				i++
+				continue
+			}
+			if text[i] == quote {
+				return decodeTagString(text[start : i+1]), i + 1, true
+			}
+		}
+		return "", len(text), false
+	}
+	if text[start] == '{' {
+		end, ok := scanBalancedBraces(text, start)
+		if !ok {
+			return "", len(text), false
+		}
+		expression := strings.TrimSpace(text[start+1 : end-1])
+		if len(expression) >= 2 && (expression[0] == '"' || expression[0] == '\'' || expression[0] == '`') && expression[len(expression)-1] == expression[0] {
+			return decodeTagString(expression), end, true
+		}
+		return "", end, false
+	}
+	end := start
+	for end < len(text) && !unicode.IsSpace(rune(text[end])) {
+		end++
+	}
+	return html.UnescapeString(text[start:end]), end, true
+}
+
+func decodeTagString(quoted string) string {
+	if len(quoted) < 2 {
+		return ""
+	}
+	if quoted[0] == '"' || quoted[0] == '`' {
+		if decoded, err := strconv.Unquote(quoted); err == nil {
+			return html.UnescapeString(decoded)
+		}
+	}
+	inner := quoted[1 : len(quoted)-1]
+	inner = strings.ReplaceAll(inner, `\\`, `\`)
+	inner = strings.ReplaceAll(inner, `\'`, `'`)
+	return html.UnescapeString(inner)
+}
+
+func tagLinkDestination(attributes map[string]dilTagAttribute) (string, bool) {
+	for _, name := range []string{"href", "url"} {
+		attribute, ok := attributes[name]
+		if !ok {
+			continue
+		}
+		if attribute.static && isSafeLinkDestination(attribute.literal) {
+			return attribute.literal, true
+		}
+		return "", true
+	}
+	return "", false
+}
+
+func tagLinkLabel(attributes map[string]dilTagAttribute) string {
+	for _, name := range []string{"title", "label"} {
+		if attribute, ok := attributes[name]; ok && attribute.static {
+			return strings.TrimSpace(attribute.literal)
+		}
+	}
+	return ""
+}
+
+func isSafeLinkDestination(destination string) bool {
+	if destination == "" || strings.ContainsAny(destination, "\r\n\x00") {
+		return false
+	}
+	parsed, err := neturl.Parse(destination)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "mailto", "tel":
+		return true
+	default:
+		return false
+	}
+}
+
+func markdownLink(label, destination string) string {
+	if label == "" {
+		label = destination
+	}
+	return "[" + escapeMarkdownLabel(label) + "](" + escapeMarkdownDestination(destination) + ")"
+}
+
+func escapeMarkdownLabel(label string) string {
+	return strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`).Replace(label)
+}
+
+func escapeMarkdownDestination(destination string) string {
+	return strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`, " ", "%20").Replace(destination)
 }
 
 func repeatedByteLen(text string, start int, target byte) int {
